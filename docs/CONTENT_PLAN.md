@@ -10,14 +10,14 @@ Binding for everyone writing `src/data/*`. The spec (`docs/BUILD_PROMPT.md`) def
 | `data/00_items.js` | every `ITEMS` entry (§3 below), with 3D models and examine details |
 | `data/01_documents.js` | every `DOCUMENTS` entry (§4), exact text from spec §13, plus the puzzle-clue docs per riddle level |
 | `data/02_calls.js` | Luka's 8 calls (`CALLS`), shared `DIALOGUE` sets (§6) |
-| `data/03_maps.js` | every `MAPS` entry; also the town-map and building-map transforms for rooms (written last, after rooms exist) |
+| `data/21_maps.js` | every `MAPS` entry, map marks, and each room's `map` field (`ROOMS[id].map = {id, floor, xform, outage, rxform}`) — loads after every chapter so it can attach transforms without editing chapter files |
 | `data/10_prologue.js` | Prologue rooms/cutscenes/chapter 0 |
 | `data/11_ch1.js` … `data/18_ch8.js` | one chapter each, including its boss (`defineBoss`) and custom enemy types |
 | `data/19_endings.js` | ending rooms/cutscenes after the transmitter room, credits text, fate cards, `Game.ending` wiring |
 | `data/20_title.js` | title backdrop room `t_title`, the 60 s idle attract sequence |
 
 Helper names at the top level of a data file must be prefixed with the file's tag (`P0_`, `C1_` … `C8_`, `END_`,
-`TTL_`, `ITM_`, `DOC_`, `CALL_`, `MAP_`) or wrapped in a block.
+`TTL_`, `ITM_`, `DOC_`, `CALL_`, `MAP_`). Chapter files do NOT set `room.map` (21_maps.js does) or wrapped in a block.
 
 ## 2. Rooms, entries and connections
 
@@ -196,7 +196,9 @@ Borrowed on the stairs), `4-4`. Endings: `E-C1` (the connected call, in the tran
 (Morning), `E-C3` (post-credits "Ask First"), `E-OC0` (the call rings out — Ch 8 file), `E-OC` (Out of Coverage shots),
 `E-FT0` (A ≥ F: the automated voice + the Closer's hand — Ch 8 file), `E-FT` (the city store), `E-YES`.
 Ch 8 decides the ending with `Game.endingFor(S)`, plays its in-room part, then `await G.ending(name)`; `Game.ending`
-plays the rest (`19_endings.js` owns that wiring).
+plays the rest (`19_endings.js` owns that wiring). The Yes ending is checked when Aidan opens the transmitter-room
+door (spec §12: the door opens onto confetti) — if `Game.endingFor(S) === 'yes'` there, Ch 8 calls `G.ending('yes')`
+instead of the Closer.
 
 ## 8. Ollie stickers (12, ids `sticker01` … `sticker12`)
 

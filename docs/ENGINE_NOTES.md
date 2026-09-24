@@ -1,0 +1,420 @@
+# Signal Hill — Engine Notes for content authors
+
+What the engine really does, beyond `docs/ARCHITECTURE.md` (the contract). Written against the code in `src/engine/`.
+Every `CONTRACT+` comment in the code marks an addition; the file headers document each module in full. When this
+file and the code disagree, the code wins — tell the integrator.
+
+`src/data/99_testroom.js` (`test_room` + `test_room2`) uses almost every feature below and passes `Cam.check`; copy
+from it.
+
+---
+
+## 0. The ten things that bite
+
+1. **−Z is north.** `K.roomBox` sides: `n` = z0, `s` = z1, `w` = x0, `e` = x1; `at` is measured from x0 (n/s walls) or
+   z0 (w/e walls). Yaw 0 faces +Z (south), 90 faces +X (east). Entries are `[x, z, yawDeg]`.
+2. **`y` means different things.** `K.box / K.cyl / K.stairs`: y = **bottom**. `K.sphere / K.plane / K.sign /
+   K.writing`: y = **centre**. `K.wall / K.floor / K.roomBox`: `opts.y` (default 0). Ramp heights are absolute. A
+   missing `y` defaults to the floor height at (x, z) *from the floors built so far* — build floors first.
+3. **Static geometry is merged** at the end of the build (walls, floors, room-level `K.box/cyl/sphere/plane`, static
+   props). Materials that differ only in colour are batched through vertex colours, and static canvas labels (plates,
+   signs, posters, notes) are packed into a per-room atlas, so a room's colours and labels cost a handful of draw calls.
+   Anything you will change later needs `{name}` (→ `G.obj(name)`) or `{static:false}`; a named prop still merges its
+   own static parts inside itself (it stays movable as one piece; `{merge:false}` keeps every part separate). Prop setters (`setOpen`, `setRinging`, `screen`,
+   `fuse_board.setSwitch` …) need `name`, `live:true` or the matching opt (`open`, `ringing`, `state`, `on` …),
+   otherwise they only warn once.
+4. **`K.examine` with an array shows ONE line per press**, in order, then repeats the last. For several lines in one
+   press pass `async (G) => { await G.think(a); await G.think(b); }`.
+5. **Every `K.door` needs a wall opening** (`K.wall` `openings`, or `K.roomBox` `doors`). Kit doesn't cut walls.
+6. **Lights default to `world:'both'` and come back on after the Outage cut.** Tag Fog-world lights `world:'fog'`
+   (props take `world` too: `K.prop('fluoro_tube', …, {world:'fog'})`) and add `world:'outage'` ones (flickering
+   tubes, red LEDs, screen glow). The real-light pool is **8 point + 2 spot**, but handles are virtual: every frame the
+   lit lights nearest Aidan whose range reaches into view hold the real slots (a slot changing hands fades over
+   0.3 s; switching a light off / on is instant), so a 200 m street can have a lamp every 10 m. Aidan's phone glow
+   takes one slot. More than 8 lit point lights within ~14 m of each other still means some are dark at once — pass
+   `light:false` to props there (glow only; the tube / lamp still switches with `lightsOut` and the Outage banks).
+7. **Interactions are blocking scripts** (Player locked, `control:false`). An interaction that starts gameplay (the
+   Outage, a chase) must call `G.control(true)` first — the spec's Outage keeps the player in control.
+8. **Fixed cameras can't see what is below them.** A static camera needs its volume ≥ ~4 m away horizontally (or
+   higher up), or `Cam.check` flags `offscreen`. Pan and rail cameras aim at Aidan, so they pass easily. See §3.
+9. **Indoor Fog-world fog is the grey spec colour `#8e9996`** — dark interiors look milky. Give interiors
+   `fog:{density:0.03–0.035, color:'#3b4543'}` (darker teal-grey). Outdoor fog 0.075 ≈ 15 m: keep street cameras
+   within ~10 m of Aidan, or lighten the room with `fog:{density:0.05}`.
+10. **Rig actors are the draw-call budget.** Aidan ≈ 55–60 calls, each human/monster 39–66 (Tethered ≈ 49, Reach ≈
+    66, `detail:'low'` ≈ 39), plus ≈ 12 more each for the torch's shadow pass when the torch is on (one caster per
+    body segment — `actor.trimShadows()`; held props and small parts don't cast; the torch shadow reaches 12 m). There
+    is no occlusion culling: actors behind walls still draw if they're in the camera frustum. Keep ≤ 3–4 actors in
+    any camera's frustum. Room geometry measures ~140–240 calls per view in `test_room` (it is deliberately
+    overstuffed: ~45 props, 5 doors, dressing in both worlds); its yard view still totals ~520 because five actors
+    (four of them behind walls) are in that frustum. Game skips actors the fog already hides (beyond ≈
+    2.45 / density m: 33 m outdoors, 80 m indoors — `Game.culled`), so long foggy streets full of figures are fine.
+
+---
+
+## 1. Rooms (`defineRoom`) and the kit `K`
+
+### Room def fields actually read
+
+`id, name, area, map, chapter, outdoor, fog {density,color}, noFog, surface, surfaces:[{box:[x0,z0,x1,z1], s, world}],
+outageSurface, ambient (Snd bed), grade (Render grade), outageFog, env (extra Render.setEnvironment opts), bounds,
+entries, cameras, spawns, build(K), onEnter(G, fromRoomId), onUpdate(dt), onLeave()`.
+
+* `chapter` enables the chapter lock: a door says "It won't open. Not anymore." when this room's chapter **and** the
+  target room's chapter are both below `S.chapter`. Rooms without `chapter` never lock.
+* `onEnter` runs as a background (room-bound) script after the fade-in starts; it is aborted when the room unloads
+  (`G.persist()` opts out). Triggers do the same.
+* Footstep surfaces: `tile carpet lino bitumen gravel metal ladder concrete wood grass vinyl`.
+* Ambient beds: `wind wind_heavy interior hum office hospital garage store none` (the Outage bed layers on top by itself).
+* Grades: `none fog outage flashback dawn hospital party title`.
+
+### Textures / materials
+
+Pass a texture name (or `{tex, color, roughness, metalness, …}`, `'#hex'`, a Material/Texture):
+`plaster plaster_stained render_cracked brick concrete concrete_wet bitumen gravel footpath kerb lino lino_hospital tile
+tile_white carpet vinyl_retail wood weatherboard timber_floor metal metal_rust metal_grating chainlink grille
+ceiling_tile cardboard cardboard_wet paper receipt contracts fabric_knit grass dirt leaves glass plastic_sheet`.
+Every kit material dissolves to its Outage partner automatically (contracts, circuit carpet, wet cardboard …).
+Variants: `{tex:'bitumen', lines:'center'|'double'|'edge'|'solid'|'crossing'|'stop'|'parking'}`, `{tex:'lino', color}`,
+`{tex:'weatherboard', paint}`. Content-specific generators: `Tex.define(name, {px, size, gen(ctx,w,h,rng,opts)})`.
+
+### K functions (contract §5.2 plus)
+
+* `K.floor(x0,z0,x1,z1, mat, {y, ramp:{axis,y0,y1}, skirt, base})` — floors registered later win where they overlap
+  (a platform floor over ground makes the ground under it unwalkable — put a solid `K.box(…,{collide:true})` under it).
+  Aidan can step up 0.45 m and drop 1 m; higher edges need stairs/ramps and stop him walking off platforms.
+* `K.wall(x0,z0,x1,z1, h, mat, {thick, openings:[{at,w,h,sill,glass,frame}], both, skirting, grime, collideH})` —
+  window openings (sill > 0) keep a full-height collider; doorways split it. **`both:false`** draws only the front face
+  (the right-hand side walking from (x0,z0) to (x1,z1)) — seen from behind it is invisible: the **cutaway** trick for a
+  camera outside a small room (the test room's store room).
+* `K.stairs(x0,z0,x1,z1, y0,y1, {axis, rail:'both'|'left'|'right'|true, mat})` — from the (x0|z0) edge at y0 to the
+  (x1|z1) edge at y1; rails add colliders.
+* `K.road(x0,z0,x1,z1, {axis, markings, footpath, kerb, slope:{y0,y1}})` — the box is the carriageway; kerbs and
+  footpaths are outside it, with their own raised height regions.
+* `K.drop(x0,z0,x1,z1, {side:'n'|'s'|'e'|'w', msg})` — road-end cliff + barrier + sign + blocker; Outage trench of
+  cable. Infers `side` from floors built before it — pass it to be safe. It doesn't remove floors under its box.
+* `K.fogWall(x0,z0,x1,z1, msg)` — soft blocker: Aidan is turned around with the message.
+* `K.blocker(x0,z0,x1,z1, msg)` — invisible wall with a message once per contact (only for the player).
+* `K.writing(text, x,y,z, w, {rotY, style:'marker'|'receipt', world})` — x,y,z on the wall surface; with no `world` it
+  builds a faded Fog scrawl AND an Outage marker/receipt version.
+* `K.door({id,x,z,rot,w,h,style,to,entry,locked,key,lockMsg,openMsg,sign,signBack,reader:'card'|'keypad'|'maglock',
+  chain,hinge,swing,open,when,chapterLock,mapMark})` — styles `wood metal fire wired glass glass_double roller`.
+  Without `to`: swings in-room (collider toggles; the Reach can't pass a closed one; the Standard opens them). With
+  `to`: 1.5 s black transition. `key` → "The key fits." and it stays unlocked (`S.done['unlocked:<id>']`). Script
+  control: `G.door(id).open({instant}) / close() / toggle() / lock(msg) / unlock() / isOpen / locked`.
+* **Automatic map marks** (spec §2A): trying a locked door writes a red X to the room's map
+  (`S.mapMarks['auto:door:<id>']`, placed through `room.map.xform`; also on its receipt map when the room has
+  `map.outage` + `rxform`); unlocking it turns the X into a tick. The first bump into a blocked road — `K.drop`,
+  `K.fogWall`, an exit whose `when()` is false, or `K.blocker(…, {mapMark:true})` — marks an X there. Opt out with
+  `{mapMark:false}` on the door / drop / fog wall / exit. Rooms without `map.xform` get no marks.
+* `K.exit({id, box, to, entry, when, blockedMsg, sound:'steps'|'door'|'none', mapMark})` — walking into the box
+  transitions (the player must leave the box once before it arms; entries must be placed outside exit boxes). Exits
+  are the player's: they never fire while a blocking script / cutscene / transition owns Aidan (a scene that walks
+  him into a box doesn't leave the room — call `G.goto` in the scene; if it ends with him inside a box, he has to step
+  out and back in).
+* `K.trigger(box, fn, {id, once=true, when, enter=true, anytime})` — `fn` runs as a background script; spawning
+  inside the box counts as entering, and so does the trigger becoming ACTIVE (its `when()` turning true, its world
+  showing — e.g. an Outage-only trigger where Aidan stands when the Outage hits) while he is inside. Triggers are
+  evaluated only while the player has control: a scene walking him through a box fires nothing; one that leaves him
+  inside a box fires it when control returns. `{anytime:true}` fires even during scripts. Fired ids are kept in
+  `S.done['trig:<id>']`.
+* `K.interact(x,y,z, fn, {id, r, hold, holdText, when})`, `K.examine(…)`, `K.pickup(item, x,y,z, {id, n, msg,
+  extraOnEasy, rot, glint})` (heal pickups obey `DIFF.pickup`; Hard removes ~30% deterministically by id), `K.doc(docId,
+  x,y,z, {id, model:'paper'|'sticky'|'binder'|'board'|'none', wall, glint})` — no markers: `glint` is opt-in
+  (`true`|size) and only sparkles where the torch or a lamp actually lights the item (never in the dark), `K.payphone(x,z,rot, {wall})` (wall phones:
+  place at the wall surface facing into the room), `K.breakTable(x,z,rot, {time:[h,m], clock:[x,y,z,rot]|false})`
+  (the clock goes on the nearest wall), `K.sticker(id, x,y,z, rot, {pitch})` (ids `sticker01`…`sticker12` count for
+  Yes), `K.npc(id, preset, x,z,rot, {anim, rig:{…Rig params, detail:'low'}, talk:async G=>{}, examine, when, whenTalk})`
+  (`when` = build-time presence; `whenTalk` = runtime condition).
+* `K.ladder(x,z,rot, y0,y1, {id, top:[x,z], bottom:[x,z], cage})` — faces `rot` toward the climber; `top` must be on
+  the upper floor region. Two interactables (`id:bottom`, `id:top`); Player climbs with W/S.
+* `K.light(kind, x,y,z, {color,intensity,distance,world,bank,name,flicker,blink,on,real})` — kinds `street fluoro lamp
+  screen point spot led`. `real:false` = glow / halo / tube only, no pool light (what props' `light:false` does); it
+  still switches with `lightsOut` and the Outage banks. `bank` orders the Outage blackout (banks die toward the
+  camera). `G.light(name)` → handle `{on(bool), isOn, set(o), setWorld}`. Fluoro tubes and LEDs switch properly even
+  inside static props (their emissive parts never merge).
+* `K.fogOnly(fn) / K.outageOnly(fn) / K.world(w, fn)` — tag everything inside (meshes, colliders, lights, floors,
+  interactables, triggers). `K.animate(fn(dt,t))` for per-frame behaviour; `K.mark / K.region / K.obj`; `K.dress(kind,
+  box, n, {seed, world})` kinds `papers leaves boxes receipts cables contracts cups`.
+
+### Prop kinds (`K.prop(kind, x, z, rotDeg, opts)`) — 169
+
+Origin on the floor at the prop's centre, facing +Z. **Wall props** stand at the wall surface with the wall behind them
+(−Z local): rotate so they face into the room; `mount` sets the centre height. **Ceiling props** hang from `ceil`
+(default 3.0; `fluoro_tube` uses `h`). **Tabletop props** need `y` = the surface height (desk 0.745, counter 1.0,
+table 0.74). Common opts: `variant, lit, light:false, bank, seed, live, name, examine, interact, world, collide`.
+Radius-like opts are `radius` (never `r` — `r` is the examine radius).
+
+Street: `streetlight power_pole letterbox bench bench_plaque bus_shelter payphone_booth payphone_wall barrier road_sign
+sign_post guardrail fence chainlink gum_tree gum_tree_small shrub car hatchback bin traffic_light bollard boom_gate
+cable_drum shutter roller_door awning window_display shopfront house cottage hut substation fountain escalator planter
+gnome pansies dumpster pallet cone floodlight mast rf_sign trolley rubbish leaf_pile`.
+
+Interior: `counter demo_table accessory_wall shelf desk office_chair chair stool table cafe_table meeting_table
+locker_bank microwave fridge sink_bench corkboard whiteboard huddle_board clock notice_board framed_photo poster tv
+monitor crt cctv_bank cctv_camera terminal printer photocopier desk_phone rotary_phone bedside_phone wall_phone
+answering_machine modem modem_box base_station pendant phone_socket tablet_box card_reader rotary_dial pa_mic
+leaderboard rankings_screen projector_screen emergency_phone duress_button alarm_lamp headset switchboard lamp_panel
+frame_rack jumper_wire fuse_board cable_tray fluoro_tube headset_hanging tether_hanging receipt_strip receipt_curtain
+spotlight turnstile ticket_machine vending_machine plinth plastic_sheet drop_sheet paint_tins mop_bucket wet_floor_sign
+box box_stack satchel esky stacked_chairs bingo_machine stage water_cooler plant_pot mug sandwich drawing cardigan_chair
+returns_cage lift_doors desk_lamp contract_stack crossword tea_towel fallen_chair glasses iv_stand wheelchair keys_ring
+extinguisher first_aid_box coffee_cup energy_can bar_steel box_cutter jumper_tool handset filing_cabinet binders_shelf
+couch bed hospital_bed dresser bedside_table phone_table cubicle pod_desk sticky_note roster visitor_book key_lockbox
+exit_sign water_stain feedback_board photo_wall`.
+
+Useful hooks (`obj.userData.*`, need the prop live): `screen` (a `Tex.screen` to draw on; `custom = true` stops the
+built-in loop) on tv/monitor/crt/terminal/leaderboard/rankings_screen/projector_screen; `modem.setState('off'|'boot'|
+'red'|'ok')` / `boot(sec)`; `setOpen(0..1)` + `collider` on roller_door/shutter/boom_gate/lift_doors/turnstile;
+`returns_cage.setDoor` + `doorCollider`; `fuse_board.setSwitch/setMain/setAmps` (pass `on`/`main`/`amps`, `live` or a
+name); `switchboard/lamp_panel.setLamp`;
+`clock.setTime/addMinutes`; `payphone_*.setHanging`; `rotary_dial.spin(d)`; `desk_phone.setRinging`;
+`car/hatchback.setHazards/setHeadlights`; `traffic_light.setMode`; `mast.platforms/ladder`. Full opts: the header of
+`src/engine/05b_props.js` and the comment above each `def(…)`. `poster` takes `style` (plan|faded|alarm|notice), not
+`kind`. `bench_plaque` is a memorial bench with a brass plaque. Power-pole wires run toward +X only.
+
+---
+
+## 2. Scripts, cutscenes and G
+
+* `Script.run(fn, {control, letterbox, skippable, name, id, parent, persist})` — **blocking** (`control:false`) scripts
+  lock the player and run one at a time (others queue); **background** ones run side by side. A script started inside
+  a running blocking script (`G.cutscene`, `G.call`, `G.boss`, `G.run`) nests instead of queueing.
+  Background scripts started by World (triggers, onEnter, interactions of kind ladder) and `G.bg` children are
+  room-bound: aborted on room change unless inside `G.goto`/`G.startChapter`/`G.ending` or `G.persist()`ed.
+* `defineCutscene(id, fn, {letterbox:true, skippable:true, control:false})` → `await G.cutscene(id)` or
+  `Script.playCutscene(id)`. `S.done['cs:<id>']` is set when it starts; `Script.seen(id)`.
+* **Skipping** (hold Esc/Start 1 s, `SH.skip()`): waits, lines, camera moves, walks, turns, gestures, fades resolve
+  at once; cards jump to black; `G.outage` swaps instantly; `G.goto` has no black hold; one-shot sounds are dropped —
+  but **choices, keypads, `G.hold` and calls still wait**, and every state change still happens. Write scenes so that
+  all state changes are plain statements (never inside `if (!G.skipping)`).
+* `G.say(speaker, text, o)` — `[beat]` 0.8 s, `[long beat]` 2 s, `[static]`, `[pen click]`, `[click]`, `[keys]`,
+  `[clunk]`, `[beep]`; other `[stage directions]` are dropped. `'NAME (phone)'` → italic + static wobble;
+  `G.think(text)` = Aidan's italic thought. The speaking actor's mouth moves if the room has an actor of that name.
+  Arrays = consecutive lines. `G.choice(opts, {timer, def, cancel, title})` → index (def is 0-based).
+* Actors: `G.actor(id, preset, {at, pose})` finds a room NPC or creates one; `A.place(x,z,rot|mark)`,
+  `await A.walkTo(x,z | mark | [[x,z],…], {run, speed, collide, face})`, `await A.turn(deg|target)`, `A.look(t)`,
+  `A.eyes(mode,t)`, `A.pose(anim, {seat})`, `await A.gesture(name, o)`, `A.expr(name)`, `A.hold(hand, prop)`,
+  `await A.fade(a, dur)`, `A.say(text)`, `A.remove()`, `A.raw` (Rig actor). `G.aidan` drives the player while a
+  blocking script holds control (Player never writes Aidan's transform then).
+  Presets: `aidan aidan_perfect wai chase chloe luka luke nan nan_gown man_counter old_man customer rep` (Wai wears
+  his candy-bar phone in a belt pouch — `A.hold('R', 'candybar')` takes it into his hand, `A.hold('R', null)` puts it
+  back).
+  Loops: `idle stand_still idle_hunched walk run run_bad stagger pace sit sit_lean sit_floor sit_knees sit_bed kneel
+  kneel_one crouch cower lie lie_side collapse climb crawl type work brace struggle hurt`.
+  Gestures: `rub_neck pen_click shift_weight rub_eyes tap_bar bounce check_shoulder fidget tremor offer point raise_phone
+  hands_up cover_lanyard head_in_hands nod shake_head wipe_eyes reach swing hand_on_shoulder sit_down stand_up shrug
+  laugh peer sigh clench flinch look_around smooth_uniform touch_pendant grip earbud_out earbud_in glasses_off
+  glasses_on`. Expressions: `neutral smile grin sad cry wide tired smile_huge flat angry scared pain shout`.
+  Hand props: `phone tablet bar coffee clipboard candybar flip headset keys box_cutter extinguisher pen box jumper_tool
+  pendant handset card`. Idle "habit" gestures fire on their own — set `A.raw.idleLife = false` for long still beats.
+* Camera: `G.cam({pos, target, fov, roll, to:{…}, dur, ease, follow, keys:[{t,pos,target,fov,roll}]})` — pos/target
+  may be `[x,y,z]`, a mark name, an Object3D or an actor (its head). Returns at once; `await G.camDone()`; the camera
+  holds its last frame until `G.camRelease()` (automatic when the scene ends).
+* Declarative: `G.shot({cam, fade, actors:{id:{preset, place, pose, look, walk, gesture, …}}, sfx, music, lines:[…],
+  dur:'input'|sec, out})` and `G.shots([…])`.
+* Presentation: `G.letterbox(on)`, `G.fade(to, dur, color)`, `G.card(text)` (leaves the screen black),
+  `G.title(text)`, `G.textOnBlack(text, dur)`, `G.post({grade, desat, noise, white, blur, …, dur})` (restored when a
+  letterboxed scene ends), `G.hud(on)`, `G.screen(content, {style:'crm'|'case'|'terminal'|'phone'})`,
+  `G.keypad({style:'terminal'|'lockbox'|'padlock'|'rotary', code|check, …})`, `G.stamp(text, o)`.
+* World: `await G.goto(room, entry, {sound, fade})`, `await G.outage(on)` (resolves at the siren cut, 6.25 s),
+  `G.setOutage(on)` (instant), `G.spawn(def)`, `G.enemy(id)`, `G.pos(mark)`, `G.region`, `G.obj`, `G.door`, `G.light`,
+  `await G.lightsOut({dur})`, `await G.call(id)`, `await G.hold(text, sec)`, `G.bars(n|'noservice'|'flicker'|null,
+  {room:true})`, `await G.boss(id, o)` (the calling scene steps aside: no letterbox, control back, not skippable),
+  `await G.startChapter(n, {card:false})`, `await G.ending(name)`, `G.autosave()`, `G.dist(a, b)`.
+* State: `G.flag / G.set / G.track('F'|'A', n) / G.give(id, n, {silent}) / G.take / G.has / G.count / G.equip /
+  G.note(text, {id, done}) / G.doc(docId) / G.once(id) / G.mapMark(id, {at:[x,z], t, text}) / G.stat / G.heal /
+  G.damage(n, source, o)`.
+* Builtins (`Script.builtins`): pickup ("Aidan picked up the <name>." — `ITEMS[id].pickupName` overrides; map items
+  scribble and set `S.maps`), doc (Menus reading view; the doc's `track` once; `DOCUMENTS[id].after(G, first)`),
+  payphone (§2A exactly; Wai's `DIALOGUE.wai_payphone` lines when `waiSaved` and chapter > 3), breakTable (once per
+  chapter), door (World.useDoor), useItem, sticker (also written to `META.stickers` for NG+).
+
+---
+
+## 3. Cameras
+
+* Types: `static`, `pan` (`pan:{lag, yaw, pitch}` limits in degrees around pos→target), `rail` (`rail:{a, b, look,
+  lag}` — pos slides by Aidan's projection onto a→b, looking at Aidan + look), `scripted` (room camera with `keys`,
+  `loop` — plays when cut to). `fov:'fit'` computes the smallest fov (30–60) that frames the volume; `y:[y0,y1]` limits
+  a volume by Aidan's foot height (platforms, ladders); higher `pri` wins where volumes overlap; `world`, `when(S)`.
+* Selection: 0.5 m exit hysteresis, then `pri`, then keep the current camera. The hysteresis only holds the current
+  camera while it can still see Aidan where he stands (feet and head in frame, no wall / closed door / tall prop
+  between the lens and his chest; one-sided `both:false` walls seen from behind don't block) — otherwise the best
+  containing camera cuts in, so walking past the edge of a volume through a doorway never leaves him off-frame.
+  Outside every volume the current (or the nearest) camera stays. `Cam.lock(id)` forces one; `Cam.snap()` after
+  teleports.
+* **Making `Cam.check` pass:** it samples every walkable 0.5 m grid point (on a floor, not inside an enabled collider)
+  at 0.1 m and 1.8 m and requires it to be on screen for the camera that owns it.
+  - A static camera cannot see steeply below itself: keep it ≥ 4 m (horizontally) from the near edge of its volume,
+    e.g. put the west half's camera in the east half and vice versa (test room hall).
+  - Tiny rooms: put the camera outside a `both:false` wall (cutaway) — see the test room's store room.
+  - Pan and rail cameras aim at Aidan, so they only fail on pitch/yaw limits (points almost under a pan camera).
+  - Each point is checked against the highest-`pri` unconditional camera containing it (and any `when` camera);
+    volumes may overlap freely. Doorways of closed in-room doors aren't sampled — overlap volumes by ~0.3 m there.
+  - Rooms with Outage-tagged content are checked in both worlds.
+  - `SH.camCheck('room')` → `[{cam, x, z, y, h, why:'uncovered'|'offscreen'|'behind', world}]`; the debug panel's
+    CAMERA VOLUMES draws volumes (current = yellow) and the problem points (red).
+* Composition helpers: `Cam.shake(a, dur)` (respects Options), `Cam.basis()` for camera-relative input.
+
+---
+
+## 4. World, Player, the Outage
+
+* `World.goto(room, entry, {sound:'door'|'steps'|'none', fade, style})` — doors: 1.5 s black with handle/creak/close.
+  Entry = name | `[x,z,yaw]` | `{pos:[x,z]|[x,y,z], yaw}` | null (→ `entries[fromRoom]` → `start` → the first).
+* `World.outageTransition(on)` = spec §2: dial-up + siren (6 s), grain/CA ramp, light banks die toward the camera
+  (1.2–4.0 s, all dark before the swap hides the Fog world's fixtures), environment/grade cross-fade from 1.4 s, surfaces dissolve 2.4–5.6 s, tagged objects/colliders/spawns
+  swap at 4.0 s, siren cut + the world's lights at 6.0 s, phone bars climb 0→3 then automatic at 8.7 s. Leaving: 4.6 s,
+  exhale of static, the swap at 2.0 s. `World.outageBusy` while it runs. `Bus 'outage:begin'(on)`, `'outage'(on)`.
+* `World.move/heightAt/los/raycast/pointFree/surfaceAt`, `World.lightsOut/lightsOn({dur, filter})`, `World.mark(name)`.
+* `Render.lightAt(point, {torch, pool, ambient})` → a rough light level at a world point (≈ 1 two metres in front of
+  the torch) for effects that must only show where light really falls (glints, the Tethered's clamshell glare).
+* Player: `Player.pos / yaw / yawDeg / actor / mode ('normal'|'crawl'|'ladder'|'grabbed'|'pinned'|'down'|'dead') /
+  control / lock(reason, on) / teleport(x,z,yaw) / face(deg) / damage(n, source, {minHealth, knock, push, from, dot}) /
+  heal / kill / status() / setGaze / crawl(on) / pin(on) / grab({mash, damage, source}) / setTorch / noclip`.
+  Damage from an enemy (the enemy object, `'enemy:…'`, `'boss:…'` or a type name) gets `DIFF.dmg`; anything else is
+  taken as given. Walk 1.6, run 3.5 m/s (6 s stamina). An E pressed in the last 0.5 s of a swing is buffered.
+  Direction hold (spec §3) keeps the previous camera's axes after a cut; across a room change or teleport a direction
+  held through the transition keeps him walking along his entry facing instead (the old axes mean nothing in the new
+  room) until it is released or changed. The phone lights his face (a weak pool light at the screen, off when dead).
+* Weapons: `ITEMS[id].weapon = {dmg, speed:'fast'|'slow', range, arc, knock, spray}`; defaults exist for
+  box_cutter / steel_bar / extinguisher. Extinguisher: ready + attack sprays (`S.ammo.extinguisher`), attack alone bashes.
+  Every extinguisher picked up adds its `ITEMS.extinguisher.ammo` (6) sprays (the first one sets the count); the
+  Items screen shows "sprays / charge carried" ("4/6", "10/12").
+
+---
+
+## 5. Enemies
+
+Spawn defs (room `spawns` or `G.spawn`) use persistent ids `'room:local'`; resolution goes to `S.spawns[id]`
+(`'freed'`/`'dead'`), freed Tethered to `S.freedOrder`. Resolved Tethered are rebuilt passive (freed sit, dead lie);
+other dead enemies aren't spawned again.
+
+* `tethered` — `anchor:[x,z]`, `sit:true|'floor'`, `seat:{pos,rot,h}` (where it sits once freed), `watching:true`,
+  `voice:false`, `noticeRange`, `threat:false`. `e.alert()` starts its turn. Cut free = hold E 2 s with the box cutter
+  on a downed or unaware one (F+1); stomp = A+1.
+* `reach` — rage 20/s × DIFF.rage in sight, lunge at 100 (20 dmg), can't pass closed doors (pounds on them).
+* `borrowed` — `disguise:'wai'|'chloe'|'luka'`, `line`, `lineWhen`, `examine`, `badge`, `hands`, `wristband`, `anim`.
+  Within 4 m (or E): Talk / Examine / Step back; Examine then Step back reveals it at range.
+* `unread` — `cluster:[[x,y,z]…]` 1–3 cm off a wall/ceiling, `count` 30–60. Torch light wakes it; torch off + still 3 s
+  settles it; the spray scatters it. Unkillable. Needs a free pool light for its red glow.
+* `standard` — room-local `route:[[x,z,pause?,faceDeg?]…]`, `mode:'patrol'|'hunt'`; across rooms:
+  `Enemies.standard.start({graph:{nodes:{id:{room, pos:[x,z], door?, pause?}}, edges:[[a,b]…]}, node, name, mode,
+  route})`. It stops on death, load and `chapter` — restart it from the chapter/room script. Its graph position is
+  not saved.
+* Bosses / custom: `Enemies.defineType(name, {create(e, def), update(e, dt), onHit(e, dmg, weapon) → false to consume,
+  hp, radius, hitbox(e), downs:false, invincible, threat, tell})`; `defineBoss(id, {async run(G, o)})` →
+  `await G.boss(id)`.
+* Events: `Bus 'enemy:freed'(e)`, `'enemy:killed'(e)`. `Enemies.freedRow(points, {face})` for 8-1.
+
+---
+
+## 6. UI, Menus, Phone, Save — the data they read
+
+* `ITEMS[id]`: `name, cat:'item'|'weapon'|'key'|'map', desc, model() (static — world pickups are merged), heal, stack,
+  weapon, ammo, map:'<mapId>', details:[{text, face:[x,y,z], zoom, min}], combine:{otherId:{result,n,msg,keep}} | fn,
+  use(G), pickupName`.
+* `DOCUMENTS[id]`: `title, group ('Story'|'Account Notes'|"Operator's Log"|'Whiteboards'|'Returns Notes'|'Personal'),
+  paper ('lined'|'notebook'|'dotmatrix'|'email'|'sticky'|'whiteboard'|'laminated'|'receipt'|'plaque'|'card'|'phone'|
+  'paper'), text ('\n' breaks, '~~struck~~' lines), hand (cursive after the text), track:{F|A}, after(G, first)`.
+* `MAPS[id]` per contract §10.6 plus `sub, printed, publisher, floorOrder`, receipt maps `kind:'receipt', of:'<map>'`;
+  rooms `map:{id, floor, xform:[ox,oz,scale,rot], outage:'<receipt id>', rxform}`.
+* `CALLS[id]`: `caller, n, answer(G), voicemail (string with tags | async G), track (true | false | {answer, decline})`.
+  Luka's calls (caller 'LUKA' or id 'luka…') track F+2 / A+2 automatically; first voicemail play F+1.
+* `DIALOGUE.credits` (credits lines: strings, '' gaps, `{title}`, `{head}`, `{role,name}`, `{text,italic}`),
+  `DIALOGUE.wai_payphone`, `DIALOGUE.reach` (Reach shouts).
+* UI for scripts: `UI.say`, `UI.subtitle`, `UI.message`, `UI.prompt(text, {id})` (once per id; `{interact}` style
+  tokens become key labels), `UI.card`, `UI.titleText`, `UI.textOnBlack`, `UI.keypad`, `UI.screen` (+ `UI.crmHtml`),
+  `UI.bars`, `UI.sting`, `UI.stamp`, `UI.letterbox`, `UI.fade`, `UI.noSignal`.
+* Phone: `Phone.ring(id)`, `Phone.bars(override)`, `Phone.note(text, {id, done})`, `Phone.display({title, big, lines,
+  button})` for inserts (e.g. "CASE 118-2231 … CALL").
+* Save: slots 0–2 + `'auto'`. `Game.startChapter(n)` takes `Save.autosave({room, entry, chapterStart:n})` with the
+  chapter's start — always, even when Aidan already stands in that room — and continuing from it resumes at that entry
+  and **re-runs the chapter's `begin(G, {resumed:true})`** (the envelope's `chapterStart` flag decides). A plain
+  `G.autosave()` / `Save.autosave()` saves where Aidan stands (no begin re-run). Everything in `S` is saved; keep all
+  state that must survive in `S` (flags, `S.done`), never in closures.
+
+---
+
+## 7. Chapters, endings, title (Game)
+
+```js
+defineChapter({ n: 1, id: 'ch1', title: 'THE PLAZA', card: 'SIGNAL HILL PLAZA', cardSub: null,
+  start: { room: 'c1_relay', entry: 'south' },
+  debugState(S) { /* the inventory/flags a player has at this chapter's start (chapter select) */ },
+  async begin(G, o) { /* o.skipIntro (SH.newGame({skipIntro:true})), o.resumed (from the autosave) */ } });
+```
+
+* `Game.startChapter(n, {card, skipIntro})`: `S.chapter = n`, Bus `'chapter'(n)`, the card on black (only if
+  `card` is set — chapter 0 has none), autosave, `World.goto(start)` without a fade, fade in, then `begin(G)` runs as
+  a persistent background script (not awaited). A chapter ends with `await G.startChapter(n + 1)` from any script,
+  including a blocking cutscene (the next chapter's first cutscene waits for it to finish). Pass `{card:false}` if the
+  scene showed its own card.
+* `skipIntro` skips the first skippable scene `begin` plays (its state changes still apply).
+* **Endings.** Ch 8 decides with `Game.endingFor(S)` (`'yes'` when `S.playthrough ≥ 2` and all of `sticker01`–`12`
+  are in `META.stickers ∪ S.stickers`; then deal / A ≥ F → `'tomorrow'`; F ≥ 35 and ≥ 3 of Wai/Chase/Chloe/Luke →
+  `'connected'`; else `'coverage'`), plays its in-room part, then `await G.ending(name)`. `Game.ending` plays the
+  registered cutscenes nested in the caller: connected `E-C1`* → `E-C2` → credits → fate cards → `E-C3` → results;
+  coverage `E-OC0`* → `E-OC` → credits → fates → results; tomorrow `E-FT0`* (not after the accepted deal) → `E-FT` →
+  credits → results; yes `E-YES` → credits (hold music) → results. (*skipped if `S.done['cs:<id>']` — Ch 8 already
+  played it.) Missing cutscenes are skipped (a name card shows if none exist). Results are recorded
+  (`META.endingsSeen/results/completed` → EXTRA and New Game+), then the title. Ending cutscenes may `G.goto` any room.
+  Never call `G.ending` from inside one of the ending cutscenes (it would wait for itself); call it once, from Ch 8.
+  The first room of each chapter pays for first-use texture generation (up to ~0.6 s in headless SwiftShader) — it
+  happens behind the chapter card / black, so keep chapter starts on black.
+* **Title backdrop:** `ROOMS.t_title` is built on its own — no player, spawns, triggers or `onEnter`; its `animated`
+  callbacks run; its first camera is used with a slow push (a `keys` camera plays as is). Without it a built-in fog
+  vista shows. **Attract (60 s idle):** `defineScript('title:attract', async (G, {signal, show}) => { await show(
+  'c1_relay', {index: 0, dur: 7}); … })` — `show(roomId, {cam, index, dur})` fades to that room's camera; stop when
+  `signal.aborted`. Default: silent shots of c1_relay, c2_crescent, c3_hall, c5_atrium (whichever exist).
+* Playthroughs: every NEW GAME after a finished game counts (`S.playthrough = META.results.length + 1`), so the Yes
+  ending works on any second run with all 12 stickers (collected stickers persist in `META.stickers`). New Game+ (from
+  EXTRA) adds `S.ngPlus`, the steel bar in the inventory and `S.stickers` = `META.stickers`.
+* Death: Player collapses → Bus 'death' (scripts abort) → camera holds → colour drains, static fills (2.8 s) →
+  disconnected tone + NO SIGNAL → CONTINUE (latest save) / LOAD GAME / TITLE. Only in play mode.
+
+---
+
+## 8. Testing a room or a chapter
+
+```
+node tools/build.mjs --out .build/me.html && node tools/lint.mjs .build/me.html
+node tools/run.mjs --file .build/me.html --newgame --room c1_relay:south --shot .build/relay.png
+node tools/run.mjs --file .build/me.html --newgame --chapter 1 --advance 20 --shot .build/ch1.png
+node tools/run.mjs --file .build/me.html --newgame --room c1_relay --camcheck        # [] = every point covered
+node tools/run.mjs --file .build/me.html --camcheck --all-rooms
+node tools/run.mjs --file .build/me.html --script my_test.mjs --shot .build/end.png
+```
+
+`window.SH` (from `--eval "…"` or a `--script` module's `h.eval`): `SH.ready, SH.S, SH.mode ('title'|'newgame'|
+'calibrate'|'play'|'menu'|'cutscene'|'death'|'ending'|'credits'|'fates'|'results'|'loading'), SH.state()` (room, cam,
+pos, F, A, script, menu …), `SH.newGame({skipIntro, action, riddle, ngPlus})`, `SH.chapter(n)` (fresh state +
+`debugState`, no card), `SH.goto(room, entry)`, `SH.testRoom()`, `SH.advance(sec)` (30 Hz game ticks, no rendering),
+`SH.skip()`, `SH.choose(i)`, `SH.press(action, sec)`, `SH.teleport(x, z, yawDeg)`, `SH.camCheck(room|'*')`,
+`SH.rooms()`, `SH.run(async G => …)` (a background script with a G), `SH.preset('connected'|'coverage'|'tomorrow'|
+'yes')`, `SH.ending(name)`, `SH.menu(name)`, `SH.nav('confirm'|…)`, `SH.debug(on)`, `SH.screenshot()`, `SH.errors`,
+`SH.fps`, `SH.mod.<Module>`.
+
+Tips:
+* SwiftShader runs at 5–15 fps and real dt is clamped to 0.05, so game time crawls in real time. Drive tests with
+  `SH.advance(sec)`; to move Aidan, hold a real key around it:
+  `await page.keyboard.down('d'); await h.eval('return SH.advance(1.5)'); await page.keyboard.up('d');`
+  (`SH.press` injects actions such as `interact`, `attack`, `ready`, `pause` — movement reads raw keys).
+* Wait for a menu to be *ready* before pressing keys: `SH.mod.Menus.current === 'save' && SH.mod.Menus._top.ready`;
+  wait for `SH.mod.Script.choosing` before `SH.choose(i)`.
+* Teleporting into a trigger box fires it; mark it done first to avoid that: `SH.S.done['trig:<id>'] = true`.
+* `Render.stats()` reports the last *rendered* frame — call `SH.mod.Render.render(0)` after `SH.advance` before reading
+  draw calls.
+
+**The full regression pass** (a `--script` module; run it without `--allow-errors` — it must end with 0 problems):
+boot (`SH.mode === 'title'`) → `SH.nav('any')`, `SH.nav('confirm')` through NEW GAME / setup / calibration until
+`SH.mode === 'play'` → `SH.goto('test_room','start')`, walk (real keys), pick up the coffee (`SH.press('interact')`),
+TR-1 via its trigger (`SH.skip()`, `SH.choose(0)`) → `SH.menu(name)` for pause, items, map, memos, phone, options
+(wait for `Menus._top.ready`, `SH.nav('down'|'right')`, `Menus.close()`) → `Save.save(0)`, change state,
+`Game.continueFrom(0)` → `World.outageTransition(true)` + `SH.advance(9.5)`, then `(false)` + 5.5 s → in
+`test_room2` spawn one of each monster type, equip the bar and `SH.press('ready', 0.6)` + `SH.press('attack')` a few
+times → `Player.kill()`, wait for the `death` menu, `SH.nav('confirm')` (CONTINUE) → for each of connected, coverage,
+tomorrow, yes: `SH.preset(name)`, `SH.ending(name)`, then `SH.skip()` + `SH.nav('confirm')` + `SH.advance(1)` until
+`SH.mode === 'title'` (`META.endingsSeen` lists all four). `SH.errors` must stay empty.
+* The debug panel (backtick) shows room/camera ids, F/A, flags, fps and draw calls, chapter select, noclip, camera
+  volumes with the check, Outage toggles and the ending presets.

@@ -17,7 +17,7 @@ Binding for everyone writing `src/data/*`. The spec (`docs/BUILD_PROMPT.md`) def
 | `data/20_title.js` | title backdrop room `t_title`, the 60 s idle attract sequence |
 
 Helper names at the top level of a data file must be prefixed with the file's tag (`P0_`, `C1_` … `C8_`, `END_`,
-`TTL_`, `ITM_`, `DOC_`, `CALL_`, `MAP_`). Chapter files do NOT set `room.map` (21_maps.js does) or wrapped in a block.
+`TTL_`, `ITM_`, `DOC_`, `CALL_`, `MAP_`) or wrapped in a block. Chapter files do NOT set `room.map` (21_maps.js does).
 
 ## 2. Rooms, entries and connections
 

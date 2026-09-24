@@ -158,6 +158,11 @@ Each chapter ends with `await G.startChapter(n+1)` at the moment the spec shows 
 | `rmap_plaza`, `rmap_village`, `rmap_exchange`, `rmap_care`, `rmap_office`, `rmap_mast` | RECEIPT MAP | map | Outage maps |
 | `new_pendant` | ALARM PENDANT (NEW) | key | ending only |
 
+### Map ids (`MAPS`)
+Paper maps: `town`, `plaza`, `village`, `exchange`, `care`, `office`, `office_upper`, `hospital`, `mast`.
+Receipt maps: `rmap_plaza`, `rmap_village`, `rmap_exchange`, `rmap_care`, `rmap_office`, `rmap_mast`, each with
+`kind:'receipt'` and `of:'<paper map id>'`. `ITEMS.map_<id>.map` / `ITEMS.rmap_<id>.map` resolve to these.
+
 ## 4. Documents (`DOCUMENTS` ids) — groups: Story, Account Notes, Operator's Log, Whiteboards, Returns Notes, Personal
 
 Story: `timetable`, `noticeboard`, `fridge_list` (track F+1), `plaque`, `wai_email`, `call_logs`, `case_file`, `luka_notes`.

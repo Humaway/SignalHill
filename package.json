@@ -1,0 +1,27 @@
+{
+  "name": "signalhill",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Humaway/SignalHill.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Humaway/SignalHill/issues"
+  },
+  "homepage": "https://github.com/Humaway/SignalHill#readme",
+  "devDependencies": {
+    "acorn": "^8.18.0",
+    "eslint": "^9.39.5",
+    "globals": "^17.12.0",
+    "playwright": "^1.56.1",
+    "three": "^0.170.0"
+  }
+}

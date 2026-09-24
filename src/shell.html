@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signal Hill</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+  body { color: #d9d6cc; font-family: Georgia, 'Times New Roman', serif; user-select: none; -webkit-user-select: none; cursor: default; }
+  #app { position: fixed; inset: 0; background: #000; }
+  #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; image-rendering: auto; }
+  #ui { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  #ui * { box-sizing: border-box; }
+  #boot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #6f6f6a; font: 14px Georgia, serif; letter-spacing: 0.3em; }
+  #fatal { position: absolute; left: 20px; bottom: 20px; right: 20px; color: #c66; font: 12px 'Courier New', monospace; white-space: pre-wrap; display: none; pointer-events: auto; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="gl"></canvas>
+  <div id="ui"></div>
+  <div id="boot">LOADING</div>
+  <pre id="fatal"></pre>
+</div>
+<script type="module">
+//__GAME__
+</script>
+</body>
+</html>

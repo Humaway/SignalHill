@@ -745,7 +745,7 @@
       K.light('led', 19.93, 2.35, 8.5, { color: '#ff2a1c', blink: true });
       // Chase watches the lobby after 4-1 (until the Outage)
       K.npc('chase', 'chase', 12.6, 10.2, 170, {
-        anim: 'idle', when: () => flag('c4_metChase') && !S.outage && !flag('c4_outage'),
+        anim: 'idle', when: () => flag('c4_metChase') && !flag('c4_bossDone') && !S.outage && !flag('c4_outage'),
         talk: async (G) => {
           const k = 'c4:chaseLobby', n = S.done[k] | 0;
           S.done[k] = n + 1;
@@ -759,7 +759,7 @@
       // ---- examine lines (Aidan) ----------------------------------------------------------------------------------------
       K.interact(7.3, 1.1, 10.55, (G) => C4_ticket(G), { id: 'c4_lobby:ticket', r: 1.2 });
       K.examine(13.9, 1.2, 4.6, async (G) => { await G.msg('"We are experiencing higher than normal call volumes."'); await G.think('Always.'); }, { id: 'c4lb:volumes', r: 1.5 });
-      K.examine(0.5, 1.4, 6.1, ['Care Champion of the Month. Every face faded to white.', 'Every one of them\'s smiling.'], { id: 'c4lb:champion', r: 2.0 });
+      K.examine(0.5, 1.4, 6.1, ['Every one of them\'s smiling.', 'Care Champion of the Month. Every face faded to white. [beat] You can still tell.'], { id: 'c4lb:champion', r: 2.0 });
       K.examine(9.4, 1.1, 2.6, ['Dead. Tap your card, nothing happens.', 'The disabled gate\'s just hanging open.'], { id: 'c4lb:turnstiles', r: 1.3 });
       K.examine(4.2, 0.9, 9.2, ['A cardigan on the back of a chair. A queue ticket in the pocket.', 'Three thousand nine hundred and eighty. They waited all that time.'], { id: 'c4lb:cardigan', r: 1.2 });
       K.examine(5.4, 2.1, 0.5, ['The TV\'s just static.', 'For a second it said "Your call is important to us." Then static again.'], { id: 'c4lb:tv', r: 2.2 });
@@ -1066,7 +1066,8 @@
       K.door({ id: 'c4_floor:records', x: 7.1, z: 0, rot: 0, w: 0.95, style: 'metal', to: 'c4_records', entry: 'door', locked: true, lockMsg: 'It\'s locked. There\'s an old dial beside it.', sign: 'RECORDS' });
       K.prop('rotary_dial', DIAL.x, DIAL.z, 0, { mount: 1.3, name: 'c4_dial' });
       K.interact(DIAL.x, 1.3, 0.25, (G) => C4_dial(G), { id: 'c4_floor:dial', r: 1.0 });
-      K.doc('rotary_card', DIAL.x, 0.95, 0.1, { id: 'c4_floor:rotarycard', model: 'none', wall: true, r: 0.9 });
+      // (the card sits under the dial on the same plate: until it has been read, E reads the card first)
+      K.doc('rotary_card', DIAL.x, 0.95, 0.1, { id: 'c4_floor:rotarycard', model: 'none', wall: true, r: 1.0, prio: -0.3, when: () => !(S.docs && S.docs.rotary_card) });
       K.light('lamp', 7.6, 2.35, 0.35, { color: '#e8d8b0', intensity: 2.2, distance: 4.5, name: 'c4fl:recordslamp' });
       K.door({ id: 'c4_floor:break', x: 50, z: 7.1, rot: -90, w: 0.95, style: 'wood', to: 'c4_break', entry: 'door', sign: 'STAFF ROOM', world: 'fog' });
       K.door({ id: 'c4_floor:breakO', x: 50, z: 7.1, rot: -90, w: 0.95, style: 'wood', world: 'outage', locked: true, lockMsg: 'The handle won\'t turn.' });
@@ -2038,13 +2039,16 @@
     // 2. the first page, close: Luke's three calls highlighted, CALLBACK ASSIGNED: AIDAN
     G.cam({ pos: [tx + 0.16, 1.55, tz + 0.2], target: [tx + 0.155, 0.78, tz - 0.02], fov: 30, to: { pos: [tx + 0.156, 1.3, tz + 0.1], fov: 29 }, dur: 9 });
     G.sfx('paper', { vol: 0.6 });
-    await G.wait(4.0);
-    await G.waitOrInput(3.0);
+    await G.wait(2.6);
+    //    DOC Call Logs opens by itself on the first page: Luke's three calls highlighted, CALLBACK ASSIGNED: AIDAN in view
+    await G.doc('call_logs', { id: 'c4_records:logs', page: 0, highlight: ['Caller: Luke', 'CALLBACK ASSIGNED: AIDAN'] });
+    await G.wait(0.4);
     // 3. the choice
     const i = await G.choice(['Read on', 'Tear it up']);
     if (i === 0) {
       G.set('c4_logs', 'read');
       G.track('F', 3, 'Ch 4: read the call logs');
+      //  → the full document (the status history to the end: Follow up tomorrow, three times)
       await G.doc('call_logs', { id: 'c4_records:logs' });
       G.cam({ pos: [tx - 1.6, 1.9, tz + 1.9], target: [tx, 1.0, tz + 0.4], fov: 40 });
       if (A.raw) A.raw.expr('sad');

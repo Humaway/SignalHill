@@ -116,6 +116,31 @@
   const thinkAll = (...lines) => async (G) => { for (const l of lines) await G.think(l); };
   // a flat plane lying on the floor (y = floor top)
   const flatPlane = (K, x, y, z, w, d, mat, rotY = 0, o = {}) => K.plane(x, y, z, w, d, mat, { rot: [-90, 0, rotY], ...o });
+  // hanging Outage dressing (tethers, receipt strips) always clears his head: nothing brushes through Aidan's face, and
+  // nothing hangs to head height (spec §1 content rules)
+  const C1_hang = (K, kind, x, z, len, ceil, rot = 0) => K.prop(kind, x, z, rot, { ceil, len: Math.max(0.35, Math.min(len, ceil - (kind === 'tether_hanging' ? 2.3 : 2.0))) });
+  // The torch's bounce: while the torch is on, a soft fill a metre ahead of Aidan (the beam's spill back off the floor
+  // and walls), so he reads in every shot of a dark interior — stronger in the Outage, where nothing else lights him.
+  // One pool light per room, ranked as if right beside him so it keeps a real slot.
+  function C1_bounce(K, fog = 0.8, out = 2.3) {
+    const L = K.light('point', 0, 1.3, 0, { color: '#cfe2dc', intensity: 0, distance: 3.4, decay: 1.5, prio: 20 });
+    let key = '';
+    K.animate(() => {
+      if (typeof Player === 'undefined' || !Player.pos || (World.outageBusy && !Player.torchOn)) return;
+      const on = !!Player.torchOn && !Player.dead;
+      const out1 = !!S.outage, I = on ? (out1 ? out : fog) : 0;
+      // half along the beam, half toward the lens: the spill that reaches him from the side the shot sees
+      let cx = 0, cz = 0;
+      try { const c = Render.camera.position, dx = c.x - Player.pos.x, dz = c.z - Player.pos.z, d = Math.hypot(dx, dz) || 1; cx = dx / d; cz = dz / d; } catch (e) { /* no camera */ }
+      const x = Player.pos.x + Math.sin(Player.yaw) * 0.55 + cx * 0.6, z = Player.pos.z + Math.cos(Player.yaw) * 0.55 + cz * 0.6, y = (Player.pos.y || 0) + 1.3;
+      const k = `${I}|${x.toFixed(2)}|${z.toFixed(2)}|${y.toFixed(2)}`;
+      if (k === key) return;
+      key = k;
+      if (I > 0 && !L.isOn) L.on(true);
+      L.set({ pos: [x, y, z], intensity: I, color: out1 ? '#8fd8cc' : '#cfe2dc' });
+    });
+    return L;
+  }
   // the ring of the food court payphone: positional in the food court, muffled one room away elsewhere in the Plaza
   function C1_ringTick(roomId) {
     let want = '';
@@ -165,15 +190,16 @@
       // the south end: from up the street looking back toward the fog he came out of (the empty street first)
       { id: 'c1_relay:south', vol: [-0.3, -12, 14.4, 6.5], type: 'static', pos: [10.2, 3.3, -19.5], target: [6.8, 0.5, -1.5], fov: 'fit' },
       // rails along both footpaths: from the east gutter looking west at him and the shopfronts behind him …
-      { id: 'c1_relay:railE', vol: [-0.3, -152, 8.2, -12], type: 'rail', pos: [10.3, 3.4, -40], fov: 50, rail: { a: [10.3, 3.4, -8], b: [10.3, 3.4, -156], look: [0, 1.05, 0], lag: 0.4 } },
+      { id: 'c1_relay:railE', vol: [-0.3, -157, 8.2, -12], type: 'rail', pos: [10.3, 3.4, -40], fov: 50, rail: { a: [10.3, 3.4, -8], b: [10.3, 3.4, -156], look: [0, 1.05, 0], lag: 0.4 } },
       // … and from the west gutter looking east at him and the Plaza's long blank wall (the car park's mouth)
-      { id: 'c1_relay:railW', vol: [8.2, -152, 16.2, -12], type: 'rail', pos: [5.6, 3.3, -40], fov: 50, rail: { a: [5.6, 3.3, -8], b: [5.6, 3.3, -156], look: [0, 1.05, 0], lag: 0.4 } },
+      { id: 'c1_relay:railW', vol: [8.2, -157, 16.2, -12], type: 'rail', pos: [5.6, 3.3, -40], fov: 50, rail: { a: [5.6, 3.3, -8], b: [5.6, 3.3, -156], look: [0, 1.05, 0], lag: 0.4 } },
       // through the newsagent's window (from inside, past the magazines and the back of the 1987 front page)
       { id: 'c1_relay:news', vol: [-0.3, -76.6, 6.2, -67.5], pri: 1, type: 'static', pos: [-2.2, 1.45, -78.05], target: [3.2, 0.95, -71.6], fov: 'fit' },
       // low under the entrance canopy, up at the chained doors and the sign
       { id: 'c1_relay:doors', vol: [8.2, -118, 14.4, -102], pri: 1, type: 'static', pos: [3.4, 0.55, -99.4], target: [13.6, 2.5, -110.6], fov: 'fit' },
-      // a high static at the traffic light, down on the junction and the memorial bench (the fog thins for it)
-      { id: 'c1_relay:junction', vol: [-0.3, -176, 14.4, -152], type: 'static', pos: [7.4, 11.5, -140.5], target: [6.6, 0, -166.5], fov: 'fit' },
+      // high over the street short of the traffic light, down on the junction and the memorial bench (the fog thins for
+      // it); it turns after him with a long lens so he stays a figure, not a speck
+      { id: 'c1_relay:junction', vol: [-0.3, -176, 14.4, -157], type: 'pan', pos: [9.2, 8.2, -150.2], target: [6.2, 0, -166.5], fov: 36, pan: { lag: 0.45, yaw: 45, pitch: 32 } },
       // the foot of Hilltop Road: the road climbs away into the fog (nothing past the first bend until he commits)
       { id: 'c1_relay:hilltop', vol: [14.4, -176, 24.7, -166], type: 'static', pos: [8.2, 1.35, -171.2], target: [24, 1.3, -171], fov: 'fit' },
       // the north end: Exchange Road's lower branch, the barrier and the drop
@@ -527,7 +553,7 @@
       { id: 'c1_dock:apron', vol: [8.6, 5, 20.5, 12.6], type: 'static', pos: [5.3, 3.85, 1.05], target: [15.2, 0.3, 9.4], fov: 'fit' },
       { id: 'c1_dock:door', vol: [15.3, -0.5, 20.5, 5], y: [0.8, 2.5], pri: 1, type: 'static', pos: [5.3, 3.85, 1.05], target: [17.2, 1.4, 2.4], fov: 'fit' },
       // low between the pallets on the platform, looking along it toward the open door
-      { id: 'c1_dock:platform', vol: [-1.2, -0.5, 15.3, 5], y: [0.8, 2.5], pri: 1, type: 'static', pos: [19.4, 2.25, 4.4], target: [6.5, 1.3, 2.2], fov: 'fit' },
+      { id: 'c1_dock:platform', vol: [-1.2, -0.5, 15.3, 5], y: [0.8, 2.5], pri: 1, type: 'static', pos: [19.4, 3.1, 4.6], target: [6.5, 1.3, 2.2], fov: 'fit' },
     ],
     build(K) {
       const py = DK.py;
@@ -612,6 +638,8 @@
       // a static from each end, straight down the corridor
       { id: 'c1_corridor:east', vol: [24.5, 0, 35.4, 3], pri: 1, type: 'static', pos: [39.75, 2.4, 0.45], target: [22, 0.95, 1.9], fov: 'fit' },
       { id: 'c1_corridor:west', vol: [4.6, 0, 15.6, 3], pri: 1, type: 'static', pos: [0.3, 2.4, 2.6], target: [18, 0.95, 1.1], fov: 'fit' },
+      // the dock end, from down the corridor: the goods-in door and the stacked stock waiting beside it
+      { id: 'c1_corridor:dock', vol: [35.4, 0, 40, 3], pri: 1, type: 'static', pos: [27.2, 2.35, 2.6], target: [39.2, 1.0, 1.1], fov: 'fit' },
     ],
     build(K) {
       const H = CO.h;
@@ -638,6 +666,7 @@
         else K.light('fluoro', x, H - 0.02, 1.5, { len: 1.2, rot: 90, bank: 1 + (i >> 1), real: st !== 'glow', flicker: st === 'flick', intensity: 6, distance: 8 });
       });
       K.light('led', 39.9, 2.35, 0.5, { color: '#2aff5a', intensity: 2 });
+      C1_bounce(K);
       K.prop('exit_sign', 0.08, 1.5, 90, { mount: 2.35 });
       // along the north wall: the mop bucket and wet-floor sign, a cleaner's trolley, boxes, a fire hose reel
       K.prop('mop_bucket', 20.2, 0.45, 20, { sign: true });
@@ -764,6 +793,7 @@
       K.light('fluoro', 4, H - 0.02, 2.2, { len: 1.2, intensity: 5, distance: 8, bank: 1, flicker: true });
       K.light('fluoro', 4, H - 0.02, 4.4, { len: 1.2, on: false });
       K.light('screen', 6.7, 1.4, 3.0, { color: '#b8c4c0', intensity: 1.6, distance: 4.5, bank: 2 });
+      C1_bounce(K);
       // the CCTV bank on the east wall, facing west; its six feeds are ours to paint
       const bank = K.prop('cctv_bank', SO.bank[0], SO.bank[1], -90, { name: 'c1s_bank' });
       K.prop('office_chair', 6.2, 3.1, 110, { turn: 30 });
@@ -909,6 +939,8 @@
       { id: 'c1_staffroom:lockers', vol: [0, 0, 1.9, 6], pri: 1, type: 'static', pos: [5.2, 1.75, 1.2], target: [0.4, 1.05, 3.2], fov: 'fit' },
       // from the kitchenette corner back to the door and the couch
       { id: 'c1_staffroom:door', vol: [1.2, 0, 8, 2.8], type: 'static', pos: [7.6, 2.4, 5.65], target: [3.2, 0.7, 1.2], fov: 'fit' },
+      // the corkboard and the certificate, from the doorway corner: him reading the date
+      { id: 'c1_staffroom:cork', vol: [5.4, 2.2, 8, 5.0], pri: 1, type: 'static', pos: [1.0, 2.05, 0.45], target: [7.5, 1.25, 3.8], fov: 'fit' },
     ],
     build(K) {
       const H = SR.h;
@@ -916,6 +948,7 @@
       K.door({ id: 'c1_staffroom:door', x: 4, z: -0.075, rot: 180, w: 0.9, style: 'wood', to: 'c1_corridor', entry: 'staff', color: '#d8d0bc', sign: 'STAFF ROOM' });
       K.light('fluoro', 3.2, H - 0.02, 3.0, { len: 1.2, intensity: 6, distance: 8, bank: 1 });
       K.light('fluoro', 6.2, H - 0.02, 3.0, { len: 1.2, real: false, bank: 2 });
+      C1_bounce(K);
       // the break table (the chapter's 15 minutes) — its clock goes on the nearest wall at 8:59
       K.breakTable(4.4, 3.7, 0, { id: 'c1_staffroom:break', time: [8, 59] });
       K.prop('mug', 4.15, 3.55, 30, { y: 0.745, text: 'I ♥ SIGNAL HILL' });
@@ -1007,21 +1040,30 @@
   const CN = { h: 8, bal: 4.4, storeX: 51, fireX: 43, fountain: [20.5, 6.2] };
   defineRoom({
     id: 'c1_concourse', name: 'CONCOURSE', area: 'SIGNAL HILL PLAZA', chapter: 1, outdoor: false, surface: 'carpet', ambient: 'interior',
-    fog: { density: 0.03, color: '#3a4442' }, outageFog: { density: 0.03, color: '#17312e' },
+    fog: { density: 0.03, color: '#3a4442' }, outageFog: { density: 0.026, color: '#1f3d3a' },
     surfaces: [{ box: [0, -1, 60, 0.4], s: 'tile' }],
     bounds: [0, -1, 60, 12],
     entries: { fire: [CN.fireX, 11.0, 180], food: [7, 1.2, 0], store: [CN.storeX, 1.1, 0], start: [CN.fireX, 11.0, 180] },
     cameras: [
       // a wide from the fountain, west to the chained front doors and the food court's mouth
-      { id: 'c1_concourse:fountain', vol: [0, -1, 18.5, 12], type: 'static', pos: [25.2, 1.75, 7.6], target: [5.5, 1.05, 5.4], fov: 'fit' },
+      //   (from just past the fountain's south-east side and above its rim: the dry bowl sits bottom-right, never between
+      //   the lens and him)
+      { id: 'c1_concourse:fountain', vol: [0, -1, 18.5, 12], type: 'pan', pos: [24.6, 3.2, 10.4], target: [6.5, 0.9, 4.0], fov: 40, pan: { lag: 0.4, yaw: 45, pitch: 28 } },
+      // the west end: the chained front doors, the fog against the glass, the food court's mouth (from across the floor)
+      { id: 'c1_concourse:doors', vol: [0, -1, 7.2, 12], pri: 1, type: 'static', pos: [12.8, 2.5, 11.3], target: [2.0, 0.9, 4.2], fov: 'fit' },
       // a low rail along the south side, looking across at him and the shopfronts behind him
-      { id: 'c1_concourse:rail', vol: [18.5, -1, 41, 5.8], type: 'rail', pos: [30, 0.8, 9.9], fov: 50, rail: { a: [17, 0.8, 9.9], b: [43, 0.8, 9.9], look: [0, 1.05, 0], lag: 0.4 } },
+      //   (at hip height: low, but over the kiosk island and the benches, so they never hide him)
+      { id: 'c1_concourse:rail', vol: [18.5, -1, 41, 5.8], type: 'rail', pos: [30, 1.45, 9.9], fov: 50, rail: { a: [17, 1.45, 9.9], b: [43, 1.45, 9.9], look: [0, 1.05, 0], lag: 0.4 } },
       // a pan from the top of the escalator, down the concourse
-      { id: 'c1_concourse:escalator', vol: [18.5, 5.8, 33.5, 12], type: 'pan', pos: [37.6, 5.9, 9.15], target: [26, 0.9, 6.8], fov: 48, pan: { lag: 0.35, yaw: 70, pitch: 50 } },
+      //   (at the dead escalator's top end, just under the balcony's edge: the steps fall away bottom-left, and nothing
+      //   under the balcony is hidden by its deck)
+      { id: 'c1_concourse:escalator', vol: [18.5, 5.8, 33.5, 12], type: 'pan', pos: [36.6, 3.8, 8.1], target: [26, 0.9, 6.6], fov: 48, pan: { lag: 0.35, yaw: 70, pitch: 50 } },
       // the fire door from the corridor and the escalator's top, from over by the store (the corridor stays hidden)
       { id: 'c1_concourse:fire', vol: [33.5, 5.8, 42.4, 12], pri: 1, type: 'static', pos: [47.2, 2.7, 3.2], target: [38.8, 0.8, 9.6], fov: 'fit' },
       // the east end: him in silhouette against the only lit shopfront
       { id: 'c1_concourse:store', vol: [41, -1, 60, 12], type: 'static', pos: [36.8, 2.4, 9.6], target: [53.2, 1.3, 2.2], fov: 'fit' },
+      // the Outage: the store's front is a wall of contracts; the lens comes closer and follows him along it
+      { id: 'c1_concourse:contracts', vol: [42.5, -1, 60, 9.2], world: 'outage', pri: 1, type: 'pan', pos: [43.2, 2.7, 11.0], target: [51, 1.4, 1.5], fov: 50, pan: { lag: 0.4, yaw: 70, pitch: 35 } },
     ],
     spawns: [
       // the Outage: three Tethered stand in the concourse
@@ -1148,6 +1190,7 @@
         K.light('fluoro', 56, B - 0.02, 2.2, { len: 1.2, on: false });
       });
       K.light('led', 0.2, 2.6, 7.3, { color: '#2aff5a', intensity: 2.5 });
+      C1_bounce(K);
       // ---- the Outage: contract walls, hanging tethers and receipts, the store walled off, red light ------------------
       K.outageOnly(() => {
         // the wall of paper across the store's front
@@ -1159,7 +1202,7 @@
         K.writing('DID YOU CHECK', 22.5, 2.0, 12.0, 2.0, { rotY: 180, style: 'receipt' });
         K.writing('IT\'LL BE FINE', 5.2, 2.1, -0.98, 2.2, { style: 'marker' });
         for (const [x, z, len] of [[8, 5, 2.4], [12.5, 7.5, 3.2], [17, 4, 2.0], [24, 8.2, 3.6], [29, 5.2, 2.8], [35.5, 7, 3.0], [41, 5.8, 2.2], [48, 6.4, 3.4], [54, 4.8, 2.6]]) K.prop('tether_hanging', x, z, 0, { ceil: H, len: len + 3.2 });
-        for (const [x, z] of [[10, 3], [20, 9], [27, 2.8], [44, 8.8]]) K.prop('receipt_strip', x, z, (x * 17) % 90, { ceil: B, len: 1.8 });
+        for (const [x, z] of [[10, 3], [20, 9], [27, 2.8], [44, 8.8]]) C1_hang(K, 'receipt_strip', x, z, 1.8, B, (x * 17) % 90);
         K.prop('receipt_curtain', 31, 9.3, 0, { ceil: B, w: 5, len: 2.2 });
         K.dress('contracts', [2, 2, 58, 10], 26, { seed: 74 });
         K.dress('receipts', [2, 2, 58, 10], 30, { seed: 75 });
@@ -1169,6 +1212,8 @@
         K.light('fluoro', 22, B - 0.02, 9.8, { len: 1.2, intensity: 4.5, distance: 10, flicker: true, color: '#bfe0d4' });
         K.light('fluoro', 39, B - 0.02, 2.2, { len: 1.2, intensity: 4, distance: 9, color: '#cfe8dc' });
         K.light('point', 51, 3.5, 1.4, { color: '#ff2a1c', intensity: 4, distance: 11 });
+        K.light('fluoro', 47.5, B - 0.02, 2.4, { len: 1.2, intensity: 5, distance: 8, flicker: true, color: '#cfe8dc' });   // over the paper wall
+        K.light('point', 54.5, 2.2, 3.4, { color: '#bfe0d4', intensity: 2.2, distance: 6 });
         K.light('point', 20.5, 2.2, 6.2, { color: '#e8c21a', intensity: 2.2, distance: 8 });
         K.light('led', 13.2, 2.4, 11.9, { color: '#ff2a1c', blink: 1.4 });
         K.light('led', 38.4, 2.2, -0.6, { color: '#ff2a1c', blink: 0.9 });
@@ -1207,7 +1252,7 @@
         K.mesh(g, { name: 'c1cn_tiles' });
       }
     },
-    onUpdate() { C1_ringTick('c1_concourse'); C1_ambient(['#74827f', 0.5], ['#2a8a84', 0.42]); },
+    onUpdate() { C1_ringTick('c1_concourse'); C1_ambient(['#74827f', 0.5], ['#2a8a84', 0.62]); },
     onLeave() { C1_ringStop(); C1_ambientOff(); },
   });
 
@@ -1221,14 +1266,16 @@
   C1.ringPos = [0.35, 1.4, FC.phone[1]];
   defineRoom({
     id: 'c1_foodcourt', name: 'FOOD COURT', area: 'SIGNAL HILL PLAZA', chapter: 1, outdoor: false, surface: 'carpet', ambient: 'interior',
-    fog: { density: 0.03, color: '#3a4442' }, outageFog: { density: 0.03, color: '#17312e' },
+    fog: { density: 0.03, color: '#3a4442' }, outageFog: { density: 0.026, color: '#1f3d3a' },
     bounds: [0, 0, 30, 21],
     entries: { concourse: [15, 19.3, 180], kitchen: [FC.kitchen[0], 1.0, 0], phone: [0.95, FC.phone[1], 90], start: [15, 19.3, 180] },
     cameras: [
       // high from a stall sign (north wall), panning after him across the tables to the concourse mouth
       { id: 'c1_foodcourt:sign', vol: [0, 8.5, 30, 21], type: 'pan', pos: [15, 3.95, 0.75], target: [15, 0.6, 13.5], fov: 44, pan: { lag: 0.35, yaw: 66, pitch: 32 } },
-      // low under the tables, from the concourse side, toward the stalls
-      { id: 'c1_foodcourt:low', vol: [0, 0, 30, 8.5], type: 'pan', pos: [15.4, 0.5, 19.6], target: [15, 1.0, 4.5], fov: 40, pan: { lag: 0.35, yaw: 55, pitch: 22 } },
+      // low among the tables (chair backs in the foreground), up at the stalls and the kitchen corner
+      { id: 'c1_foodcourt:low', vol: [12, 0, 30, 8.5], type: 'pan', pos: [19.0, 0.98, 14.4], target: [19, 1.1, 4.0], fov: 46, pan: { lag: 0.35, yaw: 60, pitch: 30 } },
+      // the west stalls and the order kiosk (the receipt map prints out of it in the Outage), from across the tables
+      { id: 'c1_foodcourt:kiosk', vol: [0, 0, 12, 8.5], type: 'static', pos: [15.2, 2.4, 12.6], target: [5, 0.9, 5.2], fov: 'fit' },
       // close by the payphone (the call; the save point)
       { id: 'c1_foodcourt:phone', vol: [0, 9.5, 4.8, 17.5], pri: 1, type: 'static', pos: [8.6, 2.0, 9.4], target: [0.6, 1.1, 13.6], fov: 'fit' },
       // the kitchen's door in the corner (hidden past the last stall until he's there)
@@ -1301,10 +1348,11 @@
         K.light('screen', 1.9, 1.2, 2.0, { color: '#cfe8e6', intensity: 1.6, distance: 4.5 });
       });
       K.light('led', 15, 3.9, 19.9, { color: '#2aff5a', intensity: 2 });
+      C1_bounce(K);
       // ---- the Outage: circuit board through the carpet, receipts hanging, contracts, the receipt map -----------------
       K.outageOnly(() => {
-        for (const [x, z, len] of [[5, 9, 2.4], [11, 14, 3], [16, 12, 2.2], [24, 14.5, 2.8], [8, 4, 2]]) K.prop('receipt_strip', x, z, (x * 13) % 90, { ceil: H, len });
-        for (const [x, z, len] of [[13, 7.5, 2.6], [26, 9, 2.2], [7.5, 16, 2.8]]) K.prop('tether_hanging', x, z, 0, { ceil: H, len });
+        for (const [x, z, len] of [[5, 9, 2.4], [11, 14, 3], [16, 12, 2.2], [24, 14.5, 2.8], [8, 4, 2]]) C1_hang(K, 'receipt_strip', x, z, len, H, (x * 13) % 90);
+        for (const [x, z, len] of [[13, 7.5, 2.6], [26, 9, 2.2], [7.5, 16, 2.8]]) C1_hang(K, 'tether_hanging', x, z, len, H);
         K.prop('receipt_curtain', 27.6, 2.2, 0, { ceil: H, w: 2.4, len: 2.6 });
         K.dress('contracts', [2, 2, 28, 18], 18, { seed: 83 });
         K.dress('receipts', [2, 2, 28, 18], 26, { seed: 84 });
@@ -1330,7 +1378,7 @@
       K.examine(3.0, 1.1, 19.4, 'Sachets. Tomato sauce, sugar, salt. Hundreds of them. For all the people.', { id: 'c1fc:condiments', r: 1.3 });
       K.examine(0.4, 1.5, 6, 'The toilets. Locked. A sign says "Please ask at the Food Court counter for the key."', { id: 'c1fc:toilets', r: 0.9, world: 'fog' });
     },
-    onUpdate() { C1_ringTick('c1_foodcourt'); C1_ambient(['#74827f', 0.5], ['#2a8a84', 0.42]); },
+    onUpdate() { C1_ringTick('c1_foodcourt'); C1_ambient(['#74827f', 0.5], ['#2a8a84', 0.62]); },
     onLeave() { C1_ringStop(); C1_ambientOff(); C1.onPhone = false; },
   });
 
@@ -1344,9 +1392,11 @@
     bounds: [0, 0, 10, 6],
     entries: { food: [0.9, 3, 90], office: [9.1, 3, -90], start: [0.9, 3, 90] },
     cameras: [
-      // tight statics at each end
-      { id: 'c1_kitchen:west', vol: [4.4, 0, 10, 6], type: 'static', pos: [0.3, 2.3, 1.1], target: [7.5, 0.9, 3.4], fov: 'fit' },
-      { id: 'c1_kitchen:east', vol: [0, 0, 4.4, 6], type: 'static', pos: [9.7, 2.3, 4.9], target: [2.2, 0.9, 2.8], fov: 'fit' },
+      // tight statics at each end, each corner looking across to the far quarter (the aisle stays clear between them)
+      { id: 'c1_kitchen:west', vol: [5, 3, 10, 6], type: 'static', pos: [0.3, 2.35, 0.35], target: [7.8, 0.9, 4.4], fov: 'fit' },
+      { id: 'c1_kitchen:westlow', vol: [5, 0, 10, 3], type: 'static', pos: [0.3, 1.25, 5.65], target: [7.8, 1.0, 1.6], fov: 'fit' },
+      { id: 'c1_kitchen:east', vol: [0, 0, 5, 3], type: 'static', pos: [9.7, 2.35, 5.65], target: [2.2, 0.9, 1.5], fov: 'fit' },
+      { id: 'c1_kitchen:eastdoor', vol: [0, 3, 5, 6], type: 'static', pos: [9.7, 2.35, 0.35], target: [2.2, 0.9, 4.4], fov: 'fit' },
     ],
     build(K) {
       const H = 2.9;
@@ -1365,14 +1415,16 @@
       K.prop('mop_bucket', 8.6, 4.4, 30, {});
       K.box(5, 1.5, 0.12, 2.6, 0.04, 0.12, { tex: 'metal', color: '#9aa09e' });
       for (let k = 0; k < 7; k++) K.plane(4.0 + k * 0.33, 1.38, 0.19, 0.09, 0.22, 'receipt', { rotY: 0 });
-      // the Outage: receipts, contracts, a red tube, the coffee
-      K.prop('receipt_curtain', 5, 3, 90, { ceil: H, w: 4, len: 1.6 });
-      K.prop('tether_hanging', 7.2, 2.2, 0, { ceil: H, len: 1.5 });
+      // the Outage: receipts (a curtain of them over the south bench, clear of the aisle), contracts, a red tube, the coffee
+      K.prop('receipt_curtain', 6.3, 5.3, 0, { ceil: H, w: 3.6, len: 1.35 });
+      C1_hang(K, 'tether_hanging', 7.2, 1.2, 1.5, H);
       K.dress('receipts', [0.5, 1.2, 9.5, 4.8], 30, { seed: 91 });
       K.dress('contracts', [0.5, 1.2, 9.5, 4.8], 8, { seed: 92 });
       K.writing('WHO ARE YOU TRYING TO REACH', 5, 2.1, 5.92, 3.2, { rotY: 180, style: 'marker', world: 'outage' });
       K.light('fluoro', 5, H - 0.02, 3, { len: 1.2, intensity: 5, distance: 8, flicker: true, color: '#cfe8dc' });
+      K.light('fluoro', 8.4, H - 0.02, 3, { len: 1.2, intensity: 3.2, distance: 6, color: '#bfe0d4' });
       K.light('point', 2.0, 1.9, 4.6, { color: '#ff3b2a', intensity: 2.2, distance: 5 });
+      C1_bounce(K);
       K.pickup('coffee', 3.1, 0.94, 0.55, { id: 'c1_kitchen:coffee' });
       // examine
       K.examine(4.6, 1.4, 0.3, ['The docket rail. Every docket says the same thing.', 'Order 22. [beat] Customer callback.'], { id: 'c1k:dockets', r: 1.3 });
@@ -1380,11 +1432,12 @@
       K.examine(9.2, 1.3, 5.3, 'The coolroom. It\'s warm. It\'s been warm a long time.', { id: 'c1k:coolroom', r: 1.2 });
       K.examine(6.2, 1.1, 5.0, 'A staff meal on a plate, cling-wrapped. A name on it in texta. The name\'s been scribbled out.', { id: 'c1k:meal', r: 1.3 });
       K.examine(8.9, 1.4, 0.8, 'Stock. Paper cups, lids, napkins. Enough for a crowd that isn\'t coming.', { id: 'c1k:shelf', r: 1.3 });
-      K.examine(5, 1.6, 3, 'Receipts, hanging off the ceiling like streamers at a party.', { id: 'c1k:receipts', r: 1.6 });
+      K.examine(6.3, 1.6, 4.9, 'Receipts, hanging off the ceiling like streamers at a party.', { id: 'c1k:receipts', r: 1.6 });
       K.examine(8.6, 0.6, 4.4, 'A mop in a bucket of grey water. Somebody was halfway through the floor.', { id: 'c1k:mop', r: 1.2 });
-      K.examine(7.2, 1.6, 2.2, 'A security tether, hanging from the ceiling. Nothing on the end of it.', { id: 'c1k:tether', r: 1.2 });
+      K.examine(7.2, 2.2, 1.2, 'A security tether, grown down out of the ceiling like a vine. The demo phone\'s still clipped to it.', { id: 'c1k:tether', r: 1.4 });
     },
-    onUpdate() { C1_ambient(['#2a8a84', 0.3], ['#2a8a84', 0.3]); },
+    async onEnter() { S.done['c1:kitchenIn'] = true; },              // (the receipt map's "another way?" circle reads this key)
+    onUpdate() { C1_ambient(['#2a8a84', 0.36], ['#2a8a84', 0.36]); },
     onLeave() { C1_ambientOff(); },
   });
 
@@ -1395,7 +1448,7 @@
   // Outage: the front is gone — the sales floor runs back into the dark in rows of demo tables, every phone ringing;
   // the counter holds the stack of contracts (Account Note 2); Chloe is gone.
   // =================================================================================================================
-  const ST = { h: 3.3, chloe: [10, 2.25], deep: 56, tables: [[5.4, 6.8], [14.6, 6.8], [5.4, 9.8], [14.6, 9.8], [5.4, 12.8], [14.6, 12.8]] };
+  const ST = { h: 3.3, chloe: [10, 2.25], deep: 46, tables: [[5.4, 6.8], [14.6, 6.8], [5.4, 9.8], [14.6, 9.8], [5.4, 12.8], [14.6, 12.8]] };
   const C1_ringMat = new THREE.MeshBasicMaterial({ map: null, color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false });
   C1_ringMat.userData.shared = true;
   const ringScreenTex = () => C1_tex('ringscr', 128, 256, (x, w, h) => {
@@ -1423,13 +1476,13 @@
   });
   defineRoom({
     id: 'c1_store', name: 'THE STORE', area: 'SIGNAL HILL PLAZA', chapter: 1, outdoor: false, surface: 'vinyl', ambient: 'store',
-    fog: { density: 0.026, color: '#5a6664' }, outageFog: { density: 0.045, color: '#0c1a19' },
+    fog: { density: 0.026, color: '#5a6664' }, outageFog: { density: 0.036, color: '#0c1a19' },
     surfaces: [{ box: [0, 0, 20, 2.6], s: 'vinyl' }],
     bounds: [0, 0, 20, ST.deep],
     entries: { door: [10, 15.2, 180], office: [17.5, 1.05, 0], start: [10, 15.2, 180] },
     cameras: [
       // low behind the counter, looking out over it to the front (panning after him)
-      { id: 'c1_store:counter', vol: [0, 9.5, 20, 17.6], type: 'pan', pos: [14.7, 1.32, 1.05], target: [10, 1.0, 12.5], fov: 50, pan: { lag: 0.35, yaw: 55, pitch: 25 } },
+      { id: 'c1_store:counter', vol: [0, 9.5, 20, 17.6], type: 'pan', pos: [13.4, 1.55, 1.3], target: [10, 1.0, 12.5], fov: 50, pan: { lag: 0.35, yaw: 55, pitch: 25 } },
       // the reverse, from the door: the floor, the demo tables, the counter and whoever is behind it
       { id: 'c1_store:door', vol: [0, 2.6, 20, 9.5], type: 'pan', pos: [10, 2.2, 16.1], target: [10, 1.2, 3.8], fov: 46, pan: { lag: 0.35, yaw: 60, pitch: 30 } },
       // high corner (north-east), along the staff side behind the counter
@@ -1438,8 +1491,10 @@
       { id: 'c1_store:office', vol: [15.2, 0, 20, 2.6], type: 'static', pos: [9.2, 2.3, 7.4], target: [17.3, 1.0, 1.0], fov: 'fit' },
       // the Outage: from out on the endless floor, back at the counter and its stack of contracts
       { id: 'c1_store:mid', vol: [0, 9.5, 20, 16.4], world: 'outage', pri: 1, type: 'pan', pos: [16.2, 2.7, 20.6], target: [10.4, 1.0, 8.5], fov: 46, pan: { lag: 0.35, yaw: 55, pitch: 25 } },
-      // the Outage: the sales floor running back into the dark
-      { id: 'c1_store:deep', vol: [0, 16.4, 20, ST.deep], world: 'outage', pri: 1, type: 'pan', pos: [10, 2.9, 11.5], target: [10, 0.8, 26], fov: 44, pan: { lag: 0.4, yaw: 60, pitch: 30 } },
+      // the Outage: the sales floor running back into the dark (from the counter end: him walking away into it) …
+      { id: 'c1_store:deep', vol: [0, 16.4, 20, 30], world: 'outage', pri: 1, type: 'pan', pos: [10, 2.9, 11.5], target: [10, 0.8, 26], fov: 42, pan: { lag: 0.4, yaw: 60, pitch: 30 } },
+      // … and further in, the lens follows him down the rows (the counter's glow long gone behind)
+      { id: 'c1_store:deeper', vol: [0, 30, 20, ST.deep], world: 'outage', pri: 1, type: 'pan', pos: [12.8, 2.9, 25.2], target: [9, 0.8, 38], fov: 44, pan: { lag: 0.4, yaw: 65, pitch: 35 } },
     ],
     build(K) {
       const H = ST.h;
@@ -1498,6 +1553,7 @@
         for (const [x, z, real] of [[5, 5.5, true], [15, 5.5, true], [5, 11.5, false], [15, 11.5, true], [10, 9, false], [10, 14.5, true]]) K.light('fluoro', x, H - 0.02, z, { len: 1.2, diffuser: true, intensity: 7, distance: 9, bank: z < 9 ? 1 : 2, real });
         K.light('point', 10, 2.4, 1.6, { color: '#e8f4ef', intensity: 4, distance: 6, bank: 1 });
       });
+      C1_bounce(K);
       // ---- the Outage: the floor runs back into the dark; rows of demo tables ringing; contracts on the counter -------
       K.outageOnly(() => {
         K.floor(0, 16.4, 20, ST.deep, { tex: 'vinyl_retail', color: '#d8d6ce' });
@@ -1520,12 +1576,13 @@
         // the counter: a tall stack of contracts, Account Note 2 on top
         K.prop('contract_stack', 10.6, 3.15, 12, { y: 1.0, h: 1.5 });
         K.prop('contract_stack', 9.9, 3.25, -8, { y: 1.0, h: 1.1 });
-        K.prop('contract_stack', 11.3, 3.1, 30, { y: 1.0, h: 0.8 });
-        K.doc('acct2', 10.62, 2.52, 3.15, { id: 'c1_store:acct2', model: 'paper', rot: 12, r: 1.6 });
+        K.prop('contract_stack', 11.3, 3.1, 30, { y: 1.0, h: 0.42 });
+        // Account Note 2 on the low stack at the front, where he can reach it (the tall one is 2.5 m up)
+        K.doc('acct2', 11.3, 1.0 + 0.42 + 0.012, 3.1, { id: 'c1_store:acct2', model: 'paper', rot: 24, r: 1.6 });
         K.dress('contracts', [1, 3, 19, ST.deep - 3], 50, { seed: 102 });
         K.dress('receipts', [1, 3, 19, ST.deep - 3], 40, { seed: 103 });
-        for (const [x, z, len] of [[3, 6, 1.4], [8, 13, 1.6], [16, 9, 1.2], [12, 20, 1.8], [4, 27, 1.5], [17, 32, 1.7], [9, 40, 1.4]]) K.prop('tether_hanging', x, z, 0, { ceil: H, len });
-        for (const [x, z] of [[6, 18], [14, 24], [10, 31], [5, 38], [15, 45]]) K.prop('receipt_strip', x, z, (x * 11) % 90, { ceil: H, len: 1.6 });
+        for (const [x, z, len] of [[3, 6, 1.4], [8, 13, 1.6], [16, 9, 1.2], [12, 20, 1.8], [4, 27, 1.5], [17, 32, 1.7], [9, 38, 1.4]]) C1_hang(K, 'tether_hanging', x, z, len, H);
+        for (const [x, z] of [[6, 18], [14, 24], [10, 31], [5, 36], [15, 40]]) C1_hang(K, 'receipt_strip', x, z, 1.6, H, (x * 11) % 90);
         K.writing('FOLLOW UP TOMORROW', 19.95, 1.9, 22, 3.4, { rotY: -90, style: 'marker' });
         K.writing('IT\'LL BE FINE', 0.05, 1.9, 30, 3.0, { rotY: 90, style: 'receipt' });
         K.writing('ASK THEM', 19.95, 1.8, 36, 2.2, { rotY: -90, style: 'marker' });
@@ -1533,6 +1590,8 @@
         K.light('point', 12.5, 2.7, 12.6, { color: '#8fd8cc', intensity: 2.4, distance: 9 });
         K.light('point', 10, 1.4, 19.5, { color: '#5fd6c8', intensity: 2.2, distance: 9 });
         K.light('point', 10, 1.4, 32, { color: '#5fd6c8', intensity: 1.6, distance: 8 });
+        K.light('point', 5.4, 1.3, 26.5, { color: '#5fd6c8', intensity: 1.4, distance: 7 });     // the ringing screens' glow
+        K.light('point', 14.6, 1.3, 39, { color: '#5fd6c8', intensity: 1.4, distance: 7 });
         K.light('led', 17.65, 2.32, 0.06, { color: '#ff2a1c', blink: 1.1 });
         K.examine(10.6, 1.6, 3.15, 'My signature. [beat] All of them are mine.', { id: 'c1st:contracts', r: 1.7 });
         K.examine(10, 1.3, 21.6, ['Every phone. Every one of them ringing.', 'The same number on every screen.'], { id: 'c1st:ringing', r: 2.2 });
@@ -1561,7 +1620,7 @@
       C1_ringTick('c1_store');
       C1_ambient(['#8a9896', 0.55], ['#2a8a84', 0.5]);
       // every display phone ringing (the Outage)
-      if (S.outage && !C1.storeRings && typeof Snd !== 'undefined') { try { C1.storeRings = [[5, 20], [15, 27], [10, 36], [4, 44]].map(([x, z]) => Snd.play('ring', { loop: true, pos: [x, 1.0, z], vol: 0.55, gap: 0.6 + (x % 3) * 0.2 })); } catch (e) { C1.storeRings = []; } }
+      if (S.outage && !C1.storeRings && typeof Snd !== 'undefined') { try { C1.storeRings = [[5, 20], [15, 27], [10, 36], [4, 41]].map(([x, z]) => Snd.play('ring', { loop: true, pos: [x, 1.0, z], vol: 0.55, gap: 0.6 + (x % 3) * 0.2 })); } catch (e) { C1.storeRings = []; } }
       if (!S.outage && C1.storeRings) C1_storeRingsOff();
     },
     onLeave() { C1_ringStop(); C1_ambientOff(); C1_storeRingsOff(); if (C1.pinLight) { try { C1.pinLight.free(); } catch (e) { /* pool */ } C1.pinLight = null; } },
@@ -1604,6 +1663,10 @@
       { id: 'c1_backoffice:terminal', vol: [0, 0, 6, 5], type: 'static', pos: [3.0, 2.55, -3.9], target: [3.0, 0.55, 3.2], fov: 'fit' },
       // through the office window from the sales floor (the stockroom door, the desk)
       { id: 'c1_backoffice:window', vol: [3.2, 1.3, 6, 3.9], pri: 1, type: 'static', pos: [4.1, 1.62, 9.6], target: [4.4, 1.05, 2.0], fov: 'fit' },
+      // close over the terminal desk: from beyond the north-east corner, down onto the keyboard and Chloe's sticky note
+      { id: 'c1_backoffice:desk', vol: [1.2, 0, 4.1, 1.85], pri: 2, type: 'static', pos: [6.6, 1.95, -3.2], target: [2.5, 0.85, 1.1], fov: 'fit' },
+      // the kitchen's service door and the whiteboard, from beyond the cutaway north wall, hard by the west wall
+      { id: 'c1_backoffice:west', vol: [0, 1.85, 2.2, 5], pri: 1, type: 'static', pos: [0.3, 2.35, -3.5], target: [1.5, 0.9, 3.3], fov: 'fit' },
     ],
     build(K) {
       const H = BO.h;
@@ -1645,27 +1708,30 @@
       K.prop('filing_cabinet', 5.6, 4.5, -90, {});
       K.box(0.5, 0, 4.55, 0.6, 0.75, 0.55, { tex: 'metal', color: '#3a3f3d', metalness: 0.4 }, { collide: true });
       K.prop('shelf', 5.72, 0.7, -90, { len: 1.2, h: 2.0, load: 'boxes' });
-      K.prop('corkboard', 4.0, 5.0, 180, { w: 1.0, h: 0.7, mount: 1.6, roster: true });
-      K.box(3.1, 1.75, 4.95, 0.07, 0.07, 0.07, { tex: 'metal', color: '#6d726c' });
-      K.box(3.1, 1.2, 4.9, 0.44, 0.62, 0.05, { tex: 'fabric_knit', color: '#10403f' });
+      // the roster between the door and the window; Chloe's jacket on a hook by the stockroom door
+      K.prop('corkboard', 2.55, 5.0, 180, { w: 0.9, h: 0.62, mount: 1.62, roster: true });
+      K.box(5.95, 1.75, 3.55, 0.07, 0.07, 0.07, { tex: 'metal', color: '#6d726c' });
+      K.box(5.9, 1.2, 3.55, 0.05, 0.62, 0.44, { tex: 'fabric_knit', color: '#10403f' });
       K.dress('papers', [0.5, 1.5, 5.5, 4.5], 6, { seed: 111 });
       K.fogOnly(() => { K.light('fluoro', 3, H - 0.02, 2.5, { len: 1.2, intensity: 5, distance: 7, bank: 1 }); });
+      C1_bounce(K);
       K.outageOnly(() => {
         K.light('fluoro', 3, H - 0.02, 2.5, { len: 1.2, intensity: 4, distance: 7, flicker: true, color: '#cfe8dc' });
         K.light('led', 6.0, 2.3, 2.5, { color: '#2aff5a', intensity: 3, halo: 0.4 });
-        K.prop('receipt_strip', 1.8, 2.5, 30, { ceil: H, len: 1.3 });
-        K.prop('tether_hanging', 4.3, 3.2, 0, { ceil: H, len: 1.2 });
+        K.light('point', 5.6, 2.2, 2.5, { color: '#3aff7a', intensity: 1.2, distance: 3.2 });   // the green over the open stock door
+        C1_hang(K, 'receipt_strip', 1.8, 2.5, 1.3, H, 30);
+        C1_hang(K, 'tether_hanging', 4.3, 3.2, 1.2, H);
         K.dress('receipts', [0.5, 1.5, 5.5, 4.5], 16, { seed: 112 });
-        K.writing('DID YOU CHECK', 5.98, 1.5, 4.2, 1.2, { rotY: -90, style: 'marker' });
+        K.writing('DID YOU CHECK', 0.02, 1.62, 4.45, 0.95, { rotY: 90, style: 'marker' });
       });
       // examine
       K.examine(3.8, 1.5, 0.3, ['Top Performer. Chloe. January, February, March, April …', 'There\'s room on the wall for more. She measured it.'], { id: 'c1bo:certs', r: 1.3 });
       K.examine(BO.term[0] + 0.6, 0.9, 0.62, 'Energy drinks. Four empties, lined up by the keyboard like tally marks.', { id: 'c1bo:cans', r: 1.0 });
       K.examine(6.0, 1.5, 2.5, 'Stock only. It\'s locked.', { id: 'c1bo:stockdoor', r: 1.1, world: 'fog' });
-      K.examine(3.1, 1.3, 4.8, ['Her jacket. On the hook since the start of the month, by the look of it.', 'The pockets are full of receipts.'], { id: 'c1bo:jacket', r: 1.1 });
+      K.examine(5.8, 1.3, 3.55, ['Her jacket. On the hook since the start of the month, by the look of it.', 'The pockets are full of receipts.'], { id: 'c1bo:jacket', r: 1.1 });
       K.examine(0.5, 1.0, 4.55, 'The safe. Tomorrow\'s float. Yesterday\'s float. The same float.', { id: 'c1bo:safe', r: 1.1 });
       K.examine(4.6, 1.0, 0.35, 'The printer. A contract in the tray, printed and never signed.', { id: 'c1bo:printer', r: 1.1 });
-      K.examine(4.0, 1.6, 4.9, 'The roster. Chloe\'s on every shift. Every one.', { id: 'c1bo:roster', r: 1.1 });
+      K.examine(2.55, 1.6, 4.9, 'The roster. Chloe\'s on every shift. Every one.', { id: 'c1bo:roster', r: 1.1 });
     },
     async onEnter(G, from) {
       if (S.outage && S.chapter === 1 && G.once('c1:outageOffice')) {
@@ -1674,7 +1740,7 @@
         note(G, 'The stockroom. Behind the back office.', 'c1_obj');
       }
     },
-    onUpdate() { C1_ringTick('c1_backoffice'); C1_ambient(['#8a9896', 0.5], ['#2a8a84', 0.28]); },
+    onUpdate() { C1_ringTick('c1_backoffice'); C1_ambient(['#8a9896', 0.5], ['#2a8a84', 0.36]); },
     onLeave() { C1_ringStop(); C1_ambientOff(); },
   });
 
@@ -1758,11 +1824,12 @@
       K.dress('papers', [1, 1, 8.4, 9], 10, { seed: 122 });
       // light: caged tubes (dead in the Fog world but one); the Outage: flickering, red over the cage
       K.fogOnly(() => { K.light('fluoro', 4, H - 0.3, 5, { len: 1.2, intensity: 6, distance: 10, bank: 1 }); K.light('fluoro', 8.5, H - 0.3, 5, { len: 1.2, on: false }); });
+      C1_bounce(K);
       K.outageOnly(() => {
         K.light('fluoro', 4, H - 0.3, 5, { len: 1.2, intensity: 7, distance: 12, flicker: true, color: '#cfe8dc' });
         K.light('point', 9.2, 3.6, 5, { color: '#ff2a1c', intensity: 5, distance: 11 });
         K.light('point', 2, 2.6, 8.2, { color: '#e8c21a', intensity: 1.6, distance: 6 });
-        for (const [x, z, len] of [[3.4, 3.2, 2.2], [5.2, 8.9, 2.4], [8.5, 2.2, 2.2], [10.9, 8.6, 2.0]]) K.prop('tether_hanging', x, z, 0, { ceil: H, len });
+        for (const [x, z, len] of [[3.4, 3.2, 2.2], [5.2, 8.9, 2.4], [8.5, 2.2, 2.2], [10.9, 8.6, 2.0]]) C1_hang(K, 'tether_hanging', x, z, len, H);
         K.prop('receipt_curtain', 10.9, 1.4, 90, { ceil: H, w: 2.4, len: 2.0 });
         K.dress('receipts', [1, 1, 8.4, 9], 24, { seed: 123 });
         K.writing('YOU SAID IT WOULD WORK HERE', 11.98, 3.6, 5, 4.2, { rotY: -90, style: 'marker' });
@@ -1823,7 +1890,7 @@
       K.examine(8.2, 0.6, 5, ['Cardboard. Tape. Phones with the film still on the screens.', 'That\'s all it was.'], { id: 'c1sk:heap', r: 2.2, world: 'outage', when: () => done('c1:collapsed') });
     },
     async onEnter() { if (!C1.boss || !C1.boss.data || !C1.boss.data.fight) { C1.bossLock = false; C1.bossOn = false; } },
-    onUpdate() { C1_ambient(['#74827f', 0.45], ['#2a8a84', 0.3]); },
+    onUpdate() { C1_ambient(['#74827f', 0.45], ['#2a8a84', 0.36]); },
     onLeave() { C1_ambientOff(); if (C1.keyLight) { try { C1.keyLight.free(); } catch (e) { /* pool */ } C1.keyLight = null; } },
   });
 
@@ -1832,7 +1899,7 @@
   // thin fog, the compound fence, the huts; its red aircraft light comes on for the first time.
   // =================================================================================================================
   defineRoom({
-    id: 'c1_mastshot', name: 'THE SUMMIT (1-2)', area: 'THE MAST', chapter: 1, outdoor: true, surface: 'gravel', ambient: 'wind_heavy',
+    id: 'c1_mastshot', name: 'THE SUMMIT (1-2)', area: 'THE MAST', chapter: 1, outdoor: true, surface: 'gravel', ambient: 'wind_heavy', cutsceneOnly: true,
     fog: { density: 0.007 }, env: { sheets: 6, specks: true },
     bounds: [-6, 8, 6, 14],
     entries: { cam: [0, 12, 180], start: [0, 12, 180] },
@@ -1981,6 +2048,7 @@
     const A = G.aidan;
     await A.turn([BO.term[0], BO.term[1]], 0.4);
     if (G.once('c1:termFirst')) {
+      S.done['c1:termFirst'] = true;                                  // (the Plaza map's "PIN?" note reads this key)
       A.gesture('rub_neck', { hand: 'L' }).catch(() => {});
       await G.say('AIDAN', 'My PIN. What\'s my— [beat] I can\'t remember my PIN.');
       if (!flag('c1_pinKnown')) note(G, 'Her address. Back office terminal. What\'s my PIN?', 'c1_obj');
@@ -2675,7 +2743,8 @@
     await G.wait(0.9);
     // 2. low, looking up: the pile rises into a hunched giant with a cardigan's silhouette; the satchel head turns
     //    toward him and the handwritten note flutters. Cardboard grinding, packing tape peeling.
-    G.cam({ pos: [4.5, 0.36, 6.5], target: [8.2, 2.5, 5.0], fov: 54, to: { pos: [4.3, 0.34, 6.7], target: [8.2, 3.0, 5.0], fov: 58 }, dur: 5 });
+    //    (from the floor a few metres back and to his right: him at the frame's edge, the whole giant rising past him)
+    G.cam({ pos: [2.75, 0.34, 7.45], target: [8.2, 2.0, 5.0], fov: 54, to: { pos: [2.6, 0.32, 7.6], target: [8.2, 2.7, 5.0], fov: 57 }, dur: 5 });
     G.sfx('cardboard', { pos: [8.2, 1, 5], vol: 1 });
     G.sfx('tape', { pos: [8.2, 2.4, 5], vol: 1 });
     if (e) { e.data.riseTo = 1; e.data.state = 'rise'; }
@@ -2790,8 +2859,9 @@
       s.equipped = 'box_cutter';
       s.maps.town = true;
       s.flags.p0_carDead = true;
-      s.docs.timetable = { read: true };
-      Object.assign(s.taken, { 'p2_lookout:modem': true, 'p2_lookout:map': true, 'p4_busshelter:cutter': true });
+      s.docs[(s.difficulty && s.difficulty.riddle) === 'hard' && DOCUMENTS.timetable_hard ? 'timetable_hard' : 'timetable'] = { read: true };
+      // (the coffee he carries is the bus shelter's)
+      Object.assign(s.taken, { 'p2_lookout:modem': true, 'p2_lookout:map': true, 'p4_busshelter:cutter': true, 'p4_busshelter:coffee': true });
       Object.assign(s.done, { 'cs:P-1': true, 'cs:P-4': true, 'p4:reveal': true, 'p4:outcome': 'freed', 'p3:crossed': true, 'trig:p4_busshelter:near': true });
       s.spawns['p4_busshelter:teth'] = 'freed'; s.freedOrder.push('p4_busshelter:teth');
       s.F = 1; s.stats.freed = 1;

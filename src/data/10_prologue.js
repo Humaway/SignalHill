@@ -296,7 +296,7 @@
   // =================================================================================================================
   const CAR = { floor: 0.2, cushion: 0.44, roof: 1.42, belt: 0.92, zin: 0.66, drvZ: 0.36, psgZ: -0.36, seatX: -0.08 };
   defineRoom({
-    id: 'p1_car', name: 'THE CAR', area: 'THE LOOKOUT', chapter: 0, outdoor: false, surface: 'carpet', ambient: 'none',
+    id: 'p1_car', name: 'THE CAR', area: 'THE LOOKOUT', chapter: 0, outdoor: false, surface: 'carpet', ambient: 'none', cutsceneOnly: true,
     fog: { density: 0.11, color: '#7f8b89' }, env: { sheets: 0, specks: false, ambient: ['#7f918e', 0.55] },
     bounds: [-2.4, -1.4, 2.6, 1.4],
     entries: { seat: [CAR.seatX, CAR.drvZ, 90], start: [CAR.seatX, CAR.drvZ, 90] },
@@ -500,13 +500,15 @@
       { id: 'p2_lookout:booth', vol: [1.4, 1.2, 9.8, 8.6], type: 'static', pos: [14.6, 6.6, 8.6], target: [4.9, 0.3, 3.4], fov: 'fit' },
       // from behind the guardrail near the panorama board, looking back at the car through fog (the lookout stretch)
       { id: 'p2_lookout:rail', vol: [9.8, 1.2, 16.2, 8.6], type: 'static', pos: [7.2, 1.35, -2.4], target: [16.8, 0.9, 5.2], fov: 'fit' },
+      // the passenger side of the car, from behind the guardrail over the valley (the wide shot loses him behind the car)
+      { id: 'p2_lookout:carN', vol: [18.4, 1.2, 25.8, 3.4], pri: 1, type: 'static', pos: [22.4, 1.75, -3.3], target: [22.0, 0.75, 3.2], fov: 'fit' },
       // the east end: the road sign and the turn-off
-      { id: 'p2_lookout:east', vol: [28.6, 1.2, 42.6, 8.6], type: 'static', pos: [23.2, 2.3, 10.4], target: [35.8, 0.9, 3.6], fov: 'fit' },
+      { id: 'p2_lookout:east', vol: [28.6, 1.2, 42.6, 8.6], type: 'static', pos: [24.2, 2.1, 9.9], target: [35.8, 1.0, 3.6], fov: 'fit' },
       // down the Hill Road turn-off into the fog (hides what's below until the cut)
       { id: 'p2_lookout:branch', vol: [34.6, -6.4, 42.0, 1.25], pri: 1, type: 'static', pos: [38.3, 1.95, 5.7], target: [38.2, -1.4, -8.5], fov: 'fit' },
       // the highway and the far verge (pans with Aidan along the road)
-      { id: 'p2_lookout:roadW', vol: [1.4, 8.6, 22, 17], type: 'pan', pos: [12, 3.1, 2.4], target: [12, 0.8, 12], fov: 50, pan: { lag: 0.3, yaw: 62, pitch: 24 } },
-      { id: 'p2_lookout:roadE', vol: [22, 8.6, 42.6, 17], type: 'pan', pos: [32, 3.1, 2.4], target: [32, 0.8, 12], fov: 50, pan: { lag: 0.3, yaw: 62, pitch: 24 } },
+      { id: 'p2_lookout:roadW', vol: [1.4, 8.6, 22, 17], type: 'pan', pos: [12, 3.1, 2.4], target: [12, 0.8, 12], fov: 40, pan: { lag: 0.3, yaw: 62, pitch: 24 } },
+      { id: 'p2_lookout:roadE', vol: [22, 8.6, 42.6, 17], type: 'pan', pos: [32, 3.1, 2.4], target: [32, 0.8, 12], fov: 40, pan: { lag: 0.3, yaw: 62, pitch: 24 } },
     ],
     build(K) {
       const dead = !!(S.flags && S.flags.p0_carDead);
@@ -623,7 +625,7 @@
       K.examine(8.6, 2.0, 1.6, 'Scenic lookout. [beat] You can\'t see past the rail.', { id: 'p2:lookoutsign' });
 
       // ---- the east end: the road sign ("SIGNAL HILL 2 — POP. 1,900" / "MOBILE COVERAGE ENDS"), the turn-off -------
-      K.prop('road_sign', 33.4, 2.1, -90, {});
+      K.prop('road_sign', 33.4, 2.1, -68, {});                                   // (turned a little toward the road and the east camera)
       K.examine(33.4, 1.8, 2.1, 'Mobile coverage ends. [beat] Great.', { id: 'p2:roadsign', r: 1.5 });
       K.prop('sign_post', 42.0, 1.6, 180, { text: 'HILL RD', text2: 'SIGNAL HILL 2' });
       // guide posts along the far verge, a power line running into the fog
@@ -652,8 +654,9 @@
     bounds: [-3, -18, 123, 16],
     entries: { top: [-0.6, 0, 90], bottom: [120.6, 0, -90], start: [-0.6, 0, 90] },
     cameras: [
-      // P-3: a very high static shot looking down the curve, Aidan tiny at the top
-      { id: 'p3_hillroad:high', vol: [-3.2, -8, 14, 12], type: 'static', pos: [-11, 12.5, -9.5], target: [15, -2.4, 3.5], fov: 'fit' },
+      // P-3: very high, looking down the curve, Aidan small at the top (§7B: a pan; a long lens so he still reads — a
+      // wide static here left him a speck under the fog sheets)
+      { id: 'p3_hillroad:high', vol: [-3.2, -8, 14, 12], type: 'pan', pos: [-10, 12, -9], target: [6, -0.6, 1.2], fov: 38, pan: { lag: 0.5, yaw: 45, pitch: 25 } },
       // low at the bend, from the valley side through the gum trunks (pans with him around the bend)
       { id: 'p3_hillroad:bend', vol: [14, -8, 44, 16], type: 'pan', pos: [29, hrY(29) + 0.9, -1.4], target: [29, hrY(29) + 0.5, 8], fov: 46, pan: { lag: 0.35, yaw: 78, pitch: 22 } },
       // from behind the fire-trail gate, looking back up the road (the empty road before he arrives)
@@ -662,8 +665,9 @@
       { id: 'p3_hillroad:rail', vol: [64, -16, 84, 8], type: 'rail', pos: [62, hrY(62) + 2.3, -8], fov: 50, rail: { a: [61.4, hrY(61.4) + 2.3, -8.06], b: [82.3, hrY(82.3) + 2.3, -14.15], look: [0, 0.9, 0], lag: 0.35 } },
       // the letterbox in the foreground, the road coming down past it
       { id: 'p3_hillroad:letterbox', vol: [84, -16, 92.2, 8], type: 'pan', pos: [...(() => { const [x, z] = hrPt(95.6, HR.bank - 0.35); return [x, hrY(x) + 1.45, z]; })()], target: [86, hrY(86) + 0.7, hrZ(86)], fov: 44, pan: { lag: 0.3, yaw: 70, pitch: 55 } },
-      // the bottom: down toward the one light at the bus shelter
-      { id: 'p3_hillroad:bottom', vol: [92.2, -12, 123.2, 8], type: 'static', pos: [86.6, hrY(87) + 4.2, -9.9], target: [110, hrY(110), hrZ(110)], fov: 'fit' },
+      // the bottom: a rail out over the valley, looking a little ahead of him — down toward the one light at the bus
+      // shelter (a static shot here lost him in the fog at the far end of a 30 m volume)
+      { id: 'p3_hillroad:bottom', vol: [92.2, -12, 123.2, 8], type: 'rail', pos: [92.6, hrY(92.6) + 2.4, -15.1], fov: 50, rail: { a: [92.6, hrY(92.6) + 2.4, -15.1], b: [123, hrY(123) + 2.4, -8.2], look: [2.2, 0.9, 0], lag: 0.35 } },
     ],
     build(K) {
       const bags = Bags();
@@ -766,8 +770,11 @@
       const tree = (x, d, dy, kind = 'gum_tree', o = {}) => { const [tx0, tz0] = hrPt(x, d); K.prop(kind, tx0, tz0, (x * 37) % 360, { y: hrY(tx0) + dy, ...o }); };
       for (const [x, d] of [[6, 9], [15, 11], [27, 8.5], [37, 10], [47, 9], [55, 11.5], [67, 9], [74, 12], [81, 8.8], [97, 9.5], [106, 11], [114, 8.6]]) tree(x, d, bankY.top(x) * 0.8 + 0.2);
       tree(24.5, 5.8, 0.0); tree(33.8, 6.0, 0.0); tree(29.2, 6.4, 0.0, 'gum_tree_small');
-      for (const [x, d] of [[10, -8], [42, -8.2], [70, -8.5], [86, -7.8], [101, -9], [112, -8]]) tree(x, d, -7.5, 'gum_tree', { h: 12 });
-      tree(25.0, -6.2, -2.2, 'gum_tree', { h: 15 }); tree(33.2, -6.6, -2.4, 'gum_tree', { h: 16 });
+      // (the ones below the rail cameras' paths — 64–123 m, 8 m out over the valley — stand further down the slope)
+      tree(42, -8.2, -7.5, 'gum_tree', { h: 12 });
+      for (const [x, d, y] of [[70, -15.5, -14.0], [86, -15.5, -14.0], [101, -16, -14.4], [112, -15.5, -14.0]]) tree(x, d, y, 'gum_tree', { h: 17 });
+      // (both trunks stand a little further down the slope: closer in, they hid him from the bend camera)
+      tree(25.0, -9.2, -6.1, 'gum_tree', { h: 19 }); tree(33.2, -9.4, -6.3, 'gum_tree', { h: 19 });
       // shrubs and rocks along the bank toe
       for (let x = 3; x < 120; x += 6.5) { if (Math.abs(x - 60.6) < 3 || Math.abs(x - 88.6) < 3) continue; const [sx0, sz0] = hrPt(x, HR.bank + 0.55); K.prop('shrub', sx0, sz0, 0, { y: hrY(sx0) + 0.1, w: 1.1 + ((x * 7) % 5) * 0.12, h: 0.9 + ((x * 3) % 4) * 0.15, dead: ((x * 13) % 7) < 2, collide: false }); }
       for (let x = 6; x < 120; x += 11) { if (Math.abs(x - 60.6) < 3 || Math.abs(x - 88.6) < 3) continue; const [rx, rz] = hrPt(x, HR.bank + 1.4); K.sphere(rx, hrY(rx) + 1.0 + (x % 3) * 0.3, rz, 0.5, { tex: 'concrete', color: '#8a8272' }, { scale: [1.5, 0.7, 1.1] }); }
@@ -807,7 +814,8 @@
       const cz = hrZ(60), cy = hrY(60);
       let dx = 60 - a.x, dz = cz - a.z; const dd = Math.hypot(dx, dz) || 1; dx /= dd; dz /= dd;
       await A.turn([60, cz], 0.5);
-      G.cam({ pos: [a.x - dx * 2.3 + dz * 0.95, a.y + 1.2, a.z - dz * 2.3 - dx * 0.95], target: [60, cy + 1.0, cz + 0.5], fov: 36, to: { pos: [a.x - dx * 2.0 + dz * 0.9, a.y + 1.2, a.z - dz * 2.0 - dx * 0.9], fov: 31 }, dur: 11 });
+      // over his shoulder (head in frame), the crossing far ahead down the road
+      G.cam({ pos: [a.x - dx * 2.7 + dz * 1.15, a.y + 1.95, a.z - dz * 2.7 - dx * 1.15], target: [60, cy + 0.9, cz + 0.5], fov: 34, to: { pos: [a.x - dx * 2.4 + dz * 1.1, a.y + 1.95, a.z - dz * 2.4 - dx * 1.1], fov: 29 }, dur: 11 });
       // the path: out of the track on the bank, across the road, through the gap by the gate, down into the white
       const pts = [[61.2, HR.bank + 3.2, 1.25], [60.9, HR.bank + 0.4, 0.05], [60.3, 0, 0.02], [59.9, HR.rail - 0.1, 0.0], [59.6, HR.rail - 2.2, -1.2], [59.2, HR.rail - 4.4, -2.8]]
         .map(([x, d, dy]) => { const [px, pz] = hrPt(x, d); return [px, hrY(px) + dy, pz]; });
@@ -863,7 +871,8 @@
       // coming down out of the fog from Hill Road (the empty clearing first, the figure in the shelter at the frame edge)
       { id: 'p4_busshelter:entry', vol: [-1.6, 3.5, 3.4, 9.9], type: 'static', pos: [8.6, 1.7, 8.2], target: [0.2, 1.0, 5.6], fov: 'fit' },
       // low behind Aidan, facing the shelter
-      { id: 'p4_busshelter:low', vol: [3.4, 3.5, 9.4, 9.9], type: 'static', pos: [7.4, 0.7, 13.6], target: [4.6, 1.2, 2.6], fov: 'fit' },
+      // (just in front of the drop's fog curtain, high enough to look over the barrier boards)
+      { id: 'p4_busshelter:low', vol: [3.4, 3.5, 9.4, 9.9], type: 'static', pos: [7.6, 1.45, 11.9], target: [4.4, 0.95, 2.6], fov: 'fit' },
       // high, from the streetlight, looking down on the shelter and the footpath
       { id: 'p4_busshelter:high', vol: [-1.6, 0.25, 6.2, 3.5], type: 'static', pos: [9.6, 6.3, 6.6], target: [3.0, 0.3, 1.6], fov: 'fit' },
       // into the shelter from the road (under its roof: the figure reading the timetable, the bench, the fight)
@@ -904,7 +913,9 @@
       K.drop(-1.6, 9.9, 12.5, 12.2, { side: 'n', msg: 'The road ends here.' });
       K.examine(3.6, 1.2, 9.35, ['ROAD CLOSED — WORKS IN PROGRESS. [beat] There\'s nothing left to work on.', 'The road just stops. Like someone forgot the rest of it.'], { id: 'p4:drop', r: 1.6 });
       // the edges: the paling fence behind the footpath, the wire fence past the verge, scrub, fog
-      for (let x = -1; x < 6.4; x += 3) K.prop('fence', x + 1.5, -1.6, 180, { variant: 'paling', len: 3 });
+      // (the paling fence stops at the Relay Street footpath, then turns north along it)
+      for (const [x, l] of [[0, 3.2], [3.2, 3.2], [5.6, 1.6]]) K.prop('fence', x, -1.6, 180, { variant: 'paling', len: l });
+      for (const z of [-3.1, -6.1]) K.prop('fence', 6.3, z, -90, { variant: 'paling', len: 3 });
       K.box(2.4, 0, -0.68, 8.0, 0.02, 1.85, { tex: 'grass', color: '#6c745f' }, { shadow: false });
       K.dress('leaves', [-1.4, -1.4, 6.2, 0.1], 18, { seed: 41 });
       K.prop('shrub', 0.6, -0.8, 0, { w: 1.4, h: 1.2, collide: false }); K.prop('shrub', 5.8, -1.0, 0, { w: 1.1, h: 1.0, dead: true, collide: false });
@@ -993,7 +1004,7 @@
 
   async function P0_toRelay(G) {
     if (S.chapter !== 0) return;
-    try { if (G.phone && G.phone.done) G.phone.done('p0_town'); } catch (e) { /* no phone */ }
+    // (the town note stays open: he hasn't got to her place yet — Chapter 1's chapter-select state agrees)
     await G.startChapter(1);
   }
 
@@ -1083,7 +1094,8 @@
     await G.wait(4.4);
 
     // ---- 4. close on his face, lit blue by the screen (through the fogged windscreen) ----------------------------------
-    if (A.raw) { A.raw.eyes('down'); A.raw.expr('tired'); A.raw.setPhoneLight(0.4); }
+    if (A.raw) { A.raw.eyes('down'); A.raw.expr('tired'); A.raw.setPhoneLight(0.18); }
+    { const fl = G.light('p1:face'); if (fl && fl.set) fl.set({ color: '#4a74ff', intensity: 1.35 }); }
     G.bars('noservice');
     if (ph) ph.display({ title: '', lines: [], bars: 'noservice' });
     G.cam({ pos: [1.3, 1.34, 0.36], target: [-0.1, 1.17, 0.37], fov: 30, to: { pos: [1.26, 1.33, 0.36], target: [-0.1, 1.17, 0.37], fov: 25 }, dur: 10 });
@@ -1181,6 +1193,24 @@
     await G.fade(0, 1.6);
   }, { letterbox: true, skippable: true });
 
+  // P-4's low camera behind Aidan (the figure in the background): the ideal spot first, then swinging around him until
+  // both he and the figure are in clear sight — never through the shelter's ad panel or glass, a fence, or the drop
+  function P0_revealCam(a, ex, ez) {
+    let dx = ex - a.x, dz = ez - a.z; const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
+    const side = d < 4.5 ? 0.95 : 0.55;
+    const sight = { minH: 0.7, ignore: (c) => !!c.enemy };
+    const ok = (x, z) => x > -1.2 && x < 14.1 && z > -7.2 && z < 9.0 && World.pointFree(x, z, 0.2)
+      && World.los(x, z, ex, ez, sight) && World.los(x, z, a.x, a.z, sight);
+    const ox = -dx, oz = -dz;                                            // behind him, then a little to his side
+    for (const back of [1.7, 2.3, 1.3]) for (const deg of [0, 25, -25, 50, -50, 80, -80]) {
+      const r = deg * D2R, c = Math.cos(r), sn = Math.sin(r);
+      const px = ox * back + dz * side, pz = oz * back - dx * side;
+      const x = a.x + px * c + pz * sn, z = a.z - px * sn + pz * c;
+      if (ok(x, z)) return [x, z];
+    }
+    return [a.x + ox * 1.7 + dz * side, a.z + oz * 1.7 - dx * side];
+  }
+
   // =================================================================================================================
   // IN-ENGINE P-4: the figure in the shelter turns. Bars climb to 2 with the EFTPOS beep; low behind Aidan.
   // =================================================================================================================
@@ -1197,9 +1227,8 @@
       if (A.pos.x > 11.4) await A.walkTo(11.1, clamp(A.pos.z, 4.6, 6.2), { speed: 1.1 });
       await A.turn([ex, ez], 0.7);
       const a = A.pos;
-      let dx = ex - a.x, dz = ez - a.z; const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
-      const side = d < 4.5 ? 0.95 : 0.55;
-      G.cam({ pos: [a.x - dx * 1.7 + dz * side, a.y + 0.5, a.z - dz * 1.7 - dx * side], target: [ex, ey + 1.0, ez], fov: 40, to: { fov: 34 }, dur: 5 });
+      const [cx, cz] = P0_revealCam(a, ex, ez), d = Math.hypot(ex - a.x, ez - a.z);
+      G.cam({ pos: [cx, a.y + 0.5, cz], target: [ex, ey + 1.0, ez], fov: Math.min(40, 14 + d * 2.4), to: { fov: Math.min(34, 11 + d * 2) }, dur: 5 });
       try { if (Player.setTorch) Player.setTorch(true); } catch (err) { /* no torch */ }
       if (!e.aware) {
         if (e.data) e.data.spoke = true;                 // this scene says its line itself

@@ -23,11 +23,15 @@
 //   skippable scene begin() plays (SH.newGame({skipIntro:true}) starts at the Prologue gameplay).
 // Endings: Game.endingFor(S) is spec §4 exactly (Yes first: playthrough ≥ 2 and all 12 Ollie stickers in META.stickers ∪
 //   S.stickers). Game.ending(name, {parent}) plays the ending's cutscenes that content registered (skipping any that
-//   don't exist yet): connected E-C1 (unless Ch 8 already played it) → E-C2 → credits → fate cards → E-C3 (post-credits)
-//   → results; coverage E-OC0 (unless played) → E-OC → credits → fates → results; tomorrow E-FT0 (unless played or the
-//   deal was accepted) → E-FT → credits → results; yes E-YES → credits (hold music) → results. Results are recorded
-//   (META.endingsSeen / results / completed → EXTRA and New Game+ unlock), then the title.
+//   don't exist yet): connected E-C1 (unless Ch 8 already played it) → E-C2 → credits (the Nan motif) → E-C3
+//   (post-credits "Ask First") → fate cards → results; coverage E-OC0 (unless played) → E-OC → credits (wind and static)
+//   → fates → results; tomorrow E-FT0 (unless played or the deal was accepted) → E-FT → credits → results (no fates);
+//   yes E-YES → credits (the hold music, a quicker roll) → results. Fate-card texts come from DIALOGUE.fates
+//   ([{flag, saved, lost}], data/19_endings.js) when defined, else Menus' own table. Results are recorded
+//   (META.endingsSeen / results / completed → EXTRA and New Game+ unlock); Aidan's body is put back as a new game
+//   expects it (posture, the phone in his hand, nothing in the other), then the title.
 // Fog culling: Rig actors beyond the fog's cutoff (≈ 2.45 / density m) are skipped by the renderer (render layer 1).
+// Debug jumps (Game.debugRoom = SH.goto) in play cancel a transition in flight and abort running blocking scripts.
 // CONTRACT+: Game.fps, Game.culled, Game.manual(on) (SH.advance), Game.autosave(), Game.goTitle(), Game.results(name) (the §2A results
 //   record + stars without showing it), Game.rank(stats), Game.stickerCount(S), Game.debugStart(n, o),
 //   Game.debugRoom(room, entry), Game.wait(sec) (real-time Promise stepped by the loop), Game.flow (current flow name).
@@ -37,7 +41,7 @@ const Game = (() => {
     connected: { pre: ['E-C1'], main: ['E-C2'], post: ['E-C3'], fates: true, name: 'CONNECTED' },
     coverage: { pre: ['E-OC0'], main: ['E-OC'], post: [], fates: true, name: 'OUT OF COVERAGE' },
     tomorrow: { pre: ['E-FT0'], main: ['E-FT'], post: [], fates: false, name: 'FOLLOW UP TOMORROW' },
-    yes: { pre: [], main: ['E-YES'], post: [], fates: false, name: 'YES' },
+    yes: { pre: [], main: ['E-YES'], post: [], fates: false, name: 'YES', creditSpeed: 6.2 },
   };
   const ATTRACT_ROOMS = ['c1_relay', 'c2_crescent', 'c3_hall', 'c5_atrium'];
   const errors = () => (window.SH && Array.isArray(window.SH.errors) ? window.SH.errors : []);
@@ -381,6 +385,9 @@ const Game = (() => {
   }
   // tear the running game down to a black screen (scripts, menus, room, stage, enemies, sounds, post, player)
   async function teardown(o = {}) {
+    // a room transition still running from the flow being replaced (the Prologue's P-1 moving between its sets when
+    // a chapter select or a load comes in) must never finish later and land Aidan back in its room
+    safe('World.cancelTransition', () => World.cancelTransition());
     safe('Script.abortAll', () => Script.abortAll(o.reason || 'reset'));
     if (Menus.isOpen()) { try { await Menus.close(null); } catch (e) { console.error(e); } }
     safe('UI.clear', () => { UI.clear({ letterbox: true }); UI.showHud(true); });
@@ -616,9 +623,9 @@ const Game = (() => {
     showPlayer(false);
     if (!live()) return;
     mode = 'credits';
-    await Menus.open('credits', { ending: name });
+    await Menus.open('credits', E.creditSpeed ? { ending: name, speed: E.creditSpeed } : { ending: name });
     if (!live()) return;
-    if (E.fates) { mode = 'fates'; await Menus.open('fates'); if (!live()) return; }
+    // the post-credits scene (Connected: "Ask First"), then the fate cards on black
     if (E.post.length) {
       mode = 'ending';
       for (const id of E.post) { if (!live()) return; if (CUTSCENES[id]) { showPlayer(true); await playCs(id, {}); } }
@@ -626,14 +633,32 @@ const Game = (() => {
       await UI.fade(1, 1.2);
       safe('Script.abortAll', () => Script.abortAll('ending'));
       safe('World.unload', () => World.unload());
+      safe('Snd', () => { Snd.stopLoops(0.5); Snd.ambient('none', 1.2); });
+      safe('Render', () => { Render.resetPost(); Render.party(false); });
       showPlayer(false);
     }
+    if (E.fates) {
+      mode = 'fates';
+      const cards = safe('fates', () => fateCards(S));
+      await Menus.open('fates', cards && cards.length ? { cards } : {});
+      if (!live()) return;
+    }
+    safe('Player.restore', restoreAidan);
     mode = 'results';
     await Menus.open('results', { ending: name, record: true });
     if (!live()) return;
     flow = null;
     await goTitle();
   }
+  // fate-card texts from DIALOGUE.fates ([{flag, saved, lost}]) when content defines them (null → Menus' own table)
+  function fateCards(s = S) {
+    const list = typeof DIALOGUE !== 'undefined' && Array.isArray(DIALOGUE.fates) ? DIALOGUE.fates : null;
+    if (!list || !list.length) return null;
+    return list.map((f) => (f && s && s.flags && s.flags[f.flag] ? f.saved : f && f.lost) || '').filter(Boolean);
+  }
+  // after an ending: Aidan's body as a new game expects it (the endings straighten him up, take the phone out of his
+  // hand for the box and the pendant, give him things to hold) — the player's actor outlives the playthrough
+  function restoreAidan() { Player.restoreBody(); }
   // the §2A results record (+ stars) without showing it
   function results(name = endingFor(S)) {
     try { return Menus.results({ ending: name }); } catch (e) {
@@ -678,6 +703,10 @@ const Game = (() => {
   async function debugRoom(room, entry = null) {
     if (!ROOMS[room]) { console.warn(`[Game] no room "${room}"`); return false; }
     if (mode === 'play' && World.room && !flow) {
+      // a debug jump wins over whatever was moving Aidan: a transition in flight and a running cutscene / blocking
+      // beat (the Prologue's P-1 still changing sets after SH.newGame) would otherwise refuse or undo it
+      safe('World.cancelTransition', () => { if (World.transitioning) World.cancelTransition(); });
+      safe('Script.abort', () => { for (const c of Script.list()) if (c.blocking && !c.queued) Script.abort(c.name, 'debug'); });
       safe('Cam.release', () => Cam.release());
       await World.goto(room, entry, { sound: 'none', fade: true });
       return World.room;

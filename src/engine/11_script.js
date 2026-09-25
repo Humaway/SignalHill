@@ -37,6 +37,10 @@
 //   'script'(phase, name). G extras: G.shot(spec)/G.shots([…]) (declarative cutscene shots), G.waitInput(), G.persist(),
 //   G.heal(n), G.damage(n, source, o), G.equip(id), G.menu(name, o), G.screen(content, o), G.stamp(text, o),
 //   G.phone (Phone), G.enemies (Enemies), G.ctx, G.name, G.world (World), A.say(text, o), A.talk(s), A.yaw, A.id.
+// CONTRACT+ (maintenance): G.finally(fn(how)), G.addLight(kind, o) (freed at the end), G.actor(enemy | enemy id),
+//   G.doc(id, {page, highlight}), G.cam({far}); a G.boss ends the skip of the scene that awaited it; skipping scripts
+//   that only wait yield a frame every SPIN_MAX instant waits; actor promises never report Script.ABORT; o.dur of
+//   G.say is the whole line's time; A.hold('L', prop) on Aidan overrides the equipped weapon until the scene ends.
 const Script = (() => {
   const ABORT = Object.freeze({ abort: true, toString() { return 'Script.ABORT'; } });
   const D2R = Math.PI / 180;
@@ -86,6 +90,8 @@ const Script = (() => {
       this.children = new Set(); this.pending = new Set();
       this.lockHeld = false; this.lb = false; this.suspended = 0; this.inGoto = 0;
       this.loops = new Set();          // looping sound handles started through G.sfx (stopped at the end)
+      this.lights = new Set();         // G.addLight pool lights (freed at the end)
+      this.finals = [];                // G.finally callbacks (run at the end, however the script ends)
       this.postSaved = null;           // Render.post fields this script changed (restored at the end of a cutscene)
       this.music = false; this.saying = false; this.holding = false; this.choosing = false;
       this.roomBound = opts.room ?? opts.roomBound ?? (!this.blocking && !opts.persist && (!!opts.id || !!opts.bg));
@@ -113,9 +119,19 @@ const Script = (() => {
     waits.splice(i, 1);
     if (err !== undefined) w.reject(err); else w.resolve(v);
   }
+  // A skipping script resolves its waits at once. A loop that only waits (a G.bg child that inherited the skip:
+  // `for (;;) await G.wait(0.45)`) would then spin as microtasks and freeze the page, so after SPIN_MAX instant
+  // resolutions in one frame a skipping script yields a frame (a normal skip is untouched: it runs far fewer).
+  const SPIN_MAX = 24;
+  function instant(ctx, v) {
+    if (!ctx) return Promise.resolve(v);
+    if (ctx.spinFrame !== frameNo) { ctx.spinFrame = frameNo; ctx.spinN = 0; }
+    if (++ctx.spinN > SPIN_MAX && !ctx.aborted) return quiet(addWait(ctx, { kind: 'frame', frame: frameNo }).then(() => v));
+    return Promise.resolve(v);
+  }
   function waitTime(ctx, s) {
     chk(ctx);
-    if (ctx && ctx.skipping) return Promise.resolve();
+    if (ctx && ctx.skipping) return instant(ctx);
     if (!(s > 0)) return Promise.resolve();
     return addWait(ctx, { kind: 'time', until: clock + s });
   }
@@ -132,7 +148,7 @@ const Script = (() => {
     return addWait(ctx, { kind: 'loop', fn, interactive: !!o.interactive });
   }
   function waitLine(ctx, dur, o = {}) { return addWait(ctx, { kind: 'line', until: clock + dur, shown: clock, bg: !ctx || !ctx.blocking, ...o }); }
-  function waitInput(ctx, action = 'confirm') { chk(ctx); if (ctx && ctx.skipping) return Promise.resolve(); return addWait(ctx, { kind: 'input', action }); }
+  function waitInput(ctx, action = 'confirm') { chk(ctx); if (ctx && ctx.skipping) return instant(ctx); return addWait(ctx, { kind: 'input', action }); }
   // an external promise, made abortable
   function guard(ctx, p) {
     chk(ctx);
@@ -237,6 +253,9 @@ const Script = (() => {
     }
     for (const h of ctx.loops) { try { h.stop(0.4); } catch (e) { /* gone */ } }
     ctx.loops.clear();
+    for (const h of ctx.lights) { try { h.free(); } catch (e) { /* gone */ } }
+    ctx.lights.clear();
+    for (const fn of ctx.finals.splice(0).reverse()) { try { fn(ctx.aborted ? 'aborted' : ctx.skipping ? 'skipped' : 'done'); } catch (e) { console.error(`[Script] "${ctx.name}" finally`, e); } }
     if (ctx.music && ctx.skipping) snd('stopMusic', 1);
     if (ctx.postSaved && !ctx.opts.keepPost) restorePost(ctx);
     if (camOwner === ctx) { camOwner = null; try { if (hasCam() && Cam.isScripted) Cam.release(); } catch (e) { console.error('[Script] Cam.release', e); } }
@@ -317,7 +336,9 @@ const Script = (() => {
       if (c.done || c.aborted) continue;
       if (c.suspended || !c.skippable) return null;
       let t = c;
-      for (let p = t.parent; p && p.blocking && p.skippable && !p.suspended && !p.done && !p.aborted; p = p.parent) t = p;
+      // (a parent that is already skipping is not part of this chain: a scene started after its skip — past a G.boss —
+      // is skipped on its own)
+      for (let p = t.parent; p && p.blocking && p.skippable && !p.suspended && !p.done && !p.aborted && !p.skipping; p = p.parent) t = p;
       return t;
     }
     return null;
@@ -422,13 +443,15 @@ const Script = (() => {
     const italic = o.italic ?? (phone || /\(thought\)/i.test(spk));
     const parts = parseLine(String(text));
     const talker = o.talk === false ? null : talkerFor(spk);
+    // o.dur is the reading time of the whole line (pauses excluded), shared by its [beat] parts by length
+    const textLen = parts.reduce((n, p) => n + (p.text ? p.text.length : 0), 0) || 1;
     try {
       for (const p of parts) {
         chk(ctx);
         if (ctx.skipping) continue;
         if (p.pause) { if (ctx.saying) { if (subOwner === ctx.subTok) ui('clearSubtitle', 0.25); ctx.saying = false; } await waitTime(ctx, p.pause); continue; }
         if (p.sfx) { snd('play', p.sfx[0], { ...p.sfx[1], phone: phone || undefined }); continue; }
-        const dur = o.dur > 0 ? o.dur : U.readTime(p.text);
+        const dur = o.dur > 0 ? Math.max(LINE_MIN + 0.3, o.dur * p.text.length / textLen) : U.readTime(p.text);
         ui('subtitle', p.text, { italic, phone, speaker: spk });
         ctx.saying = true; ctx.subTok = subOwner = ++subTok;
         if (talker) { try { talker.talk(Math.min(dur, 0.055 * p.text.length + 0.35)); } catch (e) { /* no mouth */ } }
@@ -438,6 +461,7 @@ const Script = (() => {
     } finally {
       if (ctx.saying) { ctx.saying = false; if (subOwner === ctx.subTok) ui('clearSubtitle', ctx.skipping ? 0 : 0.3); }
     }
+    if (ctx.skipping) await instant(ctx);
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -496,7 +520,7 @@ const Script = (() => {
       gesture: p, expr: () => self, hold: () => null, show: () => self, hide: () => self, fade: p, remove: noop, say: p, talk: () => self };
     return self;
   };
-  function mkActor(ctx, raw, id, isPlayer) {
+  function mkActor(ctx, raw, id, isPlayer, enemy = null) {
     if (!raw) return DUMMY_ACTOR(id);
     const root = raw.root;
     const setYaw = (r) => { root.rotation.y = U.wrapAngle(r); if (isPlayer && hasPlayer()) Player.yaw = root.rotation.y; };
@@ -547,6 +571,7 @@ const Script = (() => {
         if (ctx.skipping) {
           let from = root.position.clone();
           for (const tp of targets) { snap(tp, from); from = tp; }
+          await instant(ctx);
         } else {
           raw.setAnim(o.anim || (run ? 'run' : 'walk'), { blend: 0.25 });
           for (const tp of targets) {
@@ -579,7 +604,7 @@ const Script = (() => {
         if (typeof t === 'number') want = t * D2R;
         else { const p = toPos(t && t.raw ? t.raw.root.position : t); if (!p) return A; want = Math.atan2(p.x - root.position.x, p.z - root.position.z); }
         const from = root.rotation.y, diff = U.angleDiff(from, want);
-        if (ctx.skipping || !(dur > 0) || Math.abs(diff) < 0.01) { setYaw(from + diff); return A; }
+        if (ctx.skipping || !(dur > 0) || Math.abs(diff) < 0.01) { setYaw(from + diff); if (ctx.skipping) await instant(ctx); return A; }
         let k = 0;
         await waitLoop(ctx, (dt) => {
           k = Math.min(1, k + dt / dur);
@@ -595,19 +620,30 @@ const Script = (() => {
         chk(ctx);
         const tgt = o.target !== undefined ? { ...o, target: lookTarget(o.target) || toPos(o.target) } : o;
         const p = raw.gesture(name, ctx.skipping ? { ...tgt, instant: true } : tgt);
-        if (ctx.skipping) { try { raw.finishGestures && !o.hold && raw.finishGestures(); } catch (e) { /* ok */ } return A; }
+        if (ctx.skipping) { try { raw.finishGestures && !o.hold && raw.finishGestures(); } catch (e) { /* ok */ } await instant(ctx); return A; }
         await guardSkippable(ctx, p);
         return A;
       },
       expr(name) { chk(ctx); raw.expr(name); return A; },
-      hold(hand, prop, o) { chk(ctx); return raw.hold(hand, prop, o); },
+      // on Aidan a prop in the left hand wins over the equipped weapon until the scene ends (or hold('L', null))
+      hold(hand, prop, o) {
+        chk(ctx);
+        const weaponHand = isPlayer && hasPlayer() && Player.holdOverride && /^l/i.test(String(hand));
+        if (weaponHand && prop && !ctx.weaponHold) {
+          ctx.weaponHold = true; Player.holdOverride(true);
+          ctx.finals.push(() => { if (ctx.weaponHold) { ctx.weaponHold = false; Player.holdOverride(false); } });
+        }
+        const r = raw.hold(hand, prop, o);
+        if (weaponHand && !prop && ctx.weaponHold) { ctx.weaponHold = false; Player.holdOverride(false); }
+        return r;
+      },
       show() { chk(ctx); raw.visible(true); return A; },
       hide() { chk(ctx); raw.visible(false); return A; },
       async fade(a, dur = 0.8) {
         chk(ctx);
         const from = raw.opacity ?? 1;
         if (a > 0) raw.visible(true);
-        if (ctx.skipping || !(dur > 0)) { raw.setOpacity(a); return A; }
+        if (ctx.skipping || !(dur > 0)) { raw.setOpacity(a); if (ctx.skipping) await instant(ctx); return A; }
         let k = 0;
         await waitLoop(ctx, (dt) => { k = Math.min(1, k + dt / dur); raw.setOpacity(U.lerp(from, a, k)); return k >= 1; });
         return A;
@@ -615,14 +651,18 @@ const Script = (() => {
       remove() {
         chk(ctx);
         if (isPlayer) { raw.visible(false); return; }
+        if (enemy) { enemy.remove(); return; }
         root.removeFromParent();
         try { const b = hasWorld() ? World.build : null; if (b && b.npcs && b.npcs[id] === raw) delete b.npcs[id]; } catch (e) { /* no room */ }
         if (actorReg.get(id) === raw) actorReg.delete(id);
         try { raw.dispose(); } catch (e) { console.error('[Script] actor dispose', e); }
       },
-      say(text, o = {}) { return say(ctx, o.speaker || String(id).toUpperCase(), text, o); },
+      say(text, o = {}) { return quiet(say(ctx, o.speaker || String(id).toUpperCase(), text, o)); },
       talk(s = true) { raw.talk(s); return A; },
     };
+    // a scene may start walks, turns, gestures and fades without awaiting them: when the scene is aborted (a room
+    // change, death) their Script.ABORT rejection is expected — it must not surface as an unhandled rejection
+    for (const k of ['walkTo', 'turn', 'gesture', 'fade']) { const f = A[k]; A[k] = (...args) => quiet(f.apply(A, args)); }
     return A;
   }
   // gestures resolve on their own; a skip mid-gesture finishes it
@@ -634,6 +674,13 @@ const Script = (() => {
   function actorFor(ctx, id, preset, o = {}) {
     chk(ctx);
     if (id === 'aidan' || id === 'player') return mkActor(ctx, hasPlayer() ? Player.actor : null, 'aidan', true);
+    // an enemy (the object, or its spawn id when no room NPC has that name): its Rig body, driven like any actor
+    // (set e.ai = false while the scene moves it, or the enemy's own AI keeps steering it)
+    if (id && typeof id === 'object' && id.isEnemy) return id.actor ? mkActor(ctx, id.actor, id.id, false, id) : DUMMY_ACTOR(id.id);
+    if (typeof id === 'string' && !findRaw(id) && hasEnemies() && Enemies.get) {
+      const e = Enemies.get(id) || (hasWorld() && World.spawned ? World.spawned.get(id) : null);
+      if (e && e.actor) return mkActor(ctx, e.actor, id, false, e);
+    }
     let raw = findRaw(id);
     if (!raw) raw = createRaw(id, preset, o);
     const A = mkActor(ctx, raw, id, false);
@@ -730,8 +777,9 @@ const Script = (() => {
     const m = { map: spec.map ?? (rm && rm.id), floor: spec.floor ?? (rm && rm.floor) ?? 'G', t: spec.t || 'x', text: spec.text };
     let x = spec.x, y = spec.y;
     const at = spec.at || (spec.z !== undefined && spec.y === undefined ? [spec.x, spec.z] : null);
-    if (at && rm && rm.xform) {
-      const [ox, oz, sc = 1, rot = 0] = rm.xform, c = Math.cos(rot * D2R), s = Math.sin(rot * D2R);
+    const xf = at && rm && rm.xform ? (hasWorld() && World.mapXform ? World.mapXform(rm.xform, at[0], at[1]) : rm.xform) : null;
+    if (at && Array.isArray(xf)) {
+      const [ox, oz, sc = 1, rot = 0] = xf, c = Math.cos(rot * D2R), s = Math.sin(rot * D2R);
       x = ox + (at[0] * c - at[1] * s) * sc; y = oz + (at[0] * s + at[1] * c) * sc;
     }
     m.x = x ?? 0; m.y = y ?? 0;
@@ -754,9 +802,9 @@ const Script = (() => {
     }
     return first;
   }
-  async function openDocView(G, docId) {
+  async function openDocView(G, docId, o = {}) {
     const d = (typeof DOCUMENTS !== 'undefined' && DOCUMENTS[docId]) || null;
-    if (hasMenus()) { await G.menu('doc', { id: docId }); return; }
+    if (hasMenus()) { await G.menu('doc', { id: docId, page: o.page, highlight: o.highlight }); return; }
     // partial build without Menus: the text on an in-world terminal screen, E to close
     const lines = [(d && d.title) || docId, ''].concat(String((d && d.text) || '').split('\n'));
     if (d && d.hand) lines.push('', String(d.hand));
@@ -792,9 +840,23 @@ const Script = (() => {
       loop: (fn, o) => waitLoop(ctx, fn, o),
       all: (list) => guard(ctx, Promise.all(list || [])),
       waitInput: (action) => waitInput(ctx, action),
-      waitOrInput: (s) => { chk(ctx); return ctx.skipping ? Promise.resolve('skip') : waitLine(ctx, Math.max(0, +s || 0)); },
+      waitOrInput: (s) => { chk(ctx); return ctx.skipping ? instant(ctx, 'skip') : waitLine(ctx, Math.max(0, +s || 0)); },
       bg(fn, o = {}) { chk(ctx); return run(fn, { ...o, control: true, parent: ctx, bg: true, name: o.name || ctx.name + ':bg' }); },
       persist() { ctx.roomBound = false; return G; },
+      // CONTRACT+: G.finally(fn(how)) — runs when this script ends, however it ends (how: 'done'|'skipped'|'aborted'):
+      // cleanup for things the scene made outside the room (lights, loops, flags that must not stick after a skip)
+      finally(fn) { if (typeof fn === 'function') ctx.finals.push(fn); return G; },
+      // CONTRACT+: G.addLight(kind 'point'|'spot', {color, intensity, distance, decay, angle, penumbra, pos, target, pin,
+      // prio}) → a Render pool light owned by this script (freed automatically when it ends — skipped or aborted too)
+      addLight(kind = 'point', o = {}) {
+        chk(ctx);
+        if (typeof Render === 'undefined' || !Render.allocLight) return null;
+        const h = Render.allocLight(kind, { pin: true, ...o });
+        ctx.lights.add(h);
+        const free = h.free;
+        h.free = () => { ctx.lights.delete(h); free(); };
+        return h;
+      },
       async cutscene(id, o = {}) {
         chk(ctx);
         const cs = typeof CUTSCENES !== 'undefined' ? CUTSCENES[id] : null;
@@ -818,12 +880,12 @@ const Script = (() => {
         if (ctx.skipping) Cam.finish();
         return guard(ctx, p);
       },
-      camDone() { chk(ctx); if (!hasCam()) return Promise.resolve(); if (ctx.skipping) { Cam.finish(); return Promise.resolve(); } return waitUntil(ctx, () => !Cam.busy || (ctx.skipping && (Cam.finish(), true))); },
+      camDone() { chk(ctx); if (!hasCam()) return Promise.resolve(); if (ctx.skipping) { Cam.finish(); return instant(ctx); } return waitUntil(ctx, () => !Cam.busy || (ctx.skipping && (Cam.finish(), true))); },
       camRelease() { chk(ctx); if (hasCam()) Cam.release(); if (camOwner === ctx) camOwner = null; },
       shake(a = 0.3, dur = 0.4) { chk(ctx); if (!ctx.skipping && hasCam()) Cam.shake(a, dur); },
-      async card(text, o = {}) { chk(ctx); if (ctx.skipping) { ui('fade', 1, 0); return; } await guard(ctx, Promise.resolve(ui('card', text, o))); },
-      async title(text, o = {}) { chk(ctx); if (ctx.skipping) return; await guard(ctx, Promise.resolve(ui('titleText', text, o))); },
-      async textOnBlack(text, dur) { chk(ctx); if (ctx.skipping) { ui('fade', 1, 0); return; } await guard(ctx, Promise.resolve(ui('textOnBlack', text, dur))); },
+      async card(text, o = {}) { chk(ctx); if (ctx.skipping) { ui('fade', 1, 0); await instant(ctx); return; } await guard(ctx, Promise.resolve(ui('card', text, o))); },
+      async title(text, o = {}) { chk(ctx); if (ctx.skipping) { await instant(ctx); return; } await guard(ctx, Promise.resolve(ui('titleText', text, o))); },
+      async textOnBlack(text, dur) { chk(ctx); if (ctx.skipping) { ui('fade', 1, 0); await instant(ctx); return; } await guard(ctx, Promise.resolve(ui('textOnBlack', text, dur))); },
       post(spec, o) { return post(ctx, spec, o); },
       hud(on = true) { chk(ctx); ui('showHud', !!on); },
       screen(content, o) { chk(ctx); return ui('screen', content, o); },
@@ -871,7 +933,8 @@ const Script = (() => {
       count: (id) => invCount(id),
       equip(id) { chk(ctx); if (!id || invCount(id) > 0) S.equipped = id || null; return S.equipped; },
       note(text, o) { chk(ctx); return hasPhone() ? Phone.note(text, o) : (S.notes.push({ text, done: false }), S.notes[S.notes.length - 1]); },
-      async doc(docId, o = {}) { chk(ctx); return builtins.doc(G, { id: o.id || 'script:' + docId, docId, open: o.open ?? true }); },
+      // CONTRACT+ o.page (0-based) / o.highlight ([strings | RegExps]): open at that page with those lines marked
+      async doc(docId, o = {}) { chk(ctx); return builtins.doc(G, { id: o.id || 'script:' + docId, docId, open: o.open ?? true, page: o.page, highlight: o.highlight }); },
       once: (id) => once(id),
       mapMark(id, spec) { chk(ctx); return mapMark(id, spec); },
       stat(name, n = 1) { chk(ctx); return stat(name, n); },
@@ -964,7 +1027,12 @@ const Script = (() => {
           return r === ABORT ? undefined : r;
         } finally {
           ctx.suspended = Math.max(0, ctx.suspended - 1);
-          if (!ctx.aborted) { if (hadLb) setLetterbox(ctx, true); if (hadLock) setLock(ctx, true); }
+          if (!ctx.aborted) {
+            if (hadLb) setLetterbox(ctx, true); if (hadLock) setLock(ctx, true);
+            // a skip made before the fight covered the scene up to the fight: what follows it (another cutscene the
+            // scene plays next) is new to the player — the scene and the chain it belongs to stop skipping
+            for (let c = ctx; c && c.skipping; c = c.parent) c.skipping = false;
+          }
           refreshSkippable();
         }
       },
@@ -1136,7 +1204,7 @@ const Script = (() => {
         return first;
       }
       if (first) { S.docs[docId] = { read: false }; stat('memos'); Bus.emit('doc', docId); }
-      await openDocView(G, docId);
+      await openDocView(G, docId, o);
       S.docs[docId].read = true;
       const d = (typeof DOCUMENTS !== 'undefined' && DOCUMENTS[docId]) || null;
       if (d && d.track && !S.done['doctrack:' + docId]) {

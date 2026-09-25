@@ -274,14 +274,6 @@
     f.density += (want - f.density) * Math.min(1, dt * 1.6);
   }
   const say = (G, who, line) => G.say(who, line);
-  // outdoor Outage rooms here get a faint sick-teal sky light once the swap has happened (the preset is near-black):
-  // enough to read the road and Aidan's shape; the torch still does the work. null clears it (room leave).
-  function outageAmbient(k) {
-    const want = k !== null && !!S.outage ? k : 0;
-    if (want === (C2.amb || 0)) return;
-    C2.amb = want;
-    try { if (want) Render.setAmbient('#1f6f6a', want); else Render.setAmbient(null); } catch (e) { /* render */ }
-  }
   const heart = (p) => Math.max(Math.exp(-(((p - 0.05) / 0.075) ** 2)), 0.78 * Math.exp(-(((p - 0.34) / 0.075) ** 2)));
   // the Reach tell on the phone at a fixed number of bars (2-2's insert: "the bars jump to 4 and pulse")
   function pulseBars(n) {
@@ -942,6 +934,8 @@
   defineRoom({
     id: 'c2_crescent', name: 'THE CRESCENT', area: 'HILLTOP VILLAGE', chapter: 2, outdoor: true, surface: 'bitumen', ambient: 'wind',
     fog: { density: 0.042 }, outageFog: { density: 0.05, color: '#14302d' },
+    // the outdoor Outage preset is near-black: a faint sick-teal sky light reads the road and Aidan's shape
+    outageAmbient: ['#1f6f6a', 0.7],
     surfaces: [
       { box: [-2.2, -5.2, 62.2, 0], s: 'concrete' }, { box: [8, 40, 65.2, 45.2], s: 'concrete' }, { box: [60, -2, 65.2, 45], s: 'concrete' }, { box: [-5.2, -2, 0, 52], s: 'concrete' },
       { box: [22, 25.8, 38, 32], s: 'concrete' }, { box: [54.8, -15.5, 61.2, -5], s: 'gravel' }, { box: [0, -33, 8, -5], s: 'gravel' },
@@ -1236,8 +1230,8 @@
         }
       }
     },
-    onUpdate(dt) { fogStep(dt, null); outageAmbient(0.7); },
-    onLeave() { C2.fogTo = null; C2.chaseWalls = []; outageAmbient(null); },
+    onUpdate(dt) { fogStep(dt, null); },
+    onLeave() { C2.fogTo = null; C2.chaseWalls = []; },
   });
 
   // the loop (GAMEPLAY 2-5): out through the back gate … and back in at the front gate, with more nines
@@ -2079,7 +2073,7 @@
   function endPursuitSoon() { for (const id of ['c2:luke', 'c2:flankL', 'c2:flankR']) { const e = Enemies.get(id); if (e && !e.removed) { e.ai = false; } } }
   defineRoom({
     id: 'c2_garages', name: 'THE GARAGES', area: 'HILLTOP VILLAGE', chapter: 2, outdoor: true, surface: 'concrete', ambient: 'wind',
-    fog: { density: 0.05 }, outageFog: { density: 0.055, color: '#14302d' },
+    fog: { density: 0.05 }, outageFog: { density: 0.055, color: '#14302d' }, outageAmbient: ['#1f6f6a', 0.6],
     bounds: [0, 0, 32, 6],
     entries: { crescent: [30.4, 3.2, -90], bay4: [BAYX(4), 1.25, 0], start: [30.4, 3.2, -90] },
     cameras: [
@@ -2156,8 +2150,6 @@
       K.pickup('energy_drink', 2.2, 0, 5.2, { id: 'c2_garages:energyEasy', extraOnEasy: true });
       K.dress('leaves', [1, 1, 31, 5.6], 22, { seed: 282 });
     },
-    onUpdate() { outageAmbient(0.6); },
-    onLeave() { outageAmbient(null); },
     async onEnter(G, from) {
       if (from === 'c2_crescent' && chasing()) {
         // he comes round the corner a moment after

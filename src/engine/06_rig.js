@@ -654,6 +654,20 @@ const Rig = (() => {
     pain: { brow: [0.03, -0.01, 0.9], curve: -0.45, open: 0.3, width: 1.15, teeth: 'both', lid: 0.45, lower: 0.5, cheek: 0.5 },
     shout: { brow: [-0.03, 0.01, 1], curve: -0.2, open: 1, round: true, width: 1.1, teeth: 'both', lid: -0.05, lower: 0.15, cheek: 0.3 },
   };
+  // a partial expression ('smile@0.5'): numbers and arrays lerp from neutral, flags switch at half strength
+  function blendExpr(name, k) {
+    const id = name + '@' + k;
+    if (EXPRS[id]) return id;
+    const A = EXPRS.neutral, B = EXPRS[name], out = {};
+    for (const key of new Set([...Object.keys(A), ...Object.keys(B)])) {
+      const a = A[key], b = B[key];
+      if (Array.isArray(b)) out[key] = b.map((v, i) => U.lerp((a && a[i]) || 0, v, k));
+      else if (typeof b === 'number') out[key] = U.lerp(typeof a === 'number' ? a : 0, b, k);
+      else out[key] = k >= 0.5 ? b : a;
+    }
+    EXPRS[id] = out;
+    return id;
+  }
   function paintFace(ctx, S, F, st) {
     const E = EXPRS[st.expr] || EXPRS.neutral;
     const X = (x) => FU(x) * S, Y = (y) => (1 - FV(y)) * S, LX = (d) => (d / 0.72) * S, LY = (d) => (d / 1.06) * S;
@@ -1516,6 +1530,10 @@ const Rig = (() => {
         const g = new THREE.Group(); g.name = 'eye' + s;
         g.position.set(sx * EYE.x, EYE.y, headZ(EYE.x, EYE.y, false) - 0.041);
         hs.add(g); this.eyeAnchors[s] = g;
+        // CONTRACT+ actor.eyeFront.{L,R}: points on the eye surface, just in front of the face (eyeAnchors are the
+        // eyeballs' pivots inside the head — a sprite parented there is hidden): eye glints, flares
+        const f = new THREE.Object3D(); f.name = 'eyeFront' + s; f.position.z = 0.056; g.add(f);
+        (this.eyeFront = this.eyeFront || {})[s] = f;
         if (eyeMeshes) {
           const ball = this._mesh(g, eyeGeo(), eyeMat, { s: 1, shadow: false, name: 'eyeball' });
           ball.rotation.order = 'YXZ';
@@ -2348,7 +2366,9 @@ const Rig = (() => {
     phone: (T) => AP([0.07, -0.19, T.chestD + 0.1], [1, -0.7, -0.5], [-0.35, 0.3, 1], [-0.15, 1, -0.45], 0.4, 0.45),
     phone_look: (T) => AP([0.04, -0.07, T.chestD + 0.16], [1, -1, -0.2], [-0.35, 0.6, 0.75], [-0.15, 0.5, -0.9], 0.42, 0.45),
     phone_up: (T) => AP([0.075, 0.17, T.chestD + 0.22], [1, -1, 0], [0, 1, 0.1], [0.05, 0.05, 1], 0.6, 0.45),
-    phone_ear: (T) => AP([0.075, 0.125, 0.03], [0.5, -1, 0.6], [-0.2, 1, 0.1], [-1, 0, 0.15], 0.6, 0.45),
+    // (the elbow out to the side and a little forward — it no longer swings in front of the face; straight out and
+    // back, [1,-1,-0.3], lifts it above the shoulder)
+    phone_ear: (T) => AP([0.075, 0.125, 0.03], [0.8, -1, 0.3], [-0.2, 1, 0.1], [-1, 0, 0.15], 0.6, 0.45),
     cup: (T) => AP([0.08, -0.15, T.chestD + 0.09], [1, -0.8, -0.3], [-0.6, 0, 0.8], [-1, 0.1, -0.2], 0.75, 0.5),
     bar: (T) => AP([0.125, -0.35, 0.035], [0.3, 0, -1], [0, -1, 0.12], [-1, 0, 0], 0.95, 0.7),
     bar_ready: (T) => AP([0.1, 0.02, T.chestD + 0.07], [1, -0.8, -0.2], [0, 0.1, 1], [-1, 0, 0], 0.95, 0.7),
@@ -2717,9 +2737,11 @@ const Rig = (() => {
       if (this.paintEyes && closed !== this.faceState.closed) { this.faceState.closed = closed; this._paintFace(); }
       return this;
     },
-    expr(name) {
+    // expr(name, {k}) — CONTRACT+ k 0..1: how strongly (blended from neutral, in quarter steps)
+    expr(name, o = {}) {
       if (!EXPRS[name]) { console.warn('[Rig] unknown expression: ' + name); return this; }
-      this.faceState.expr = name;
+      const k = o && o.k !== undefined ? Math.round(clamp(+o.k) * 4) / 4 : 1;
+      this.faceState.expr = k < 1 && name !== 'neutral' ? blendExpr(name, k) : name;
       this.faceState.tears = name === 'cry' ? true : this.faceState.tears && name === 'sad';
       this._paintFace();
       return this;
@@ -2784,6 +2806,10 @@ const Rig = (() => {
         obj = kind;
         obj.userData.kind = obj.userData.kind || 'object';
         this.anchors['grip' + hand].add(obj);
+        // CONTRACT+ o.offset [x,y,z] (m, grip space: palm centre; +Y along the fingers) and o.rot [x,y,z] (degrees):
+        // where a custom object sits in the hand (default: its own origin at the grip)
+        if (o.offset) obj.position.set(o.offset[0] || 0, o.offset[1] || 0, o.offset[2] || 0);
+        if (o.rot) obj.rotation.set((o.rot[0] || 0) * Math.PI / 180, (o.rot[1] || 0) * Math.PI / 180, (o.rot[2] || 0) * Math.PI / 180);
         if (pose === undefined) pose = 'hold';
       }
       this.held[hand] = obj;

@@ -160,4 +160,10 @@ const DIFF = {
 window.SH = window.SH || {};
 window.SH.errors = window.SH.errors || [];
 window.addEventListener('error', (e) => { window.SH.errors.push(String(e.message || e)); });
-window.addEventListener('unhandledrejection', (e) => { window.SH.errors.push('unhandled: ' + String(e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+// A script's Script.ABORT (a scene cancelled by a room change, death or a skip) is the normal way scripts end: an
+// un-awaited actor walk / G call that rejects with it is not an error.
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e.reason;
+  if (r && r.abort === true && String(r) === 'Script.ABORT') { e.preventDefault(); return; }
+  window.SH.errors.push('unhandled: ' + String(r && (r.stack || r.message) || r));
+});

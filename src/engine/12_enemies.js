@@ -76,6 +76,10 @@
 //   Having seen Aidan (within 12 s) it follows him through any door he takes (mode 'follow', 90 s), then patrols
 //   again. Level 4 (§7B): give the balcony ring's route clockwise with pause:4 on the meeting-room door nodes. The
 //   graph survives room changes; it stops on Bus 'death', 'load' and 'chapter' (the chapter restarts it if needed).
+// CONTRACT+ (maintenance): e.alert({voice}), e.scriptAI (AI during blocking scripts), def.detail / def.rig.detail
+//   ('low'), Standard def.puppet / e.puppet / e.scripted, e.clipboard / e.straighten on any Standard-bodied enemy,
+//   doors opened only on the walker's way through them (e.data.noOpen), moveToward arrival slack (1 mm) + o.ignore,
+//   freed Tethered reach their seat, unread vertical / ceiling, borrowed autoRange / interactR.
 const Enemies = (() => {
   const D2R = Math.PI / 180, TAU = Math.PI * 2, HALF = Math.PI / 2;
   const clamp = U.clamp, lerp = U.lerp;
@@ -505,6 +509,7 @@ const Enemies = (() => {
     return false;
   };
   const active = (e) => !e.removed && matchWorld(e.world, S.outage);
+  const scriptOnlyPause = () => { try { return !(hasWorld() && World.transitioning) && pOK(); } catch (e) { return false; } };
 
   function spawn(def) {
     if (!def || !def.type) { console.warn('[Enemies] spawn: missing type', def); return null; }
@@ -561,12 +566,12 @@ const Enemies = (() => {
     };
     e.stomp = () => stompEnemy(e);
     e.cutFree = () => cutFreeEnemy(e);
-    e.alert = () => { if (e.T.alert) e.T.alert(e); };
-    if (def.type === 'standard') {
-      e.clipboard = (up = false) => standardClipboard(e, up);
-      // e.straighten(k = 1, dur = 2): lifts the bent head (0 = bent 90°, 1 = upright) — 8-1 "it unfolds to its full height"
-      e.straighten = (k = 1, dur = 2) => { e.data.straight = { from: e.data.straightK || 0, to: clamp(k), t: 0, dur: Math.max(0.01, dur) }; };
-    }
+    e.alert = (o = {}) => { if (e.T.alert) e.T.alert(e, o); };
+    // e.clipboard(up) / e.straighten(k = 1, dur = 2) — the Standard's clipboard and bent head; any enemy built on the
+    // Standard's body (a custom type calling Enemies.types.standard.create) has them too (they check the data, not the
+    // type). straighten lifts the head (0 = bent 90°, 1 = upright) — 8-1 "it unfolds to its full height".
+    e.clipboard = (up = false) => standardClipboard(e, up);
+    e.straighten = (k = 1, dur = 2) => { if (e.actor && e.actor.P) e.data.straight = { from: e.data.straightK || 0, to: clamp(k), t: 0, dur: Math.max(0.01, dur) }; };
     if (def.type === 'unread') e.scatter = (origin, yaw) => unreadScatter(e, origin, yaw);
     return e;
   }
@@ -644,7 +649,8 @@ const Enemies = (() => {
   function moveToward(e, tx, tz, speed, dt, o = {}) {
     const d = Math.hypot(tx - e.pos.x, tz - e.pos.z);
     const stopAt = o.stopAt ?? 0.15;
-    if (d <= stopAt) return { moved: 0, arrived: true, blocked: false };
+    // (a millimetre of slack: the last step lands on stopAt from above, and rounding can leave it a hair outside)
+    if (d <= stopAt + 1e-3) return { moved: 0, arrived: true, blocked: false };
     let wx = tx, wz = tz;
     const N = e.data.nav || (e.data.nav = { path: null, t: 99, tx: 0, tz: 0, stuck: 0 });
     if (o.nav) {
@@ -661,30 +667,43 @@ const Enemies = (() => {
         }
       }
     }
-    if (o.opener) openDoorsAhead(e, wx, wz);
+    if (o.opener) openDoorsAhead(e, wx, wz, wx !== tx || wz !== tz ? 0.8 : (o.carry ?? 0.8));
     const wd = Math.hypot(wx - e.pos.x, wz - e.pos.z) || 1;
     const step = Math.min(speed * dt, Math.max(0, d - stopAt));
     const dx = (wx - e.pos.x) / wd * step, dz = (wz - e.pos.z) / wd * step;
-    const r = hasWorld() ? World.move(e.pos, dx, dz, e.radius, { ignore: isEnemyCol, maxStep: 0.5, maxDrop: 1.2 }) : { x: e.pos.x + dx, y: e.pos.y, z: e.pos.z + dz, blocked: false };
+    const ign = o.ignore ? (c) => isEnemyCol(c) || o.ignore(c) : isEnemyCol;
+    const r = hasWorld() ? World.move(e.pos, dx, dz, e.radius, { ignore: ign, maxStep: 0.5, maxDrop: 1.2 }) : { x: e.pos.x + dx, y: e.pos.y, z: e.pos.z + dz, blocked: false };
     const moved = Math.hypot(r.x - e.pos.x, r.z - e.pos.z);
     e.pos.set(r.x, r.y, r.z);
     if (moved < step * 0.35) N.stuck += dt; else N.stuck = Math.max(0, N.stuck - dt);
     if (o.face !== false && moved > 1e-4) e.yaw = turnToward(e.yaw, Math.atan2(dx, dz), o.turn ?? 3, dt);
-    return { moved, arrived: false, blocked: r.blocked || moved < step * 0.35 };
+    const arrived = Math.hypot(tx - e.pos.x, tz - e.pos.z) <= stopAt + 1e-3;
+    return { moved, arrived, blocked: !arrived && (r.blocked || moved < step * 0.35) };
   }
-  function openDoorsAhead(e, wx, wz) {
-    if (!hasWorld()) return;
+  // A door is opened only when the walker's way to its waypoint crosses the doorway (the leg e.pos → waypoint, carried
+  // 0.8 m on — not past a patrol stop that pauses: o.carry 0): a patrol pausing in front of a door leaves it shut.
+  // (e.data.noOpen = true: this walker never opens doors.)
+  function openDoorsAhead(e, wx, wz, carry = 0.8) {
+    if (!hasWorld() || (e.data && e.data.noOpen)) return;
     const doors = World.build.doors || {};
+    const lx = wx - e.pos.x, lz = wz - e.pos.z, ll = Math.hypot(lx, lz) || 1;
+    const ex = wx + (lx / ll) * carry, ez = wz + (lz / ll) * carry;
     for (const id of Object.keys(doors)) {
       const d = doors[id];
       if (d.to || d.open || !matchWorld(d.world, S.outage)) continue;
       const dd = Math.hypot(d.x - e.pos.x, d.z - e.pos.z);
       if (dd > 1.6) continue;
-      const ahead = Math.hypot(d.x - wx, d.z - wz) < dd + 0.8 || dd < 0.9;
-      if (!ahead) continue;
+      // the doorway: a segment across the opening (local X of the door), a little wider than the leaf
+      const c = Math.cos((d.rot || 0) * D2R), sn = Math.sin((d.rot || 0) * D2R), hw = (d.w || 0.9) / 2 + 0.25;
+      const ax = d.x - c * hw, az = d.z + sn * hw, bx = d.x + c * hw, bz = d.z - sn * hw;
+      if (!segCross(e.pos.x, e.pos.z, ex, ez, ax, az, bx, bz)) continue;
       try { World.door(id).open(); } catch (err) { /* door api */ }
       if (e.data.nav) e.data.nav.t = 99;
     }
+  }
+  function segCross(ax, az, bx, bz, cx, cz, dx, dz) {
+    const o = (px, pz, qx, qz, rx, rz) => Math.sign((qx - px) * (rz - pz) - (qz - pz) * (rx - px));
+    return o(ax, az, bx, bz, cx, cz) !== o(ax, az, bx, bz, dx, dz) && o(cx, cz, dx, dz, ax, az) !== o(cx, cz, dx, dz, bx, bz);
   }
   // footsteps by distance walked (positional; surface from the room)
   const STEPS = { tethered: { stride: 0.34, vol: 0.22 }, reach: { stride: 0.85, vol: 0.9, heavy: true }, standard: { stride: 1.05, vol: 0.55 }, borrowed: { stride: 0.72, vol: 0.5 } };
@@ -854,7 +873,7 @@ const Enemies = (() => {
   // =================================================================================================================
   // THE TETHERED (fear of mis-selling)
   // =================================================================================================================
-  let lastTethVoice = -99;
+  let lastTethVoice = -Infinity;
   const TETH = { speed: 0.6, leash: 3, notice: 5, quiet: 1.0, lashRange: 3.5, lashCd: 4, turn: 1.2 };
   const CARDI = ['#6d6456', '#7a5a3c', '#566474', '#6b4a4a', '#5a634c', '#86744f', '#4d5560', '#7c6a62'];
   const BLOUSE = ['#b8b0a0', '#c9c2b2', '#a9b0b4', '#c4b6a6', '#b2aa9c'];
@@ -1026,6 +1045,7 @@ const Enemies = (() => {
     const watching = !!(def.watching || def.variant === 'watching');
     const a = Rig.human({
       height: def.height || 1.5, build: 'frail', gender: f ? 'f' : 'm', age: 60 + Math.floor(r() * 20), seed: (seed % 997) + 1,
+      detail: def.detail || (def.rig && def.rig.detail) || undefined,                 // CONTRACT+ 'low' for distant figures
       skin, hunch: def.hunch ?? 0.62, faceMode: 'custom',
       hair: { style: f ? (r() < 0.5 ? 'bun' : 'short') : (r() < 0.5 ? 'receding' : 'short'), color: ['#a8a39a', '#8e8a84', '#c4c0b8', '#6d655c'][Math.floor(r() * 4)] },
       top: { kind: f ? 'blouse' : 'shirt', color: BLOUSE[Math.floor(r() * BLOUSE.length)] },
@@ -1128,7 +1148,9 @@ const Enemies = (() => {
     e.data.closeT = 0;
     return false;
   }
-  function tethStartTurn(e) {
+  // o.voice:true (e.alert({voice:true})) — a scripted reveal: the muffled line plays even if another Tethered spoke in
+  // the last 25 s (the throttle only thins out ambient voices)
+  function tethStartTurn(e, o = {}) {
     if (e.state !== 'idle' && e.state !== 'sit') return;
     e.aware = true;
     const wasSit = e.state === 'sit';
@@ -1137,7 +1159,7 @@ const Enemies = (() => {
     e.data.standUp = wasSit ? 1.1 : 0;
     if (wasSit) e.actor.gesture('stand_up', { to: 'idle_hunched' });
     sfx('plastic', { pos: P3(e.pos, 1.2), dur: 1.0, dens: 0.8 });
-    if (e.def.voice !== false && !e.data.spoke && clock - lastTethVoice > 25) {
+    if (e.def.voice !== false && !e.data.spoke && (o.voice === true || clock - lastTethVoice > 25)) {
       e.data.spoke = true; lastTethVoice = clock;
       const src = DIALOGUE.tethered, l0 = Array.isArray(src) ? src[0] : src;
       const line = (typeof l0 === 'string' && l0) || (l0 && l0.text) || 'I only came in to...';
@@ -1298,7 +1320,17 @@ const Enemies = (() => {
         if (!s.walking) { s.walking = true; a.setAnim('idle_hunched', { blend: 0.8 }); a.gesture('stand_up', { to: 'idle_hunched' }); s.walkT = 0; }
         s.walkT += dt;
         if (s.walkT > 1.2 && !s.seated) {
-          const m = moveToward(e, seat.pos[0], seat.pos[1], 0.45, dt, { stopAt: 0.12, turn: 2 });
+          // the last metre ignores low colliders (a bench, the shelter's seat) — it sits ON them; stuck for 3 s (or
+          // held short by anything else) it shuffles the rest of the way
+          const sd = Math.hypot(seat.pos[0] - e.pos.x, seat.pos[1] - e.pos.z);
+          const low = (c) => sd < 1.2 && (c.y || 0) + c.h < e.pos.y + 1.0;
+          const m = moveToward(e, seat.pos[0], seat.pos[1], 0.45, dt, { stopAt: 0.12, turn: 2, ignore: low });
+          s.stuckT = m.moved < 0.45 * dt * 0.35 && !m.arrived ? (s.stuckT || 0) + dt : 0;
+          if (!m.arrived && (s.stuckT > 3 || (sd < 0.6 && s.stuckT > 0.8))) {
+            const k = Math.min(1, dt * 1.5 / Math.max(0.05, sd));
+            e.pos.x += (seat.pos[0] - e.pos.x) * k; e.pos.z += (seat.pos[1] - e.pos.z) * k;
+            if (sd < 0.14) m.arrived = true;
+          }
           a.setAnim(m.arrived ? 'idle_hunched' : 'walk', { blend: 0.4 });
           if (m.arrived) {
             s.seated = true; s.sitT = 0;
@@ -1397,7 +1429,7 @@ const Enemies = (() => {
   defineType('tethered', {
     hp: 30, radius: 0.3, height: 1.35, tell: 'eftpos', downs: true, rebuildDead: true, idleAnim: 'idle_hunched',
     create: tetheredCreate, update: tetheredUpdate, post: tethPost,
-    alert(e) { if (!e.resolved && (e.state === 'idle' || e.state === 'sit')) tethStartTurn(e); },
+    alert(e, o) { if (!e.resolved && (e.state === 'idle' || e.state === 'sit')) tethStartTurn(e, o); },
     onHit(e) { if (e.data.watching) return false; if (!e.aware && !e.downed && (e.state === 'idle' || e.state === 'sit')) tethStartTurn(e); sfx('plastic', { pos: P3(e.pos, 1.1), dur: 0.35, dens: 1.2 }); return true; },
     onReact(e) { if (e.state === 'lash' || e.state === 'hold') tethLashEnd(e, true); },
     onDown(e) { tethLashEnd(e, true); e.actor.armPose('R', 'hold'); e.actor.lookAt(null); later(e, 0.85, () => { if (e.downed && !e.resolved) e.actor.setAnim('lie_side', { blend: 0.5 }); }); },
@@ -1439,6 +1471,7 @@ const Enemies = (() => {
     const tops = [{ kind: 'tee', color: '#5b5a55', sleeves: 'short' }, { kind: 'polo', color: '#3e4a5a', sleeves: 'short' }, { kind: 'tee', color: '#6a5a48', sleeves: 'short' }, { kind: 'tee', color: '#44504a', sleeves: 'short' }];
     const a = Rig.human({
       height: 1.9, build: 'heavy', gender: 'm', age: 38 + Math.floor(r() * 20), seed: (seed % 997) + 3,
+      detail: def.detail || (def.rig && def.rig.detail) || undefined,
       skin: ['#c48a6a', '#b98266', '#d09a7c', '#a87458'][Math.floor(r() * 4)],
       hair: { style: r() < 0.5 ? 'receding' : 'buzz', color: ['#3a332d', '#2a241f', '#5a4a3a'][Math.floor(r() * 3)] },
       face: { stubble: 0.8, bags: 0.9, wrinkles: 0.6, redRim: 0.9, brows: '#2a221c', browThick: 1.4 },
@@ -1794,14 +1827,20 @@ const Enemies = (() => {
     if (seen) { Player.setGaze(1); e.data.seenT = clock; e.data.lastSeen = Player.pos.clone(); if (ctl) ctl.seenT = clock; }
     return seen;
   }
+  function stepStraight(e, dt) {
+    const D = e.data, s0 = D.straight;
+    if (!s0 || !e.actor || !e.actor.P) { D.straight = null; return; }
+    s0.t += dt;
+    D.straightK = lerp(s0.from, s0.to, U.ease.inOut(clamp(s0.t / s0.dur)));
+    e.actor.P.headTilt = 90 * (1 - D.straightK);
+    if (s0.t >= s0.dur) D.straight = null;
+  }
+  // CONTRACT+ puppet: def.puppet / e.puppet = true — the Standard's body, name card, keys, form and mirror keep working
+  //   but it never thinks, walks or touches Aidan: a script drives its position and animations (a stair-bound climber).
+  //   e.scripted = true — with its AI off (e.ai = false, or during a blocking scene) it keeps whatever animation the
+  //   script set instead of dropping to idle.
   function standardUpdate(e, dt, ai) {
     const a = e.actor, D = e.data;
-    if (D.straight) {
-      const s0 = D.straight; s0.t += dt;
-      D.straightK = lerp(s0.from, s0.to, U.ease.inOut(clamp(s0.t / s0.dur)));
-      a.P.headTilt = 90 * (1 - D.straightK);
-      if (s0.t >= s0.dur) D.straight = null;
-    }
     loop(e, 'standard_keys', !D.vanished, { pos: P3(e.pos, 1.4), vol: 0.7 });
     // name card follows the story (LUKA → AIDAN)
     D.nameT = (D.nameT || 0) - dt;
@@ -1809,8 +1848,8 @@ const Enemies = (() => {
     standardForm(e, dt);
     standardMirror(e, dt);
     if (D.contact) { standardContactUpdate(e, dt); return; }
-    if (D.vanished) return;
-    if (!ai) { if (a.anim !== 'idle') a.setAnim('idle', { blend: 0.5 }); return; }
+    if (D.vanished || e.puppet || e.def.puppet) return;
+    if (!ai) { if (!e.scripted && a.anim !== 'idle') a.setAnim('idle', { blend: 0.5 }); return; }
     const seen = standardGaze(e);
     const p = pOK() ? Player.pos : null;
     const d = p ? flatDist(e.pos, p) : 99;
@@ -1840,7 +1879,7 @@ const Enemies = (() => {
       D.pauseT = 0;
     }
     if (tx === null) { if (a.anim !== 'idle') a.setAnim('idle', { blend: 0.6 }); return; }
-    const m = moveToward(e, tx, tz, STD.speed, dt, { nav: true, opener: true, stopAt: chasing ? 0.3 : 0.25, turn: 1.6 });
+    const m = moveToward(e, tx, tz, STD.speed, dt, { nav: true, opener: true, stopAt: chasing ? 0.3 : 0.25, turn: 1.6, carry: !chasing && pause > 0 ? 0 : 0.8 });
     a.setAnim(m.moved > 1e-4 ? 'walk' : 'idle', { blend: 0.4 });
     if (m.arrived && !chasing) {
       if (pause > 0) { D.pauseT = pause; D.pauseFace = faceYaw ?? null; if (Math.random() < 0.5) a.gesture('pen_click', { hand: 'L' }); }
@@ -1909,7 +1948,7 @@ const Enemies = (() => {
   });
   // e.clipboard(false): lowers the clipboard from the face (8-1 "The Mirror"); true raises it again
   function standardClipboard(e, up) {
-    const a = e.actor; if (!a || !e.data.form) return;
+    const a = e.actor; if (!a || !e.data || !e.data.form) return;
     a.hold('R', 'clipboard', { pose: up ? CLIP_FACE : 'hold', tex: e.data.form.tex });
     if (up) mountClipboard(e); else e.data.clip = a.held.R;
     e.data.clipDown = !up;
@@ -2175,7 +2214,7 @@ const Enemies = (() => {
       if (!pOK()) return;
       const d = flatDist(e.pos, Player.pos);
       if (d > 5.5) D.left = true;
-      if (e.def.auto !== false && d <= 4 && D.cool <= 0 && (D.left !== false) && los(e.pos.x, e.pos.z, Player.pos.x, Player.pos.z, { minH: 1.5, y: e.pos.y }) && Player.canControl) borrowedTalk(e);
+      if (e.def.auto !== false && d <= (e.def.autoRange ?? 4) && D.cool <= 0 && (D.left !== false) && los(e.pos.x, e.pos.z, Player.pos.x, Player.pos.z, { minH: 1.5, y: e.pos.y }) && Player.canControl) borrowedTalk(e);
       return;
     }
     if (e.state === 'ambush') return;
@@ -2253,7 +2292,7 @@ const Enemies = (() => {
   // E on the disguised Borrowed (within 3 m) opens the same conversation
   function borrowedInteractable(e) {
     if (!hasWorld() || e.data.it) return;
-    const it = { id: 'enemy:' + e.id, kind: 'npc', pos: V(), r: 2.6, when: null, world: e.world, enabled: true, hold: 0, look: true, fn: (G) => borrowedConversation(e, G), obj: e.obj, name: e.id };
+    const it = { id: 'enemy:' + e.id, kind: 'npc', pos: V(), r: e.def.interactR ?? 2.6, when: null, world: e.world, enabled: true, hold: 0, look: true, fn: (G) => borrowedConversation(e, G), obj: e.obj, name: e.id };
     World.build.interactables.push(it);
     e.data.it = it;
   }
@@ -2436,6 +2475,13 @@ const Enemies = (() => {
     for (const c of e.data.pts) {
       const d = tp.distanceTo(c);
       if (d > UNREAD.wake) continue;
+      // def.vertical (a nest above a platform / in a ladder cage, lit from below): the torch's spill wakes it — within
+      // 3 m of the lens, or within 1.2 m of the beam's axis — whatever the cone says
+      if (e.def.vertical) {
+        const along = _v5.subVectors(c, tp).dot(td);
+        const off = along > 0 ? Math.sqrt(Math.max(0, d * d - along * along)) : d;
+        if (d < 3 || off < 1.2) return true;
+      }
       const dir = _v5.subVectors(c, tp).normalize();
       if (Math.acos(clamp(dir.dot(td), -1, 1)) > UNREAD.cone * D2R) continue;
       if (los(tp.x, tp.z, c.x, c.z, { minH: 1.5 })) return true;
@@ -2549,10 +2595,14 @@ const Enemies = (() => {
       const maxV = mode === 'scatter' ? 6 : UNREAD.speed, sp = m.v.length();
       if (sp > maxV) m.v.multiplyScalar(maxV / sp);
       m.p.addScaledVector(m.v, dt);
-      // stay in the room (above the floor, below ~3.5 m over it)
+      // stay in the room (above the floor, below ~3.5 m over it — or over the nest itself, and for a def.vertical nest
+      // over Aidan too, so the swarm follows him up a ladder)
       const fy = floorY(m.p.x, m.p.z, m.home.y - 2);
+      let ceil = Math.max(fy + 3.4, m.home.y + 1.0);
+      if (e.def.vertical && p) ceil = Math.max(ceil, p.y + 2.4);
+      if (e.def.ceiling !== undefined) ceil = e.def.ceiling;
       if (m.p.y < fy + 0.15) { m.p.y = fy + 0.15; m.v.y = Math.abs(m.v.y); }
-      if (m.p.y > fy + 3.4) { m.p.y = fy + 3.4; m.v.y = -Math.abs(m.v.y); }
+      if (m.p.y > ceil) { m.p.y = ceil; m.v.y = -Math.abs(m.v.y); }
       if (sp > 0.05) { _v2.copy(m.v).normalize(); _m1.lookAt(_v2, _v3.set(0, 0, 0), UPY); _mq.setFromRotationMatrix(_m1); m.q.slerp(_mq, Math.min(1, dt * 10)); }
       m.restK = 0;
     }
@@ -2612,7 +2662,10 @@ const Enemies = (() => {
       if (e.stunT > 0) { e.stunT -= dt; if (e.stunT <= 0) { e.stunT = 0; if (e.T.onUnstun) e.T.onUnstun(e); } }
       if (e.knocked && !e.resolved) { e.knockT -= dt; if (e.knockT <= 0) { e.knocked = false; getUp(e); } }
       if (e.downed && !e.resolved) { e.downT -= dt; if (e.downT <= 0) getUp(e); }
-      const ai = e.ai !== false && !paused;
+      // CONTRACT+ e.scriptAI = true: this enemy keeps thinking while a blocking scene runs (an alert inside an in-engine
+      // beat turns it at once) — never during a room transition or once Aidan is dead
+      const ai = e.ai !== false && (!paused || (e.scriptAI === true && scriptOnlyPause()));
+      if (e.data.straight) stepStraight(e, dt);
       try { if (e.T.update) e.T.update(e, dt, ai); } catch (err) { console.error(`[Enemies] update ${e.id}`, err); }
       if (e.removed) continue;
       stepFade(e, dt);
@@ -2715,7 +2768,7 @@ const Enemies = (() => {
   Bus.on('death', () => { if (hasPlayer()) Player.lock('standard', false); Voice.clear(); standard.stop(); });
   // a loaded save or a new chapter starts clean: the chapter's own scripts restart the Standard where the story needs it
   Bus.on('load', () => standard.stop());
-  Bus.on('chapter', () => standard.stop());
+  Bus.on('chapter', () => { standard.stop(); lastTethVoice = -Infinity; });
 
   const api = {
     spawn, update, clear, get: (id) => byId.get(id) || null, byType, nearestThreat, hitTest, lockTarget, defineType,

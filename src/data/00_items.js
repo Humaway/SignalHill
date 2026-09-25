@@ -1204,15 +1204,9 @@
   }
 
   // =================================================================================================================
-  // Map ids (21_maps.js defines MAPS): resolve whatever id the maps file uses for a base name
+  // Map ids are fixed by docs/CONTENT_PLAN §3 (21_maps.js defines them): paper maps are the base name ('plaza'),
+  // receipt maps 'rmap_<base>' with kind:'receipt', of:'<base>'
   // =================================================================================================================
-  const ITM_mapId = (base, receipt) => {
-    const M0 = typeof MAPS !== 'undefined' ? MAPS : {};
-    if (!receipt) { for (const id of [base, 'map_' + base]) if (M0[id]) return id; return base; }
-    for (const [id, m] of Object.entries(M0)) if (m && m.kind === 'receipt' && (m.of === base || m.base === base || m.for === base)) return id;
-    for (const id of ['r_' + base, 'rmap_' + base, base + '_receipt', 'receipt_' + base, base + '_r']) if (M0[id]) return id;
-    return 'rmap_' + base;
-  };
 
   // =================================================================================================================
   // ITEMS
@@ -1323,7 +1317,7 @@
     model: MODELS.new_pendant });
 
   // ---- maps (the items screen's USE opens the map; picking one up sets S.maps[map]) --------------------------------------
-  const paperMap = (id, base, name, desc) => item({ id, name, cat: 'map', desc, get map() { return ITM_mapId(base, false); }, model: () => mapModel(id) });
+  const paperMap = (id, base, name, desc) => item({ id, name, cat: 'map', desc, map: base, model: () => mapModel(id) });
   paperMap('map_town', 'town', 'SIGNAL HILL VISITOR MAP', 'Signal Hill, 1994. Nobody\'s printed a new one since.');
   paperMap('map_plaza', 'plaza', 'PLAZA DIRECTORY', 'Over thirty specialty stores. Most of them were already gone.');
   paperMap('map_village', 'village', 'HILLTOP VILLAGE SITE PLAN', 'A photocopy off the office wall. Twelve units round the loop.');
@@ -1333,7 +1327,7 @@
   paperMap('map_office_upper', 'office_upper', 'FIRE STAIRS PLAN, LEVELS 5 AND 6', 'Levels 5 and 6. Half of it says "under refurbishment".');
   paperMap('map_hospital', 'hospital', 'HOSPITAL DIRECTORY', 'Ward 3 — Orthopaedics.');
   paperMap('map_mast', 'mast', 'MAST COMPOUND DIAGRAM', 'The compound, the huts, the ladder. Cable-tied to the gate.');
-  const receiptMap = (id, base, desc) => item({ id, name: 'RECEIPT MAP', cat: 'map', desc, get map() { return ITM_mapId(base, true); }, model: () => receiptModel(id) });
+  const receiptMap = (id, base, desc) => item({ id, name: 'RECEIPT MAP', cat: 'map', desc, map: 'rmap_' + base, model: () => receiptModel(id) });
   receiptMap('rmap_plaza', 'plaza', 'The Plaza, printed on a receipt. It won\'t stay flat.');
   receiptMap('rmap_village', 'village', 'The village on a receipt. The loop doesn\'t close where it should.');
   receiptMap('rmap_exchange', 'exchange', 'The exchange on a receipt. The ink\'s already fading.');

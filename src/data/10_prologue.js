@@ -980,12 +980,8 @@
       S.done['p4:outcome'] = how;
       if (how === 'freed') {
         const e = G.enemy(id);
-        // the shelter bench's own low collider covers the seat: step it aside while the figure walks over and sits
-        const [qx, qz] = TETH.seat;
-        const low = ((World.build && World.build.colliders) || []).filter((c) => !c.enemy && !c.blocker && !c.soft && c.enabled !== false && (c.h || 0) < 1 && qx >= c.x0 - 0.35 && qx <= c.x1 + 0.35 && qz >= c.z0 - 0.35 && qz <= c.z1 + 0.35);
-        for (const c of low) c.enabled = false;
-        try { await G.until(() => !e || e.removed || !e.data || !e.data.freeSeq, { timeout: 16 }); }
-        finally { for (const c of low) c.enabled = true; }
+        // while the figure walks over to the shelter bench and sits (the engine takes it past the bench's low collider)
+        await G.until(() => !e || e.removed || !e.data || !e.data.freeSeq, { timeout: 16 });
         await G.wait(0.5);
         await G.say('AIDAN', '...There. [beat] There you go.');
       } else {

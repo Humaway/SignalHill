@@ -38,7 +38,11 @@
 //   K.prop(…,{static, interact, examineId}); K.stairs(…,{rail, nosing, solid:false, bottom}); K.wall openings
 //   {glass, frame, frameMat} + opts {grime, skirting, collideH}; K.floor {skirt, base}.
 //   Kit.defineProp(kind, builder, {collide, h, static}); Kit.preload(onProgress) → Promise (boot); Kit.clock([h,m]);
-//   Kit.itemModel(item); Kit.floorAt(floors,x,z,outage); Kit.collide(collider,x,z,r) → push-out {x,z}|null;
+//   Kit.itemModel(item); Kit.floorAt(floors,x,z,outage,refY?) (refY: stacked floors); Kit.floorLayers(floors,x,z,outage);
+//   Kit.collide(collider,x,z,r) → push-out {x,z}|null;
+//   (maintenance CONTRACT+: K.walkable / K.floor {visible:false}, K.prop pitch/tilt, K.light prio/pin/haloColor/haloFog,
+//   y bands on K.exit/K.trigger/interactables, interactable prio / crawl, K.plane double = two faces, K.door hinge
+//   'L'|'R' / swing 'front'|'back', both:false walls have no top cap, the light-cluster warning counts real lights.)
 //   Kit.inBox(box,x,z); Kit.matchWorld(w,outage); Kit.mergeGeometries(items); Kit.mat(spec); Kit.last; Kit.tex.*.
 //   RoomBuild: applyWorld(outage) (tagged visibility + light world state), heightAt(x,z,outage), ambient
 //     ({color,intensity}|null from K.ambient — apply with Render.setAmbient), stats, disposed.
@@ -143,6 +147,14 @@ const Kit = (() => {
       const g = new THREE.PlaneGeometry(w, h);
       if (su) { const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * w * su, uv.getY(i) * h * (sv || su)); }
       return g;
+    });
+  }
+  // a double-sided plane as two back-to-back faces with the same UVs: a texture (text) reads the right way round from
+  // both sides and each face is lit with its own normal (a DoubleSide material would mirror it from behind)
+  function planeGeo2(w, h, su = 0, sv = 0) {
+    return cachedGeo(`pl2|${q3(w)}|${q3(h)}|${q3(su)}|${q3(sv)}`, () => {
+      const a = planeGeo(w, h, su, sv), I = new THREE.Matrix4();
+      return mergeGeometries([{ geo: a, m: I }, { geo: a, m: new THREE.Matrix4().makeRotationY(Math.PI) }]);
     });
   }
   // tube along a list of points (CatmullRom)
@@ -924,15 +936,35 @@ const Kit = (() => {
     const t = r.axis === 'x' ? (f.x1 > f.x0 ? (x - f.x0) / (f.x1 - f.x0) : 0) : (f.z1 > f.z0 ? (z - f.z0) / (f.z1 - f.z0) : 0);
     return U.lerp(r.y0, r.y1, clamp(t, 0, 1));
   }
-  // floorAt(floors, x, z, outage?) → y | null. Later entries win; outage undefined = ignore world tags.
-  function floorAt(floors, x, z, outage, eps = 1e-4) {
+  // floorAt(floors, x, z, outage?, refY?) → y | null. Later entries win; outage undefined = ignore world tags.
+  // CONTRACT+ refY (stacked floors — World passes it only for rooms with stackedFloors:true): of the floors at (x,z)
+  // the highest one no more than a step (0.5 m) above refY wins; with none that low, the lowest one above.
+  const STACK_STEP = 0.5, EPS = 1e-4;
+  function floorAt(floors, x, z, outage, refY) {
+    const ref = typeof refY === 'number' && isFinite(refY) ? refY : null;
+    let best = null, above = null;
     for (let i = floors.length - 1; i >= 0; i--) {
       const f = floors[i];
       if (outage !== undefined && !matchWorld(f.world, outage)) continue;
-      if (x < f.x0 - eps || x > f.x1 + eps || z < f.z0 - eps || z > f.z1 + eps) continue;
-      return rampY(f, x, z);
+      if (x < f.x0 - EPS || x > f.x1 + EPS || z < f.z0 - EPS || z > f.z1 + EPS) continue;
+      const y = rampY(f, x, z);
+      if (ref === null) return y;
+      if (y <= ref + STACK_STEP) { if (best === null || y > best + 1e-3) best = y; }
+      else if (above === null || y < above) above = y;
     }
-    return null;
+    return best !== null ? best : above;
+  }
+  // CONTRACT+ floorLayers(floors, x, z, outage?) → every distinct floor height at (x, z), low to high (camera checks
+  // of stacked rooms)
+  function floorLayers(floors, x, z, outage) {
+    const ys = [];
+    for (const f of floors) {
+      if (outage !== undefined && !matchWorld(f.world, outage)) continue;
+      if (x < f.x0 - EPS || x > f.x1 + EPS || z < f.z0 - EPS || z > f.z1 + EPS) continue;
+      const y = rampY(f, x, z);
+      if (!ys.some((v) => Math.abs(v - y) < 0.6)) ys.push(y);
+    }
+    return ys.sort((a, b) => a - b);
   }
   function boxPush(x, z, x0, z0, x1, z1, r) {
     const qx = clamp(x, x0, x1), qz = clamp(z, z0, z1);
@@ -1071,6 +1103,12 @@ const Kit = (() => {
         id: o.id || autoId(kind), kind, pos: P(x, y, z), r: o.r ?? 1.2, when: o.when || null, world: W(o), enabled: o.enabled ?? true,
         hold: o.hold || 0, holdText: o.holdText ?? null, look: o.look ?? true, fn, obj, name: o.name || null,
       };
+      // CONTRACT+: prio (m added to the pick score; defaults by kind — World.nearestInteractable), yBand [y0,y1] (feet
+      // height band: stacked landings), crawl:true (usable while crawling)
+      if (o.prio !== undefined) rec.prio = +o.prio || 0;
+      const band = bandOf(o);
+      if (band) rec.yBand = band;
+      if (o.crawl) rec.crawl = true;
       rb.interactables.push(rec);
       return mkHandle(rec, rb.interactables, !!o.ownsObj);
     }
@@ -1088,6 +1126,7 @@ const Kit = (() => {
       };
     }
     const dummyHandle = (id) => ({ id, rec: null, obj: null, remove() {}, enable() { return this; } });
+    const bandOf = (o) => { const b = o.yBand || (Array.isArray(o.y) ? o.y : null); return b && b.length === 2 ? [Math.min(b[0], b[1]), Math.max(b[0], b[1])] : null; };
 
     // ---- context / world ------------------------------------------------------------------------------------
     const withWorld = (w, fn) => { const pw = ctx.world; ctx.world = w; try { return fn(K); } finally { ctx.world = pw; } };
@@ -1135,13 +1174,15 @@ const Kit = (() => {
     K.plane = (x, y, z, w, h, matOrTex, o = {}) => {
       y = yDef(y, x, z);
       let mat, s = 0;
-      if (matOrTex && matOrTex.isTexture) mat = texMat(matOrTex, { emissive: o.emissive, emissiveIntensity: o.emissiveIntensity, transparent: o.transparent, opacity: o.opacity, double: o.double, alphaTest: o.alphaTest, outage: o.outage, roughness: o.roughness });
-      else if (typeof matOrTex === 'string' && matOrTex[0] !== '#' && (o.double || o.transparent || o.emissive || o.opacity !== undefined)) {
-        mat = Tex.mat(matOrTex, { side: o.double ? 'double' : undefined, transparent: o.transparent, opacity: o.opacity, emissive: o.emissive === true ? '#ffffff' : o.emissive, emissiveMap: o.emissive ? true : undefined, emissiveIntensity: o.emissiveIntensity, polygonOffset: true });
+      // double:true builds two back-to-back faces (planeGeo2) with a one-sided material, so text is never mirrored
+      if (matOrTex && matOrTex.isTexture) mat = texMat(matOrTex, { emissive: o.emissive, emissiveIntensity: o.emissiveIntensity, transparent: o.transparent, opacity: o.opacity, alphaTest: o.alphaTest, outage: o.outage, roughness: o.roughness });
+      else if (typeof matOrTex === 'string' && matOrTex[0] !== '#' && (o.transparent || o.emissive || o.opacity !== undefined)) {
+        mat = Tex.mat(matOrTex, { transparent: o.transparent, opacity: o.opacity, emissive: o.emissive === true ? '#ffffff' : o.emissive, emissiveMap: o.emissive ? true : undefined, emissiveIntensity: o.emissiveIntensity, polygonOffset: true });
         s = 1 / Tex.size(matOrTex);
-      } else { const rm = resolveMat(matOrTex, 'paper'); mat = rm.mat; s = rm.s; if (o.double && mat.side !== THREE.DoubleSide) { mat = ownClone(mat); mat.side = THREE.DoubleSide; } }
+      } else { const rm = resolveMat(matOrTex, 'paper'); mat = rm.mat; s = rm.s; if (o.double && mat.side === THREE.DoubleSide) { mat = ownClone(mat); mat.side = THREE.FrontSide; } }
       const rot = o.rot || [0, o.rotY || 0, 0];
-      const m = part(null, planeGeo(w, h, o.uv === false ? 0 : s * (typeof o.uv === 'number' ? o.uv : 1)), mat, x, y, z, { rx: rot[0], ry: rot[1], rz: rot[2], cast: !!o.shadow, merge: mergeOK(o) && !o.emissive });
+      const uvs = o.uv === false ? 0 : s * (typeof o.uv === 'number' ? o.uv : 1);
+      const m = part(null, o.double ? planeGeo2(w, h, uvs) : planeGeo(w, h, uvs), mat, x, y, z, { rx: rot[0], ry: rot[1], rz: rot[2], cast: !!o.shadow, merge: mergeOK(o) && !o.emissive });
       if (o.renderOrder) m.renderOrder = o.renderOrder;
       addObj(m, o);
       return m;
@@ -1185,6 +1226,13 @@ const Kit = (() => {
     K.floor = (x0, z0, x1, z1, mat = 'lino', o = {}) => {
       [x0, z0, x1, z1] = normBox([x0, z0, x1, z1]);
       const y = o.y ?? 0, rp = o.ramp || null;
+      // CONTRACT+ {visible:false}: a walkable height region with no mesh (under open grating, a floor drawn by props)
+      if (o.visible === false) {
+        const g = new THREE.Group(); g.name = o.name || 'walkable';
+        addObj(g, o);
+        addFloor(x0, z0, x1, z1, y, rp ? { axis: rp.axis, y0: rp.y0, y1: rp.y1 } : null, W(o));
+        return g;
+      }
       const rm = resolveMat(mat, 'lino'), s = uvS(rm, o) || 0.5;
       const yAt = (x, z) => (rp ? (rp.axis === 'x' ? U.lerp(rp.y0, rp.y1, (x - x0) / (x1 - x0 || 1)) : U.lerp(rp.y0, rp.y1, (z - z0) / (z1 - z0 || 1))) : y);
       const gb = new GB();
@@ -1205,6 +1253,7 @@ const Kit = (() => {
       addFloor(x0, z0, x1, z1, y, rp ? { axis: rp.axis, y0: rp.y0, y1: rp.y1 } : null, W(o));
       return m;
     };
+    K.walkable = (x0, z0, x1, z1, o = {}) => K.floor(x0, z0, x1, z1, null, { ...o, visible: false });   // CONTRACT+
     K.ceiling = (x0, z0, x1, z1, y = 3, mat = 'ceiling_tile', o = {}) => {
       [x0, z0, x1, z1] = normBox([x0, z0, x1, z1]);
       const rm = resolveMat(mat, 'ceiling_tile'), s = uvS(rm, o) || 0.5;
@@ -1224,7 +1273,9 @@ const Kit = (() => {
       const ops = (o.openings || []).map((op) => ({ ...op, w: op.w ?? 1, h: op.h ?? 2.1, sill: op.sill ?? 0 }))
         .map((op) => ({ ...op, u0: clamp(op.at - op.w / 2, 0, L), u1: clamp(op.at + op.w / 2, 0, L) }))
         .filter((op) => op.u1 - op.u0 > 0.01).sort((a, b) => a.u0 - b.u0);
-      const gb = new GB(), skip = { ny: true, nz: o.both === false };
+      // both:false (a cutaway): only the front face — no back and no top cap (a camera above the wall behind it would
+      // otherwise see the cap as a dark bar)
+      const gb = new GB(), skip = { ny: true, nz: o.both === false, py: o.both === false };
       const piece = (a, b, y0, y1) => { if (b - a > 1e-4 && y1 - y0 > 1e-4) gb.box(a, y0, -t / 2, b, y1, t / 2, s, { skip }); };
       let u = 0;
       for (const op of ops) {
@@ -1547,7 +1598,7 @@ const Kit = (() => {
       }
       rb.npcs[id] = actor;
       const hy = (actor && actor.height) || 1.7;
-      if (o.talk) addInteractable('npc', x, y + hy * 0.85, z, o.talk, { r: o.r ?? 1.6, id: o.interactId || `${roomId}:npc:${id}`, when: o.whenTalk || null, world: W(o), look: o.look }, actor ? actor.root : null);
+      if (o.talk) addInteractable('npc', x, y + hy * 0.85, z, o.talk, { r: o.r ?? 1.6, id: o.interactId || `${roomId}:npc:${id}`, when: o.whenTalk || null, world: W(o), look: o.look, prio: o.prio, yBand: o.yBand }, actor ? actor.root : null);
       else if (o.examine) K.examine(x, y + hy * 0.85, z, o.examine, { r: o.r ?? 1.6, id: o.interactId || `${roomId}:npc:${id}`, world: W(o), obj: actor ? actor.root : null });
       return actor;
     };
@@ -1575,11 +1626,15 @@ const Kit = (() => {
     };
     K.exit = (o = {}) => {
       const rec = { id: o.id || autoId('exit'), box: boxR(o.box || [0, 0, 0, 0]), to: o.to, entry: o.entry ?? null, when: o.when || null, blockedMsg: o.blockedMsg ?? null, fade: o.fade ?? true, sound: o.sound ?? 'steps', world: W(o), enabled: true, mapMark: o.mapMark ?? true };
+      const band = bandOf(o);                                   // CONTRACT+ y:[y0,y1] / yBand: only at those feet heights
+      if (band) rec.yBand = band;
       rb.exits.push(rec);
       return rec;
     };
     K.trigger = (box, fn, o = {}) => {
       const rec = { id: o.id || autoId('trig'), box: boxR(box), fn, once: o.once ?? true, when: o.when || null, world: W(o), enter: o.enter ?? true, enabled: true, anytime: !!o.anytime };
+      const band = bandOf(o);                                   // CONTRACT+ y:[y0,y1] / yBand: only at those feet heights
+      if (band) rec.yBand = band;
       rb.triggers.push(rec);
       return mkHandle(rec, rb.triggers);
     };
@@ -1610,13 +1665,19 @@ const Kit = (() => {
         color: o.color ?? D.color, intensity: o.intensity ?? D.intensity, distance: o.distance ?? D.distance, decay: o.decay ?? 2,
         angle: o.angle ?? D.angle, penumbra: o.penumbra ?? D.penumbra, pos: pos.clone(), target: o.target ? P(...o.target) : pos.clone().add(new THREE.Vector3(0, -1, 0)),
       };
+      // CONTRACT+: prio (m of pool ranking bonus: the light holds a real slot as if that much closer to Aidan) and pin
+      // (always holds a slot — a key light far from him) go straight to Render.allocLight
+      if (o.prio !== undefined) cfg.prio = o.prio;
+      if (o.pin) cfg.pin = true;
+      // angle is in degrees; a value under ~1.6 is almost certainly radians (a 0.7° cone lights nothing)
+      if (cfg.angle > 0 && cfg.angle < 1.6) { warnOnce('lightangle:' + ctx.def.id + ':' + cfg.angle, `[Kit] room ${ctx.def.id}: K.light angle ${cfg.angle} looks like radians — K.light takes degrees; using ${Math.round(cfg.angle / D2R)}°`); cfg.angle = cfg.angle / D2R; }
       if (kind === 'fluoro') cfg.pos.y -= 0.12; // the light sits just under the tube
       const vis = new THREE.Group(); vis.name = o.name || 'light:' + kind; vis.position.set(x, y, z);
       if (o.rot) vis.rotation.y = rad(o.rot);
       const st = { lit: o.on !== false, worldOn: matchWorld(world, S.outage), slot: null, k: 1, flick: !!o.flicker, blink: null, halo: null, emis: [], mat: null, dead: false };
       // visuals
       if (kind === 'street' && o.halo !== false) {
-        st.halo = Render.halo([0, 0, 0], { color: o.haloColor || '#ffad5c', size: o.haloSize ?? 2.6, opacity: o.haloOpacity ?? 0.55, parent: vis });
+        st.halo = Render.halo([0, 0, 0], { color: o.haloColor || '#ffad5c', size: o.haloSize ?? 2.6, opacity: o.haloOpacity ?? 0.55, parent: vis, fog: o.haloFog });
       }
       if (kind === 'fluoro' && o.fixture !== false) {
         const len = o.len ?? 1.2;
@@ -1632,7 +1693,7 @@ const Kit = (() => {
         st.mat = o.blink ? ownClone(lm) : null;
         const dot = part(vis, sphereGeo(size, 8, 0), st.mat || lm, 0, 0, 0, { cast: false });
         st.emis.push(dot);
-        if (o.halo) st.halo = Render.halo([0, 0, 0], { color: cfg.color, size: o.halo === true ? 0.35 : o.halo, opacity: o.haloOpacity ?? 0.5, parent: vis });
+        if (o.halo) st.halo = Render.halo([0, 0, 0], { color: o.haloColor || cfg.color, size: o.halo === true ? 0.35 : o.halo, opacity: o.haloOpacity ?? 0.5, parent: vis, fog: o.haloFog });
         if (o.blink) st.blink = { period: o.blink === true ? 1 : o.blink, duty: o.duty ?? 0.5, phase: o.phase ?? ctx.irng() };
       }
       // the parts sync() switches (tube material, LED visibility) must stay out of the room's static batches — the
@@ -1685,7 +1746,7 @@ const Kit = (() => {
         } else if (st.k === 0 && Math.random() < dt * 0.8) { st.k = 1; sync(); }
       });
       sync();
-      rb.lights.push({ kind, handle, bank, world, pos, name: o.name || null });
+      rb.lights.push({ kind, handle, bank, world, pos, name: o.name || null, real: !!real });
       if (o.name && !rb.objs[o.name]) rb.objs[o.name] = vis;
       return handle;
     };
@@ -1710,7 +1771,11 @@ const Kit = (() => {
       const g = new THREE.Group(); g.name = o.name || kind; g.userData.prop = kind;
       const isStatic = (o.static ?? (def && def.static)) === true && !o.name && (!ctx.inProp || ctx.propStatic);
       const saved = { parent: ctx.parent, xf: ctx.xf, xfYaw: ctx.xfYaw, xfScale: ctx.xfScale, world: ctx.world, tagWorld: ctx.tagWorld, inProp: ctx.inProp, propStatic: ctx.propStatic };
-      const local = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(UP, rad(rotDeg)), new THREE.Vector3(sc, sc, sc));
+      // CONTRACT+ o.pitch / o.tilt (degrees about the prop's own X / Z after its yaw): props on slopes (guardrails along a
+      // 10% road). Colliders stay yaw-only boxes.
+      const pitch = rad(o.pitch || 0), tilt = rad(o.tilt || 0);
+      const eul = new THREE.Euler(pitch, rad(rotDeg), tilt, 'YXZ');
+      const local = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(eul), new THREE.Vector3(sc, sc, sc));
       ctx.xf = saved.xf ? saved.xf.clone().multiply(local) : local;
       ctx.xfYaw = saved.xfYaw + rotDeg; ctx.xfScale = saved.xfScale * sc;
       ctx.parent = g; ctx.world = w; ctx.tagWorld = w; ctx.inProp = saved.inProp + 1; ctx.propStatic = isStatic;
@@ -1729,7 +1794,7 @@ const Kit = (() => {
       if (isStatic) g.traverse((c) => { if (c.isMesh && !c.isInstancedMesh && !c.isSkinnedMesh && c.material && !Array.isArray(c.material) && c.userData.kitMerge !== false) c.userData.kitMerge = true; });
       else if (o.name && !saved.inProp && (o.static ?? (def && def.static)) === true && o.merge !== false) propMerge(g);   // named: merge inside
       const bb = meshBox(g);
-      g.position.set(x, y, z); g.rotation.y = rad(rotDeg); g.scale.setScalar(sc);
+      g.position.set(x, y, z); g.rotation.copy(eul); g.scale.setScalar(sc);
       ctx.parent.add(g); tag(g, w); named(g, o.name);
       const c = Math.cos(rad(rotDeg)), s = Math.sin(rad(rotDeg));
       const toRoom = (lx, lz) => [x + (lx * c + lz * s) * sc, z + (-lx * s + lz * c) * sc];
@@ -1833,7 +1898,10 @@ const Kit = (() => {
       const depth = o.depth ?? 0.2;
       const root = new THREE.Group(); root.name = 'door:' + id;
       root.position.set(x, y, z); root.rotation.y = rad(rot);
-      const hingeLeft = (o.hinge ?? 'left') !== 'right', swing = o.swing ?? 1;
+      // hinge 'left'|'right' ('L'|'R') as seen standing in front of the door (on the side `rot` faces); swing 1 ('front',
+      // 'out') opens the leaf toward that side, -1 ('back', 'in') away from it
+      const hingeLeft = !/^r/i.test(String(o.hinge ?? 'left'));
+      const swing = typeof o.swing === 'string' ? (/^(back|in|away)/i.test(o.swing) ? -1 : 1) : (o.swing ?? 1);
       const pivots = [];
       let setOpen;
       if (style === 'roller') {
@@ -1925,7 +1993,7 @@ const Kit = (() => {
         K.light('led', x + 0.1 * c + zf * s, y + h - 0.035, z - 0.1 * s + zf * c, { color: o.locked ? '#ff2a1c' : '#2aff5a', world, name: id + ':led', intensity: 2.5 });
       }
       rb.doors[id] = rec;
-      addInteractable('door', x, y + 1.0, z, (G) => runBuiltin('door', G, rec), { id: o.interactId || id, r: o.r ?? Math.max(1.2, w * 0.5 + 0.7), when: o.when, world }, root);
+      addInteractable('door', x, y + 1.0, z, (G) => runBuiltin('door', G, rec), { id: o.interactId || id, r: o.r ?? Math.max(1.2, w * 0.5 + 0.7), when: o.when, world, yBand: o.yBand, prio: o.prio }, root);
       return rec;
     };
 
@@ -2600,12 +2668,13 @@ const Kit = (() => {
     };
     // Render's pool gives its 8 point slots to the lit lights nearest Aidan (in view), so any number of lights along
     // a street is fine; only a cluster of more than 8 within ~14 m of each other means some stay dark at once
-    const pts = rb.lights.filter((l) => l.kind !== 'led' && l.kind !== 'spot');
+    // (only lights that take a pool slot: glow-only fittings — real:false, props with light:false — don't count)
+    const pts = rb.lights.filter((l) => l.kind !== 'led' && l.kind !== 'spot' && l.real !== false);
     for (const w of ['fog', 'outage']) {
       const ws = pts.filter((l) => matchWorld(l.world, w === 'outage'));
       let most = 0;
       for (const a of ws) { let n = 0; for (const b of ws) if (a.pos.distanceTo(b.pos) < 14) n++; most = Math.max(most, n); }
-      if (most > 8) console.warn(`[Kit] room ${ctx.def.id}: ${most} point lights within ~14 m of each other in the ${w} world (pool: the 8 nearest Aidan are real) — pass light:false to some`);
+      if (most > 8) console.warn(`[Kit] room ${ctx.def.id}: ${most} point lights within ~14 m of each other in the ${w} world (pool: the 8 nearest Aidan are real) — pass light:false (or real:false) to some`);
     }
     return rb;
   }
@@ -2666,7 +2735,7 @@ const Kit = (() => {
     prop: propDetached,
     // CONTRACT+ helpers
     get last() { return last; },                      // the most recent RoomBuild (debugging)
-    floorAt, collide, inBox, matchWorld,              // pure helpers for World
+    floorAt, floorLayers, collide, inBox, matchWorld,  // pure helpers for World
     mat: (spec) => resolveMat(spec).mat,              // resolve a material spec (see header)
     itemModel: (item) => { const d = ITEMS[item]; try { if (d && typeof d.model === 'function') return d.model(); } catch (e) { console.error(e); } return genericItem(item); },
     clock: makeClock,                                 // Kit.clock([h, m]) → wall clock Object3D with userData.setTime/addMinutes

@@ -22,6 +22,8 @@
 // Contract §10.1: init, update, subtitle, clearSubtitle, message, prompt, letterbox, fade, card, titleText, textOnBlack,
 // choice, callPrompt, bars, badges, stamp, holdPrompt, keypad, screen, noSignal, showHud. CONTRACT+ additions are marked
 // at their definitions (say, sting, mash, grainOverlay, capturing, dismissMessage, skippable, skip, clear, crmHtml …).
+// CONTRACT+ (maintenance): keypads keep digits typed while locked (replayed on unlock), ignore the press that opened
+//   them, and show [beat]-split check messages; UI.bars(n, {letterbox:true}) shows the indicator under a letterbox.
 const UI = (() => {
   const TAU = Math.PI * 2;
   const SERIF = "Georgia, 'Times New Roman', Times, serif";
@@ -515,6 +517,7 @@ const UI = (() => {
   const swallow = (...acts) => { try { for (const a of acts) Input.consume(a); } catch (e) { /* no input */ } };
   const pressed = (a) => { try { return Input.pressed(a); } catch (e) { return false; } };
   const typed = () => { try { return Input.typedChars(); } catch (e) { return []; } };
+  const isDown = (a) => { try { return Input.down(a); } catch (e) { return false; } };
 
   // =================================================================================================================
   // Subtitles (§7): centred low, #f0ede4, soft shadow, no box, no speaker names; phone voices italic with a faint
@@ -888,12 +891,14 @@ const UI = (() => {
   // =================================================================================================================
   // Phone signal bars (§4): 0–5, the only image besides item models; modes normal | pulse | none | noservice
   // =================================================================================================================
-  const barsSt = { f: null, n: 0, mode: 'normal', batt: 1, segs: 4, blinkSeg: -1, blinkT: 0, active: -99, battAt: -99, key: '', forceShow: 0 };
+  const barsSt = { f: null, n: 0, mode: 'normal', batt: 1, segs: 4, blinkSeg: -1, blinkT: 0, active: -99, battAt: -99, key: '', forceShow: 0, lbUntil: -99 };
   // UI.bars(n, {mode:'normal'|'pulse'|'none'|'noservice', battery 0..1}). Cheap to call every frame. The indicator fades in
   // while bars > 0 (or pulse / NO SERVICE) and out ~2.5 s after it goes idle; losing a battery notch blinks it and
-  // shows the indicator for 4 s (the Standard's tell). Hidden while the letterbox is down or the HUD is off.
+  // shows the indicator for 4 s (the Standard's tell). Hidden while the letterbox is down or the HUD is off —
+  // CONTRACT+ o.letterbox:true shows it for 4 s even under the letterbox (5-1: "the battery drops a notch").
   function bars(n, o = {}) {
     ensure();
+    if (o.letterbox) barsSt.lbUntil = clock + (+o.letterbox > 1 ? +o.letterbox : 4);
     barsSt.n = clamp(Math.round(+n || 0), 0, 5);
     barsSt.mode = ['normal', 'pulse', 'none', 'noservice'].includes(o.mode) ? o.mode : 'normal';
     if (o.battery != null) {
@@ -906,7 +911,7 @@ const UI = (() => {
   function tickBars(dt, menu) {
     const b = barsSt;
     if (!menu) b.blinkT = Math.max(0, b.blinkT - dt);
-    const want = hudF.target > 0 && lbF.v < 0.5 && b.mode !== 'none' &&
+    const want = hudF.target > 0 && (lbF.v < 0.5 || clock < b.lbUntil) && b.mode !== 'none' &&
       (b.n > 0 || b.mode === 'pulse' || b.mode === 'noservice' || clock - b.active < 2.5 || clock - b.battAt < 4);
     if (b.f.target !== (want ? 1 : 0)) b.f.to(want ? 1 : 0, want ? 0.35 : 0.8);
     if (b.f.v <= 0 && !want) return;
@@ -1402,7 +1407,7 @@ const UI = (() => {
     const style = ['terminal', 'lockbox', 'padlock', 'rotary'].includes(o.style) ? o.style : 'padlock';
     const st = {
       style, o, digits: clamp((o.digits | 0) || 4, 1, 8), cur: 0, t: 0, lock: 0.12, err: 0, open: 0, opening: false,
-      done: false, attempts: 0, mq: [], msgT: 0, r: null,
+      done: false, attempts: 0, mq: [], msgT: 0, r: null, pend: [], armed: !(isDown('confirm') || isDown('interact')), msgTok: 0,
       check: typeof o.check === 'function' ? o.check : o.code != null ? (c) => c === String(o.code) : null,
     };
     st.root = mk('div', 'ui-kp' + (style === 'terminal' ? ' term' : ' dim'), L.kp);
@@ -1450,9 +1455,24 @@ const UI = (() => {
     if (st.style === 'terminal') { if (st.scr && st.scr.status) st.scr.status.innerHTML = `<span>${esc(t)}</span><span>USER: ${esc(st.o.user ?? 'AIDAN')}</span>`; }
     else st.keys.textContent = t;
   }
+  // a keypad message; [beat] / [long beat] split it into parts shown one after another (0.8 s / 2 s apart)
   function kpMsg(st, text, dur = 1.8) {
-    if (st.style === 'terminal') { termStatus(st, text, true); return; }
-    st.msg.innerHTML = fmt(text); st.msgT = dur; st.msgF.to(1, 0.25);
+    const parts = String(text ?? '').split(/\s*\[(long beat|beat)\]\s*/i);
+    const tok = ++st.msgTok;
+    const show = (t, d) => {
+      if (st.style === 'terminal') { termStatus(st, t, true); return; }
+      st.msg.innerHTML = fmt(t); st.msgT = d; st.msgF.to(1, 0.25);
+    };
+    if (parts.length === 1) { show(text, dur); return; }
+    let at = 0;
+    for (let i = 0; i < parts.length; i += 2) {
+      const t = parts[i].trim(), pause = parts[i + 1] ? (/long/i.test(parts[i + 1]) ? 2 : 0.8) : 0;
+      if (!t) { at += pause; continue; }
+      const d = i + 2 < parts.length ? Math.max(0.9, U.readTime(t) * 0.7) : Math.max(dur, U.readTime(t) * 0.7);
+      const go = () => { if (st.msgTok === tok && !st.done) show(t, d); };
+      if (at <= 0) go(); else wait(at).then(go);
+      at += d + pause;
+    }
   }
   function kpFinish(st, result) {
     if (!st || st.done) return;
@@ -1494,23 +1514,35 @@ const UI = (() => {
     if (st.keysKey !== padDevice()) kpKeysText(st);
     const H = KP[st.style];
     if (H.step) H.step(st, dt);
-    if (st.lock > 0) { st.lock -= dt; st.mq.length = 0; }
-    else if (!st.done) {
+    // a press still held when the keypad opened (an injected press outlasting the open) never counts: E / A act again
+    // once released
+    if (!st.armed && !isDown('confirm') && !isDown('interact')) st.armed = true;
+    if (st.lock > 0) {
+      st.lock -= dt; st.mq.length = 0;
+      // digits typed while it is locked (opening, the wrong-code shake) are kept and replayed when it unlocks;
+      // after a correct code (lock 99) nothing more is taken
+      if (st.lock < 50) { for (const ch of typed()) if (/^[0-9]$/.test(ch) || ch === 'Backspace') st.pend.push(ch); }
+      else st.pend.length = 0;
+    } else if (!st.done) {
       const ev = st.mq.splice(0);
       if (pressed('up')) ev.push({ k: 'up' });
       if (pressed('down')) ev.push({ k: 'down' });
       if (pressed('left')) ev.push({ k: 'left' });
       if (pressed('right')) ev.push({ k: 'right' });
       let back = false;
-      for (const ch of typed()) {
+      const chars = st.pend.length ? st.pend.splice(0).concat(typed()) : typed();
+      for (const ch of chars) {
         if (/^[0-9]$/.test(ch)) ev.push({ k: 'd', d: +ch });
         else if (ch === 'Backspace') { back = true; ev.push({ k: 'back' }); }
       }
       if (pressed('attack')) ev.push({ k: 'back' });
-      if (pressed('confirm')) ev.push({ k: 'ok' });
+      if (pressed('confirm') && st.armed) ev.push({ k: 'ok' });
       if (pressed('cancel') && !back) ev.push({ k: 'cancel' });
-      for (const e of ev) {
-        if (st.done || st.lock > 0) break;
+      for (let i = 0; i < ev.length; i++) {
+        const e = ev[i];
+        if (st.done) break;
+        // a digit event that finished the code locks the pad: the rest wait for the unlock (typed-ahead digits)
+        if (st.lock > 0) { if (st.lock < 50) for (const r of ev.slice(i)) if (r.k === 'd') st.pend.push(String(r.d)); else if (r.k === 'back') st.pend.push('Backspace'); break; }
         if (e.k === 'cancel') { sfx('ui_cancel'); kpFinish(st, null); break; }
         H.ev(st, e);
       }

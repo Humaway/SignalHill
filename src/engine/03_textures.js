@@ -11,8 +11,10 @@ const Tex = (() => {
   const FONT = {
     serif: "Georgia, 'Times New Roman', Times, serif",
     mono: "'Courier New', Courier, monospace",
-    hand: "'Segoe Script', 'Bradley Hand', 'Comic Sans MS', cursive",
-    marker: "'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive",
+    // handwriting: Windows, macOS, then the common Linux / Ghostscript script faces; without any of them handwriting()
+    // slants and italicises whatever `cursive` resolves to (see handFontPresent)
+    hand: "'Segoe Script', 'Bradley Hand', 'Brush Script MT', 'Apple Chancery', 'Comic Neue', 'URW Chancery L', 'Z003', 'Comic Sans MS', cursive",
+    marker: "'Segoe Print', 'Bradley Hand', 'Marker Felt', 'Chalkboard SE', 'Comic Neue', 'Comic Sans MS', 'URW Chancery L', 'Z003', cursive",
     sans: "'Helvetica Neue', Helvetica, Arial, sans-serif",
     narrow: "'Arial Narrow', 'Helvetica Neue', Arial, sans-serif",
     heavy: "'Arial Black', 'Helvetica Neue', Arial, sans-serif",
@@ -281,11 +283,40 @@ const Tex = (() => {
   // ---------------------------------------------------------------------------------------------------------------
   // Handwriting — cursive system font, uneven baseline, per-glyph wobble. Seeded by the text.
   // ---------------------------------------------------------------------------------------------------------------
+  // Is any named face of a CSS font stack installed? (width test against two generic baselines — document.fonts.check
+  // can't tell about system fonts). Cached per stack.
+  const fontSeen = new Map();
+  let probeCtx = null;
+  function faceInstalled(name) {
+    if (fontSeen.has(name)) return fontSeen.get(name);
+    let ok = false;
+    try {
+      probeCtx = probeCtx || mk(8, 8).getContext('2d');
+      const t = 'mmmmmmmmmmlliWWxyz0123';
+      for (const base of ['monospace', 'serif', 'sans-serif']) {
+        probeCtx.font = `72px ${base}`; const w0 = probeCtx.measureText(t).width;
+        probeCtx.font = `72px '${name}', ${base}`; const w1 = probeCtx.measureText(t).width;
+        if (Math.abs(w1 - w0) > 0.5) { ok = true; break; }
+      }
+    } catch (e) { ok = true; }
+    fontSeen.set(name, ok);
+    return ok;
+  }
+  function handFontPresent(stack) {
+    const key = 'stack:' + stack;
+    if (fontSeen.has(key)) return fontSeen.get(key);
+    const names = [...String(stack).matchAll(/'([^']+)'|"([^"]+)"/g)].map((m) => m[1] || m[2]);
+    const ok = names.some((n) => faceInstalled(n));
+    fontSeen.set(key, ok);
+    return ok;
+  }
   function handwriting(ctx, str, x, y, o = {}) {
     const size = o.size || 22, wob = o.wobble ?? 1, font = o.font || FONT.hand;
     const r = U.rng((U.hash(String(str)) ^ (o.seed || 7)) >>> 0);
+    // no handwriting face installed (a bare Linux): an italic, slanted fallback reads as written, not typed
+    const synth = o.synth ?? !handFontPresent(font);
     ctx.save();
-    ctx.font = `${o.weight || ''} ${size}px ${font}`.trim();
+    ctx.font = `${synth ? 'italic ' : ''}${o.weight || ''} ${size}px ${font}`.replace(/\s+/g, ' ').trim();
     ctx.fillStyle = o.color || '#1f2c6e'; ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
     const lh = o.lineHeight || size * 1.35;
     const lines = wrapText(ctx, str, o.maxWidth);
@@ -300,6 +331,7 @@ const Tex = (() => {
         const dy = Math.sin(phase + (cx - x0) * 0.045) * size * 0.05 * wob + (r() - 0.5) * size * 0.07 * wob + (cx - x0) * slope;
         ctx.save();
         ctx.translate(cx, y + li * lh + dy); ctx.rotate((r() - 0.5) * 0.09 * wob);
+        if (synth) ctx.transform(1, 0, -0.2 - r() * 0.06, 1, 0, 0);
         ctx.globalAlpha = (o.alpha ?? 1) * (0.82 + r() * 0.18);
         ctx.fillText(c, 0, 0);
         ctx.restore();
@@ -2089,7 +2121,8 @@ const Tex = (() => {
   }
 
   // CONTRACT+: Tex.define(name, {px, size, gen(ctx,w,h,rng,opts) → {rough?, bump?, bumpScale?}, mat:{roughness,…}, outage})
-  // — register a content-specific surface generator (then Tex.get/Tex.mat work with it).
+  // — register a content-specific surface generator (then Tex.get/Tex.mat work with it). outage: another texture id
+  // (its Outage partner), 'self' (the same texture, darkened teal) or false (no dissolve).
   function defineTex(name, d) { if (d.outage !== undefined) OUTAGE_PARTNER[name] = d.outage; return define(name, d); }
 
   // CONTRACT+: Tex.preload(names = all, onProgress(i, n)) → Promise — generate textures in ~12 ms slices (boot/LOADING)
@@ -2097,7 +2130,8 @@ const Tex = (() => {
   // (e.g. ['bitumen', {lines:'center'}]). Outage partners are included.
   function preload(names, onProgress) {
     const list = (names || Object.keys(GEN)).filter((n) => GEN[Array.isArray(n) ? n[0] : n]);
-    for (const n of [...list]) { const p = OUTAGE_PARTNER[Array.isArray(n) ? n[0] : n]; if (p && !list.includes(p)) list.push(p); }
+    // (outage partners that are texture ids; 'self' and false are not textures to generate)
+    for (const n of [...list]) { const p = OUTAGE_PARTNER[Array.isArray(n) ? n[0] : n]; if (typeof p === 'string' && GEN[p] && !list.includes(p)) list.push(p); }
     return new Promise((resolveP) => {
       let i = 0;
       const step = () => {
@@ -2111,7 +2145,7 @@ const Tex = (() => {
   function stats() { return { textures: cache.size, text: textCache.size, materials: matCache.size, pendingOutage: pending.size }; }
 
   return {
-    get, mat, canvas, sign, wordmark, drawWordmark, poster, label, screen, handwriting,
+    get, mat, canvas, sign, wordmark, drawWordmark, poster, label, screen, handwriting, handFontPresent,
     setOutage, outageify, define: defineTex, stats, preload,
     get outage() { return U_OUTAGE.value; },
     // CONTRACT+: Tex.setFocus(v3) — centre of the dissolve spread (Render.update keeps it on the player).

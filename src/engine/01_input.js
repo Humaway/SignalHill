@@ -17,6 +17,8 @@
 //   RB / R3 open the inventory. (On most pads "View" *is* Select/Back, so the spec's "Select map / View
 //   inventory" cannot both be honoured on button 8 — map keeps Select, inventory moves to RB, R3 and D-pad down.)
 //   Right stick feeds drag() for examine rotation.
+// Injected actions (Input.inject / SH.press): a new injection while the last one still holds the action releases it
+// for one update first (a fresh press edge); injected up/down/left/right also drive Input.move().
 const Input = (() => {
   const ACTIONS = ['up', 'down', 'left', 'right', 'run', 'torch', 'interact', 'confirm', 'cancel', 'ready', 'attack',
     'turn', 'decline', 'inventory', 'map', 'phone', 'pause', 'skip', 'debug'];
@@ -228,8 +230,12 @@ const Input = (() => {
     lsNav.left = lx < -(lsNav.left ? NAV_OFF : NAV_ON);
     lsNav.right = lx > (lsNav.right ? NAV_OFF : NAV_ON);
     for (const d in lsNav) if (lsNav[d]) active.add('ls:' + d);
-    // injected: always down for the first update after inject(), then while real time < until
-    for (const [a, e] of injected) { if (e.first || t < e.until) { active.add('i:' + a); e.first = false; } else injected.delete(a); }
+    // injected: always down for the first update after inject(), then while real time < until. A new injection that
+    // lands while the previous one still holds the action first releases it for one update (a fresh press edge).
+    for (const [a, e] of injected) {
+      if (e.gap) { e.gap = false; continue; }
+      if (e.first || t < e.until) { active.add('i:' + a); e.first = false; } else injected.delete(a);
+    }
 
     // track when each source went down; newly pressed pad buttons count for anyPressed / lastDevice
     for (const s of active) if (!since.has(s)) since.set(s, t);
@@ -316,9 +322,12 @@ const Input = (() => {
   }
 
   // Movement vector: x = right, y = forward, magnitude ≤ 1 (keyboard digital, stick with radial dead zone).
+  const INJ_MOVE = { up: [0, 1], down: [0, -1], left: [-1, 0], right: [1, 0] };
   function move() {
     let kx = 0, ky = 0;
     for (const c in MOVE_KEYS) if (keys.has(c) && !consumed.has('k:' + c)) { kx += MOVE_KEYS[c][0]; ky += MOVE_KEYS[c][1]; }
+    // injected directions (SH.press('up', sec)) walk like the keys
+    for (const a in INJ_MOVE) if (active.has('i:' + a) && !consumed.has('i:' + a)) { kx += INJ_MOVE[a][0]; ky += INJ_MOVE[a][1]; }
     kx = Math.max(-1, Math.min(1, kx)); ky = Math.max(-1, Math.min(1, ky));
     const km = Math.hypot(kx, ky);
     if (km > 1) { kx /= km; ky /= km; }
@@ -343,7 +352,11 @@ const Input = (() => {
   }
   // CONTRACT+: Input.inject(action, sec=0) — simulate the action held for `sec` real seconds from the next update
   //            (at least one frame). Used by SH.press and tests.
-  function inject(a, sec = 0) { if (S_(a)) injected.set(a, { until: realNow() + Math.max(0, +sec || 0), first: true }); }
+  function inject(a, sec = 0) {
+    if (!S_(a)) return;
+    const gap = injected.has(a) || active.has('i:' + a);              // still held from the last injection: release first
+    injected.set(a, { until: realNow() + Math.max(0, +sec || 0), first: true, gap });
+  }
   // CONTRACT+: Input.setMenu(on) — force menu context (D-pad = nav only, right mouse = cancel) for overlays that
   //            are not Menus screens (UI.choice, UI.keypad …). Calls nest. Menus.isOpen() also counts automatically.
   function setMenu(on) { menuForced = Math.max(0, menuForced + (on ? 1 : -1)); }

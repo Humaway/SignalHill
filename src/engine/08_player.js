@@ -43,6 +43,9 @@
 //   toggleTorch(), stillTime (s since he last moved/turned), speed (m/s), running, ready, lockTarget, interactTarget,
 //   lookTarget, turnAround(), impulse(dx,dz,dur), knockback(fromPos,dist), noclip, saveState(), actor, yawDeg,
 //   weapon() → current weapon stats, attackState.
+// CONTRACT+ (maintenance): Player.restoreBody() (the actor back to a new game's defaults; reset() calls it),
+//   Player.holdOverride(on) (a scripted left-hand prop wins over the equipped weapon), crawl-mode interactables
+//   ({crawl:true}), E with a message up goes to the faced target unless it is the thing just used.
 const Player = (() => {
   const TAU = Math.PI * 2, D2R = Math.PI / 180;
   const WALK = 1.6, RUN = 3.5, BACK = 0.9, CRAWL = 0.8, READY_STEP = 0.75, CLIMB_UP = 0.8, CLIMB_DOWN = 1.0;
@@ -114,7 +117,7 @@ const Player = (() => {
   // ---------------------------------------------------------------------------------------------------------------
   // Placement
   // ---------------------------------------------------------------------------------------------------------------
-  function floorAt(x, z) { return typeof World !== 'undefined' && World && World.heightAt ? World.heightAt(x, z) : null; }
+  function floorAt(x, z, refY = pos().y) { return typeof World !== 'undefined' && World && World.heightAt ? World.heightAt(x, z, refY) : null; }
   function place(x, z, yawDeg = 0, o = {}) {
     ensureInScene();
     const y = o.y ?? floorAt(x, z) ?? 0;
@@ -294,8 +297,16 @@ const Player = (() => {
     if (!w) return UNARMED;
     return { id, dmg: 8, speed: 'fast', range: 1.2, arc: 70, knock: 0, ...w, rig: w.rig || base.rig || (it && it.rig) || null };
   }
+  // CONTRACT+: Player.holdOverride(on) — while on (counted), the equipped weapon doesn't claim the left hand: a script
+  // holding a prop there (A.hold('L', 'pen') on Aidan does it by itself) keeps it; off → the weapon comes back
+  let weaponOverride = 0;
+  function holdOverride(on) {
+    weaponOverride = Math.max(0, weaponOverride + (on ? 1 : -1));
+    if (!weaponOverride) { heldFor = undefined; heldKind = null; }
+    return weaponOverride > 0;
+  }
   function syncWeapon() {
-    if (!actor) return;
+    if (!actor || weaponOverride > 0) return;
     const id = S.equipped || null;
     if (id === heldFor) return;
     heldFor = id;
@@ -729,7 +740,10 @@ const Player = (() => {
     if (lookT <= 0) {
       lookT = 0.1;
       const p = pos();
-      if (hasWorld && mode === 'normal') {
+      if (hasWorld && mode === 'crawl') {
+        lookIt = null;
+        useIt = World.nearestInteractable(p, yaw, 3, { use: true, crawl: true });   // CONTRACT+: K.interact(…, {crawl:true})
+      } else if (hasWorld && mode === 'normal') {
         const lk = World.nearestInteractable(p, yaw, 3, { look: true });
         if (lk !== lookIt) {
           // hysteresis: keep the current look target unless it is gone or clearly worse
@@ -771,18 +785,25 @@ const Player = (() => {
     const buffered = eBuf > 0;
     eBuf = 0;
     if (!Input.pressed('interact') && !buffered) return;
-    if (hasUI() && UI.dismissMessage && UI.dismissMessage()) { Input.consume('interact'); return; }
-    const e = enemyInReach();
+    const e = mode === 'crawl' ? null : enemyInReach();
+    // E on an open message: it only dismisses the message when E has nothing else to do, or when the target is the
+    // thing he just used (so dismissing "It's locked." never re-tries the door). A message from elsewhere — a boss
+    // objective, a pickup line — never eats the press meant for the button in front of him.
+    const target = (e && (cuttable(e) || stompable(e))) ? e : useIt;
+    const recent = target && target === lastUsed.it && clock - lastUsed.t < 6;
+    if (hasUI() && UI.dismissMessage && UI.dismissMessage() && (!target || recent)) { Input.consume('interact'); return; }
     if (e) {
       if (cuttable(e)) { holdAct = { kind: 'cut', e, t: 0, need: 2, tapStomp: stompable(e), text: 'Cut it free' }; speed = 0; return; }
       if (stompable(e)) { stomp(e); Input.consume('interact'); return; }
     }
     const it = useIt;
     if (!it || typeof World === 'undefined') return;
+    lastUsed.it = it; lastUsed.t = clock;
     if (it.hold > 0) { holdAct = { kind: 'interact', it, t: 0, need: it.hold, text: it.holdText || 'Hold {interact}' }; speed = 0; return; }
     Input.consume('interact');
     World.interact(it);
   }
+  const lastUsed = { it: null, t: -99 };
 
   // ---------------------------------------------------------------------------------------------------------------
   // Per-frame
@@ -822,7 +843,7 @@ const Player = (() => {
       case 'grabbed': updateGrab(dt, ctl); break;
       case 'pinned': speed = 0; break;
       case 'ladder': updateLadder(dt, ctl); break;
-      case 'crawl': moved = locomotion(dt, ctl, CRAWL, false); break;
+      case 'crawl': moved = locomotion(dt, ctl, CRAWL, false); interactPress(ctl, dt); break;
       default: moved = normalMode(dt, ctl);
     }
     if (impulseSt) {
@@ -996,8 +1017,24 @@ const Player = (() => {
     if (grabSt) grabEnd(null);
     heldFor = undefined; heldKind = null;
     setTorch(false);
-    if (actor) { actor.finishGestures(); actor.lookAt(null); actor.hold('L', null); lastAnim = null; setAnim('idle', 0, { force: true }); }
+    if (actor) { restoreBody(); lastAnim = null; setAnim('idle', 0, { force: true }); }
     ui('holdPrompt', null); ui('mash', null);
+  }
+  // CONTRACT+: Player.restoreBody() — Aidan's actor as a new game expects it: the player's Rig actor lives for the whole
+  // session, so posture, habits, expression, eyes, head scale, opacity / tint and held props set by cutscenes (the
+  // endings take the phone out of his hand, give him a box or a pendant) would otherwise carry into the title and NG+.
+  function restoreBody() {
+    const a = actor;
+    if (!a) return;
+    a.posture = 0; a.idleLife = true;
+    try { a.finishGestures(); a.lookAt(null); a.expr('neutral'); a.eyes('ahead'); a.talk(false); } catch (e) { /* rig */ }
+    try { a.hold('L', null); } catch (e) { /* rig */ }
+    if (!a.held || !a.held.R || a.held.R.userData.kind !== 'phone') { try { a.hold('R', 'phone'); } catch (e) { /* rig */ } }
+    if (a.held && a.held.R) a.held.R.visible = true;
+    try { a.bones.head.scale.set(1, 1, 1); } catch (e) { /* rig */ }
+    try { a.setOpacity(1); if (a.tint && a.tint.amount) a.setTint(null, 0); a.visible(true); } catch (e) { /* rig */ }
+    heldFor = undefined; heldKind = null;                         // the weapon hold is re-synced next frame
+    weaponOverride = 0;
   }
 
   Bus.on('cam:cut', () => { cutFlag = true; });
@@ -1012,7 +1049,7 @@ const Player = (() => {
 
   const api = {
     init, update, place, teleport, face, damage, hurt: damage, heal, kill, status, setGaze, grab, release, climb, crawl, pin,
-    setMode, setControl, lock, reset, saveState, setTorch, toggleTorch, turnAround, impulse, knockback, weapon,
+    setMode, setControl, lock, reset, restoreBody, holdOverride, saveState, setTorch, toggleTorch, turnAround, impulse, knockback, weapon,
     isEnemySource,
     get actor() { return init(); },
     get pos() { return pos(); },

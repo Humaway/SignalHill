@@ -29,6 +29,9 @@
 // Screen: Phone.drawScreen(ctx, w, h) draws the current phone (Aidan's in-hand model: Player.actor.phoneScreen is
 //   redrawn by update when something changes). CONTRACT+: Phone.display(spec|null) — a scripted screen for cutscene
 //   inserts: {title, lines:[…], caller, big, button, buttonColor, blink} (e.g. "ACCT 4471-0932", "Calling...").
+// CONTRACT+: Phone.cancel(id) and ring(id, {until, cancelOnLeave}) (see ring), G.bars({n, battery, letterbox:true})
+//   (the HUD indicator stays visible under a letterbox), voicemailText falls back to CALLS[id].voicemailText for
+//   scripted voicemails.
 // CONTRACT+: Phone.answer() / Phone.decline() (tests, SH), ringing (call id | null), inCall, reading (bars, mode,
 //   battery, static, tell, dist), callLog(), voicemails(), voicemailText(i), reset(), tellOf(threat), unplayed.
 const Phone = (() => {
@@ -158,7 +161,7 @@ const Phone = (() => {
     else if (spec === 'auto') { st.ov = null; return null; }
     else if (typeof spec === 'object') {
       if (spec.climb !== undefined) fn = climbFn(spec);
-      else { const r = { n: clamp(Math.round(spec.n ?? 0), 0, 5), mode: spec.mode || 'normal', battery: spec.battery, static: spec.static }; fn = () => r; }
+      else { const r = { n: clamp(Math.round(spec.n ?? 0), 0, 5), mode: spec.mode || 'normal', battery: spec.battery, static: spec.static, letterbox: spec.letterbox }; fn = () => r; }
       if (spec.tell && !o.tell) o = { ...o, tell: spec.tell };
     }
     if (!fn) { console.warn('[Phone] unknown override', spec); return null; }
@@ -199,7 +202,7 @@ const Phone = (() => {
     st.staticV = dt > 0 ? U.damp(st.staticV, clamp(stat), 5, dt) : clamp(stat);
     st.n = n; st.mode = mode; st.battery = battery;
     try { if (typeof Snd !== 'undefined' && Snd.staticLevel) Snd.staticLevel(st.staticV < 0.01 ? 0 : st.staticV); } catch (e) { /* audio */ }
-    ui('bars', n, { mode, battery });
+    ui('bars', n, { mode, battery, letterbox: !!(fromOv && r.letterbox) });   // {letterbox:true}: shown under the letterbox too
     refreshScreen(dt);
   }
 
@@ -213,16 +216,29 @@ const Phone = (() => {
     if (!base && !o.def) return null;
     return { id, ...(base || {}), ...(o.def || {}) };
   }
+  // ring(id, {window (s, default 8), force, until: () => bool, cancelOnLeave}) → 'answered' | 'declined' | 'cancelled'
+  //   CONTRACT+ until / cancelOnLeave / Phone.cancel(id): a call that has not been answered yet is withdrawn — no
+  //   S.calls entry, no F/A, no voicemail — when until() turns true, when Aidan leaves the room it was rung in
+  //   (cancelOnLeave), or on Phone.cancel(id). Otherwise a pending call waits for any scene to hand control back.
+  const cancelled = new Set();
   function ring(callId, o = {}) {
     const def = callDef(callId, o);
     if (!def) { console.warn(`[Phone] no call "${callId}"`); return Promise.resolve('declined'); }
     if (S.calls && S.calls[callId] && !o.force) return Promise.resolve(S.calls[callId]);
+    cancelled.delete(callId);
     if (st.ring) {
       if (st.ring.id === callId) return st.ring.promise;
-      // one call at a time: this one rings after the current one ends
-      return st.ring.promise.then(() => ring(callId, o));
+      // one call at a time: this one rings after the current one ends (unless it is cancelled meanwhile)
+      return st.ring.promise.then(() => (cancelled.has(callId) ? (cancelled.delete(callId), 'cancelled') : ring(callId, o)));
     }
-    const R = { id: callId, def, caller: callerOf(def, callId), t: 0, force: null, promise: null, window: +o.window > 0 ? +o.window : 8 };
+    const room = typeof World !== 'undefined' ? World.room : null;
+    const R = { id: callId, def, caller: callerOf(def, callId), t: 0, force: null, promise: null, window: +o.window > 0 ? +o.window : 8, room };
+    R.gone = () => {
+      if (R.cancel) return true;
+      try { if (typeof o.until === 'function' && o.until(S)) return (R.cancel = true); } catch (e) { console.error('[Phone] ring until()', e); }
+      if (o.cancelOnLeave && typeof World !== 'undefined' && World.room !== R.room) return (R.cancel = true);
+      return false;
+    };
     st.ring = R;
     R.promise = Script.run((G) => ringFlow(G, R, o), { control: true, persist: true, name: 'ring:' + callId })
       .then((r) => (r === Script.ABORT || r === undefined ? (S.calls && S.calls[callId]) || 'declined' : r));
@@ -233,7 +249,8 @@ const Phone = (() => {
     // the player must be able to answer: a call rung by a trigger waits for a running scene to hand control back, and
     // its 8 s window pauses (prompt hidden) whenever a blocking script or a menu owns the input
     const isFree = () => !R.force && !menusOpen() && !(typeof UI !== 'undefined' && UI.capturing && UI.capturing()) && (!Script.busy || Script.owns(o.parent));
-    if (!isFree() && !R.force) await G.until(() => isFree() || !!R.force);
+    if (!isFree() && !R.force) await G.until(() => isFree() || !!R.force || R.gone());
+    if (R.gone() && !R.force) { if (st.ring === R) st.ring = null; Bus.emit('call:end', id, 'cancelled'); return 'cancelled'; }
     R.live = true;
     Bus.emit('call:ring', id);
     const vib = !(typeof META !== 'undefined' && META.options && META.options.vibration === false);
@@ -242,6 +259,7 @@ const Phone = (() => {
     try {
       await G.loop((dt) => {
         if (R.force) { how = R.force; return true; }
+        if (R.gone()) { how = 'cancelled'; return true; }
         const free = isFree();
         if (free !== shown) { shown = free; ui('callPrompt', free ? R.caller : null, { window: Math.max(0.5, R.window - R.t) }); }
         if (!free) return false;
@@ -256,6 +274,7 @@ const Phone = (() => {
       ui('callPrompt', null);
       if (st.ring === R && how !== 'answered') st.ring = null;
     }
+    if (how === 'cancelled') { if (st.ring === R) st.ring = null; Bus.emit('call:end', id, 'cancelled'); return 'cancelled'; }
     S.calls = S.calls || {};
     S.stats = S.stats || {};
     if (how === 'answered') {
@@ -291,6 +310,14 @@ const Phone = (() => {
     return 'declined';
   }
   function answer() { if (!st.ring) return false; st.ring.force = 'answered'; return true; }
+  // CONTRACT+: Phone.cancel(id?) — withdraw a pending / ringing call (the current one when id is omitted) that has not
+  // been answered: no S.calls entry, no F/A, no voicemail; G.call resolves 'cancelled'. A call queued behind another
+  // one is dropped before it rings. → true if something was cancelled.
+  function cancel(id) {
+    if (st.ring && (id === undefined || id === null || st.ring.id === id) && !st.inCall) { st.ring.cancel = true; return true; }
+    if (id) { cancelled.add(id); return true; }
+    return false;
+  }
   function decline() { if (!st.ring) return false; st.ring.force = 'declined'; return true; }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -300,7 +327,11 @@ const Phone = (() => {
     const vm = S.voicemails && S.voicemails[i];
     if (!vm) return null;
     const def = callDef(vm.id) || {};
-    return typeof def.voicemail === 'string' ? def.voicemail : '';
+    if (typeof def.voicemail === 'string') return def.voicemail;
+    // a scripted voicemail (async G => …): its transcript comes from CALLS[id].voicemailText (or .text, or a `text`
+    // property on the function)
+    const t = def.voicemailText ?? def.text ?? (def.voicemail && def.voicemail.text);
+    return typeof t === 'string' ? t : '';
   }
   function playVoicemail(i) {
     const vm = S.voicemails && S.voicemails[i];
@@ -555,7 +586,7 @@ const Phone = (() => {
   Bus.on('death', () => { st.ring = null; st.inCall = null; ui('callPrompt', null); });
 
   return {
-    update, bars, override, ring, answer, decline, playVoicemail, voicemailText, voicemails, callLog,
+    update, bars, override, ring, answer, decline, cancel, playVoicemail, voicemailText, voicemails, callLog,
     note, done, drawScreen, display, reset, tellOf,
     get notes() { return S.notes || []; },
     get ringing() { return st.ring ? st.ring.id : null; },

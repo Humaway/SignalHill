@@ -71,6 +71,9 @@
 //   floorOrder, stains, of:'<paper map id>' (receipt maps), sameFrame}, shapes also {t:'line', pts, dash},
 //   {t:'stairs', x,y,w,h, axis}, {dash, fill, lw, size, rot, lx, ly}; room.map.{outage (receipt map id), rxform,
 //   rfloor} — without rxform (or MAPS[receipt].sameFrame) the receipt map shows no arrow.
+// CONTRACT+ (maintenance): ITEMS desc / details / detail text may be functions of S; the doc view grows short texts
+//   (≤ 1.6× design size) and takes opts.page / opts.highlight; map floor names (MAPS floorNames or B/G/L4 → words), a
+//   third zoom step, notes kept on the sheet, Bus 'menu:before'(name, opts) before a screen is built.
 const Menus = (() => {
   const SERIF = "Georgia, 'Times New Roman', Times, serif";
   const MONO = "'Courier New', Courier, monospace";
@@ -450,11 +453,14 @@ const Menus = (() => {
       Render.freeze(!!sess.frozen);
     }
     sess = null;
+    injected.length = 0;
     ui('grainOverlay', false);
     consumeAll();
   }
   function buildScreen(sc) {
     if (sc.built) return;
+    // CONTRACT+ Bus 'menu:before'(name, opts): content can refresh what a screen shows (map marks) just before it's built
+    try { Bus.emit('menu:before', sc.name, sc.opts); } catch (e) { console.error('[Menus] menu:before', e); }
     sc.built = true;
     sc.el = mk('div', 'mn-s mn-' + sc.name, scrEl);
     sc.fade = fader(sc.el, 0);
@@ -1251,11 +1257,13 @@ const Menus = (() => {
     st.noneEl.textContent = st.list.length ? '' : 'Nothing.';
     itemsText(sc, !tabChanged);
   }
+  // CONTRACT+: ITEMS[id].desc, .details and a detail's .text may be functions of S (riddle-level wording)
+  const valOf = (v) => { if (typeof v !== 'function') return v; try { return v(S); } catch (e) { console.error('[Menus] item text', e); return null; } };
   function itemsText(sc, quiet) {
     const st = sc.st, e = st.list[st.sel];
     const d = e ? itemDef(e.id) : null;
     st.nameEl.innerHTML = e ? esc(itemName(e.id)) + (e.n > 1 ? `<span class="it-qty">×${e.n}</span>` : '') + (S.equipped === e.id ? '<span class="it-qty">· EQUIPPED</span>' : '') : '';
-    st.descEl.textContent = e ? (d && d.desc) || '' : '';
+    st.descEl.textContent = e ? (d && valOf(d.desc)) || '' : '';
     if (!quiet) { st.nameF.jump(0); st.descF.jump(0); st.nameF.to(1, 0.3); st.descF.to(1, 0.35); }
     if (st.row2d) [...st.row2d.children].forEach((c, i) => c.classList.toggle('sel', i === st.sel));
   }
@@ -1430,7 +1438,7 @@ const Menus = (() => {
   async function examineOpen(sc, id) {
     const st = sc.st;
     const d = itemDef(id);
-    if (!st.three) { itemsMsg(sc, (d && d.desc) || itemName(id), 3); return; }
+    if (!st.three) { itemsMsg(sc, (d && valOf(d.desc)) || itemName(id), 3); return; }
     const m = st.models.get(id);
     if (!m) return;
     st.busy = true;
@@ -1489,7 +1497,7 @@ const Menus = (() => {
     m.rotation.set(ex.pitch, ex.yaw, 0, 'XYZ');
     m.updateMatrixWorld(true);
     // details: revealed while their face points at the viewer (and close enough)
-    const d = itemDef(ex.id), details = (d && Array.isArray(d.details)) ? d.details : [];
+    const d = itemDef(ex.id), dv = d ? valOf(d.details) : null, details = Array.isArray(dv) ? dv : [];
     let best = -1, bestDot = 0;
     m.getWorldPosition(_v2);
     const toCam = _v.copy(cam.position).sub(_v2).normalize();
@@ -1506,7 +1514,7 @@ const Menus = (() => {
     if (best !== ex.shown) {
       ex.shown = best;
       if (best >= 0) {
-        st.exDetail.textContent = details[best].text || '';
+        st.exDetail.textContent = valOf(details[best].text) || '';
         st.exDetailF.jump(0); st.exDetailF.to(1, 0.4);
         if (!ex.found.has(best)) {
           ex.found.add(best);
@@ -1570,6 +1578,8 @@ const Menus = (() => {
     if (rm && def) {
       if (id === rm.id) { xform = rm.xform || null; floor = rm.floor ?? null; }
       else if (id === receiptFor(rm.id, rm)) { xform = rm.rxform || (def.sameFrame ? rm.xform : null) || null; floor = rm.rfloor ?? rm.floor ?? null; }
+      // (a function / a list of {box, xform}: resolved where Aidan stands — World.mapXform)
+      if (xform && typeof World !== 'undefined' && World.mapXform) { let px = 0, pz = 0; try { px = Player.pos.x; pz = Player.pos.z; } catch (e) { /* no player */ } xform = World.mapXform(xform, px, pz); }
     }
     const floors = floorsOf(def);
     if (floor == null || !floors.includes(floor)) floor = opts.floor && floors.includes(opts.floor) ? opts.floor : floors.includes('G') ? 'G' : floors[0];
@@ -1818,7 +1828,7 @@ const Menus = (() => {
       ix.lineWidth = 2.2 * k * 0.5; ix.strokeRect(fx0, fy0, fx1 - fx0, fy1 - fy0);
       ix.lineWidth = 0.8 * k * 0.5; ix.strokeRect(fx0 - 5 * k, fy0 - 5 * k, fx1 - fx0 + 10 * k, fy1 - fy0 + 10 * k);
       smallCaps(ix, upper(def.title || id), SW / 2, (M.t - 16) * k * 0.46, Math.min(26 * k, (SW * 0.8) / Math.max(8, String(def.title || id).length * 0.82)), { color: inkCol, spacing: 0.16 });
-      const sub = [def.sub, floors.length > 1 ? `Level ${fl}` : null].filter(Boolean).join(' · ');
+      const sub = [def.sub, floors.length > 1 ? floorName(def, fl) : null].filter(Boolean).join(' · ');
       if (sub) smallCaps(ix, sub, SW / 2, (M.t - 16) * k * 0.8, 11 * k, { italic: true, color: inkCol, spacing: 0.08 });
       const fy = SH - (M.b - 16) * k * 0.45;
       smallCaps(ix, def.scale || 'Not to scale', (M.l - 16) * k, fy, 9 * k, { align: 'left', color: inkCol, spacing: 0.2 });
@@ -1830,7 +1840,7 @@ const Menus = (() => {
       smallCaps(ix, '* * * * * * * * * * * *', cx, y, 10 * k, mono); y += 30 * k;
       smallCaps(ix, upper(def.title || id), cx, y, fitLabel(ix, upper(def.title || id), SW * 0.9, 15 * k, { mono: true }), mono); y += 26 * k;
       if (def.sub) { smallCaps(ix, upper(def.sub), cx, y, 10 * k, mono); y += 22 * k; }
-      if (floors.length > 1) { smallCaps(ix, `LEVEL ${fl}`, cx, y, 10 * k, mono); y += 22 * k; }
+      if (floors.length > 1) { smallCaps(ix, upper(floorName(def, fl)), cx, y, 10 * k, mono); y += 22 * k; }
       smallCaps(ix, '-'.repeat(Math.max(10, Math.round(SW / (7.5 * k)))), cx, (M.t - 18) * k, 10 * k, mono);
       const fy = SH - M.b * k;
       smallCaps(ix, '-'.repeat(Math.max(10, Math.round(SW / (7.5 * k)))), cx, fy + 18 * k, 10 * k, mono);
@@ -1846,6 +1856,18 @@ const Menus = (() => {
     sheetCache.set(key, sh);
     return sh;
   }
+  // a floor tab's printed name: MAPS[id].floorNames[fl] if given, else B → Basement, G → Ground, LG → Lower Ground,
+  // M → Mezzanine, L4 → Level 4, P1 → Parking 1, 3 → Level 3 (other keys as they are)
+  function floorName(def, fl) {
+    const names = def && def.floorNames;
+    if (names && names[fl]) return names[fl];
+    const f = String(fl), m = /^([A-Za-z]*)(\d*)$/.exec(f);
+    if (!m) return f;
+    const n = m[2], base = { B: 'Basement', G: 'Ground', LG: 'Lower Ground', UG: 'Upper Ground', M: 'Mezzanine', L: 'Level', P: 'Parking', R: 'Roof' }[m[1].toUpperCase()];
+    if (!m[1] && n) return 'Level ' + n;
+    if (!base) return f;
+    return n ? `${base} ${n}` : base === 'Level' ? f : base;
+  }
   function mapMarks(id, fl) {
     const def = MAPS[id], floors = floorsOf(def), f0 = floors.includes('G') ? 'G' : floors[0];
     const out = [];
@@ -1858,7 +1880,7 @@ const Menus = (() => {
     return out;
   }
   // Aidan's marker: wobbly, slightly translucent, a little overshoot
-  function drawMark(x, m, receipt) {
+  function drawMark(x, m, receipt, maxX = Infinity) {
     const col = receipt ? 'rgba(18,128,118,0.9)' : 'rgba(176,34,28,0.86)';
     const r = U.rng(U.hash(String(m.id || '') + m.t + m.x + ',' + m.y) || 7);
     const j = (a) => (r() - 0.5) * a;
@@ -1884,7 +1906,14 @@ const Menus = (() => {
     }
     if (m.text) {
       const font = (Tex.fonts && Tex.fonts.marker) || "'Comic Sans MS', cursive";
-      const tx = m.t === 'note' ? 0 : s + 6, ty = m.t === 'note' ? 0 : 5;
+      let tx = m.t === 'note' ? 0 : s + 6;
+      const ty = m.t === 'note' ? 0 : 5;
+      // text that would run off the sheet (narrow receipt strips) goes to the left of the mark instead
+      if (isFinite(maxX)) {
+        x.font = `bold ${m.textSize || 15}px ${font}`;
+        const tw = x.measureText(String(m.text)).width * 1.08;
+        if ((m.x || 0) + tx + tw > maxX) tx = m.t === 'note' ? Math.max(-(m.x || 0), maxX - (m.x || 0) - tw) : -(s + 6) - tw;
+      }
       x.rotate(U.rad(m.t === 'note' ? (m.rot ?? -3) : -2));
       try { Tex.handwriting(x, String(m.text), tx, ty, { size: m.textSize || 15, color: col, font, wobble: 1.1, weight: 'bold' }); }
       catch (e) { x.font = `bold 15px ${font}`; x.fillText(String(m.text), tx, ty); }
@@ -1895,7 +1924,8 @@ const Menus = (() => {
     const cv = canvas(sh.SW, sh.SH), x = cv.getContext('2d');
     x.drawImage(sh.cv, 0, 0);
     x.save(); x.translate(sh.M.l * sh.k, sh.M.t * sh.k); x.scale(sh.k, sh.k);
-    for (const m of mapMarks(id, fl)) { try { drawMark(x, m, sh.receipt); } catch (e) { console.error('[Menus] map mark', e); } }
+    const maxX = sh.SW / sh.k - sh.M.l - 4;                 // the sheet's right edge in map units
+    for (const m of mapMarks(id, fl)) { try { drawMark(x, m, sh.receipt, maxX); } catch (e) { console.error('[Menus] map mark', e); } }
     x.restore();
     return cv;
   }
@@ -1954,7 +1984,7 @@ const Menus = (() => {
       st.rot = U.rad(((U.hash(tg.id) % 100) / 100 - 0.5) * 2.2);
       mapLoadFloor(sc, st.floor);
       st.view = { ...st.goal };
-      legend(sc, () => [st.zoom ? ['W A S D', 'L STICK', 'MOVE'] : null, ['E', 'A', st.zoom ? 'AREA' : 'CLOSER'], tg.floors.length > 1 ? ['Q R', 'LB RB', 'FLOOR'] : null, ['ESC', 'B', 'BACK']]);
+      legend(sc, () => [st.zoom ? ['W A S D', 'L STICK', 'MOVE'] : null, ['E', 'A', st.zoom === 2 ? 'AREA' : 'CLOSER'], tg.floors.length > 1 ? ['Q R', 'LB RB', 'FLOOR'] : null, ['ESC', 'B', 'BACK']]);
       mapResize(sc);
     },
     show(sc) { if (!sc.st.none) { sfx('paper', { vol: 0.9 }); sc.st.dirty = true; } },
@@ -1999,7 +2029,10 @@ const Menus = (() => {
   function mapFit(st) { const sh = st.sheet; return Math.min((window.innerWidth * 0.86) / sh.SW, (window.innerHeight * 0.84) / sh.SH); }
   function mapGoal(sc, recentre) {
     const st = sc.st, sh = st.sheet, fit = mapFit(st);
-    const s = st.zoom ? Math.min(Math.max(fit * 2.5, fit * 1.4), 1.25) : fit;
+    // three steps: the whole sheet, the building (≤ 1.25 sheet px per screen px), close (≤ 2.5 — small labels on a small
+    // window read at this one)
+    const s1 = Math.min(Math.max(fit * 2.5, fit * 1.4), 1.25);
+    const s = st.zoom === 2 ? Math.max(s1 * 1.6, Math.min(fit * 5, 2.5)) : st.zoom ? s1 : fit;
     const g = st.goal || { cx: sh.SW / 2, cy: sh.SH / 2, s };
     g.s = s;
     if (!st.zoom) { g.cx = sh.SW / 2; g.cy = sh.SH / 2; }
@@ -2030,8 +2063,10 @@ const Menus = (() => {
     const st = sc.st, fl = st.tg.floors;
     if (K.cancel() || K.key('KeyM') || padEdge(8)) { sfx('ui_cancel'); sc.close(null); return; }
     const wh = inp('wheel') || 0;
-    if (K.confirm() || (wh < 0 && !st.zoom) || (wh > 0 && st.zoom)) {
-      st.zoom = st.zoom ? 0 : 1; sfx('paper', { vol: 0.45, dur: 0.3 }); mapGoal(sc, true);
+    const conf = K.confirm();
+    if (conf || (wh < 0 && st.zoom < 2) || (wh > 0 && st.zoom)) {
+      st.zoom = conf ? (st.zoom + 1) % 3 : clamp(st.zoom + (wh < 0 ? 1 : -1), 0, 2);
+      sfx('paper', { vol: 0.45, dur: 0.3 }); mapGoal(sc, true);
     }
     if (fl.length > 1) {
       let d = 0;
@@ -2248,6 +2283,16 @@ const Menus = (() => {
     let lines = wrapAll(size);
     // shrink a little before paginating (never below 72 % of the design size)
     for (let k = 0; k < 6 && lines.length * lhFor(size) > bh && size > (w / P.size) * 0.72; k++) { size *= 0.93; lines = wrapAll(size); }
+    // a short text on a big page grows (up to 1.6× the design size) until it fills about 60 % of the text box
+    if (lines.length * lhFor(size) < bh * 0.4 && !P.phone) {
+      for (let k = 0; k < 10; k++) {
+        const s2 = size * 1.07;
+        if (s2 > (w / P.size) * 1.6) break;
+        const l2 = wrapAll(s2);
+        if (l2.length * lhFor(s2) > bh * 0.6) break;
+        size = s2; lines = l2;
+      }
+    }
     const lh = lhFor(size), per = Math.max(1, Math.floor(bh / lh));
     const pages = [];
     for (let i = 0; i < lines.length; i += per) pages.push(lines.slice(i, i + per));
@@ -2407,6 +2452,7 @@ const Menus = (() => {
     x.save(); clipPath(); x.clip(); x.drawImage(st.paper, 0, 0);
     const lines = L.pages[st.page] || [];
     const tl = canvas(Math.ceil(L.w), Math.ceil(L.h)), tx = tl.getContext('2d');
+    const marks = [];                                       // highlighter bands (opts.highlight), drawn under the ink
     const r = U.rng(U.hash('ink:' + d.id + ':' + st.page));
     let y = L.by + L.size * (L.P.hand ? 0.95 : 0.9);
     const MARKER_COLS = ['#1d3f94', '#1a1a1a', '#b0241c'];
@@ -2436,6 +2482,7 @@ const Menus = (() => {
         } else { tx.fillText(ln.t, L.bx, y); wdt = tx.measureText(ln.t).width; }
         tx.globalAlpha = 1;
       }
+      if (wdt > 0 && docHighlighted(st, ln.t)) marks.push({ x: L.P.plaque ? L.bx + (L.bw - wdt) / 2 : L.bx, y, w: wdt });
       if (ln.strike && wdt > 0) {
         const sx = L.P.plaque ? L.bx + (L.bw - wdt) / 2 : L.bx;
         tx.strokeStyle = col; tx.lineWidth = Math.max(1.5, L.size * 0.09); tx.lineCap = 'round';
@@ -2451,12 +2498,32 @@ const Menus = (() => {
       tx.drawImage(noiseField(tl.width, tl.height, r, 3, 18), 0, 0, tl.width, tl.height);
       tx.globalAlpha = 1; tx.globalCompositeOperation = 'source-over';
     }
+    if (marks.length) {                                     // a yellow highlighter pass, a little uneven
+      x.save(); x.globalCompositeOperation = L.P.phone ? 'source-over' : 'multiply';
+      const hr = U.rng(U.hash('hl:' + d.id + ':' + st.page));
+      for (const m of marks) {
+        x.fillStyle = L.P.phone ? 'rgba(60,199,182,0.22)' : `rgba(255,${226 + Math.floor(hr() * 14)},${70 + Math.floor(hr() * 30)},0.62)`;
+        const pad = L.size * 0.25, top = m.y - L.size * 0.92 + (hr() - 0.5) * L.size * 0.08;
+        x.fillRect(m.x - pad, top, m.w + pad * 2 + (hr() - 0.5) * L.size * 0.3, L.size * 1.22);
+      }
+      x.restore();
+    }
     x.globalCompositeOperation = L.P.phone ? 'source-over' : 'multiply';
     x.drawImage(tl, 0, 0);
     x.globalCompositeOperation = 'source-over';
     if (L.P.phone) { const g = x.createLinearGradient(0, 0, L.w, L.h); g.addColorStop(0, 'rgba(255,255,255,0.05)'); g.addColorStop(0.4, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, L.w, L.h); }
     x.restore();
     x.restore();
+  }
+  // opts.highlight: strings (a line containing one is highlighted), RegExps, or line numbers (0-based, whole document)
+  function docHighlighted(st, text) {
+    const hl = st.hl;
+    if (!hl || !hl.length || !text) return false;
+    for (const h of hl) {
+      if (typeof h === 'string' && h && String(text).includes(h)) return true;
+      if (h instanceof RegExp && h.test(text)) return true;
+    }
+    return false;
   }
   function docSetup(sc) {
     const st = sc.st, dpr = DPR();
@@ -2475,10 +2542,16 @@ const Menus = (() => {
       if (!st.d.id) st.d = { ...st.d, id: sc.opts.id };
       st.cv = mk('canvas', 'mn-cv', sc.el); st.ctx = st.cv.getContext('2d'); st.cvF = fader(st.cv, 1);
       st.pageEl = mk('div', 'dc-page', sc.el);
+      // CONTRACT+ opts.page (0-based) and opts.highlight ([strings | RegExps]): G.doc(id, {page, highlight}) opens the
+      // document at that page with those lines marked; with a highlight and no page it opens on the first highlighted page
       st.page = 0;
+      st.hl = Array.isArray(sc.opts.highlight) ? sc.opts.highlight : sc.opts.highlight ? [sc.opts.highlight] : null;
       legend(sc, () => [st.L && st.L.pages.length > 1 ? ['A D', 'D-PAD', 'TURN'] : null, ['E', 'A', st.L && st.page < st.L.pages.length - 1 ? 'NEXT' : 'CLOSE'], ['ESC', 'B', 'BACK']]);
       st.legendEl.style.bottom = '0.9vh';
       docSetup(sc);
+      if (typeof sc.opts.page === 'number') st.page = clamp(sc.opts.page | 0, 0, st.L.pages.length - 1);
+      else if (st.hl) { const i = st.L.pages.findIndex((pg) => pg.some((ln) => docHighlighted(st, ln.t))); if (i > 0) st.page = i; }
+      if (st.page) { st.pageEl.textContent = `${st.page + 1} / ${st.L.pages.length}`; docDraw(sc); }
       if (sc.opts.mark !== false && sc.opts.id && hasScript() && Script.readDoc) { try { Script.readDoc(sc.opts.id); } catch (e) { console.error(e); } }
       else if (sc.opts.mark !== false && sc.opts.id) { S.docs = S.docs || {}; S.docs[sc.opts.id] = { ...(S.docs[sc.opts.id] || {}), read: true }; }
     },
@@ -3168,7 +3241,9 @@ const Menus = (() => {
     get _top() { return top(); },                 // CONTRACT+ (tests): the top screen instance {name, st, ready …}
     rank, results, fateCards, memoCount,
     // CONTRACT+: Menus.nav(action) — inject a menu action for tests ('up'|'down'|'left'|'right'|'confirm'|'cancel'|'any')
-    nav(a) { ensure(); injected.push(a); return injected.length; },
+    // (an injected nav with no screen open is dropped, and leftovers die with the menu session: a SH.nav('confirm')
+    // sent during a cutscene must never confirm the next menu that opens — the pause menu's RESUME)
+    nav(a) { ensure(); if (!stack.length) return 0; injected.push(a); return injected.length; },
     SCREENS,
   };
   requestAnimationFrame(selfTick);

@@ -344,9 +344,11 @@ const Render = (() => {
     s.renderOrder = 10;
     s.userData.opacity = m.opacity;
     s.userData.halo = true;
+    // o.fog (0..1, default 1): how much the fog swallows it — 0 keeps a far beacon (the mast's aircraft light) readable
+    const fogK = o.fog ?? 1;
     s.onBeforeRender = (r, sc, cam) => {
       s.getWorldPosition(tmpV2);
-      const d = tmpV2.distanceTo(cam.position), fd = (sc.fog ? sc.fog.density : 0) * 0.5 * d;
+      const d = tmpV2.distanceTo(cam.position), fd = (sc.fog ? sc.fog.density : 0) * 0.5 * d * fogK;
       m.opacity = s.userData.opacity * Math.exp(-fd * fd) * Math.min(1, d / 1.5);
     };
     s.userData.free = () => { s.removeFromParent(); m.dispose(); };

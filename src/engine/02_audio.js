@@ -1796,6 +1796,22 @@ const Snd = (() => {
     v.built = true; v.check();
     return v.handle;
   }
+  // CONTRACT+: Snd.define(name, build(ctx, dest, o, t, own) → seconds (Infinity for a loop), {vol, bus:'fx'|'amb'|'ui'|
+  // 'music', loops}) — a content-made sound played like any other (Snd.play / G.sfx / Snd.loop): it goes through the
+  // master / effects / duck buses, gets pos (3D), vol, phone, far, lp/hp, verb and fades like the built-in ones. The
+  // builder wires Web Audio nodes from `ctx` into `dest` starting at time `t`; pass every node through own(node) so the
+  // voice stops and disconnects it when the sound ends or is stopped (a loop runs until stop()).
+  function define(name, build, d = {}) {
+    if (typeof build !== 'function') return false;
+    SFX[name] = (v, o, t) => {
+      const own = (n) => { if (!n) return n; if (typeof n.start === 'function' && typeof n.stop === 'function') v.srcs.add(n); v.sh(n); return n; };
+      const dur = build(ctx, v.in, o, t, own, v.params);
+      return dur === undefined || dur === null ? 2 : dur;
+    };
+    if (d.loops) SFX[name].loops = true;
+    DEF[name] = { ...(DEF[name] || {}), ...(d.vol !== undefined ? { vol: d.vol } : {}), ...(d.bus ? { bus: d.bus } : {}) };
+    return true;
+  }
   // Snd.murmur(kind, {pos, dur, vol, line}) — 'tethered' | 'reach' | 'closer' | 'crowd' | 'cheer'
   function murmur(kind, o) { return play('murmur_' + kind, o || {}); }
   // Snd.tell(kind) — the phone's monster tells: 'eftpos' (a bar gained), 'vibration', 'pulse', 'battery', 'none'
@@ -2061,7 +2077,7 @@ const Snd = (() => {
   }
 
   return {
-    init, update, play, footstep, ambient, music, stopMusic, staticLevel, loop, murmur, tell, duck, muted, setVolumes,
+    init, update, play, define, footstep, ambient, music, stopMusic, staticLevel, loop, murmur, tell, duck, muted, setVolumes,
     setListener, setWorld, pauseWorld, stopLoops, stats, names, render,
     get ctx() { return ctx; },
     get ready() { return !!ctx && ctx.state === 'running'; },

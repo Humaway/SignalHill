@@ -32,6 +32,13 @@
 // [{cam, x, z, y, why:'uncovered'|'offscreen'|'behind', world}] (cam null for uncovered points). A camera with `when`
 // is checked wherever it contains a point (it may be the one showing); an unconditional camera only where no
 // unconditional camera of higher `pri` also contains the point.
+// CONTRACT+: far — the far plane (m, default 200) from a scripted move (G.cam({far})), a camera def or the room def
+//   (wide aerial / dawn sky shots with a big dome).
+// CONTRACT+: rooms with cutsceneOnly:true (sets the player never walks) are skipped; rooms with stackedFloors:true are
+//   sampled on every floor layer; Cam.check(room, {occlusion:true}) also casts a ray from each camera to Aidan's chest
+//   at every sample (1 m grid by default) against the room's visible meshes and reports why:'occluded' with `hit` (the
+//   first object's name) — walls, closed doors, sign backs, duct runs; one-sided (cutaway) faces seen from behind and
+//   transparent / glass surfaces don't block. Off by default (it is slow on big rooms).
 const Cam = (() => {
   const D2R = Math.PI / 180, HYST = 0.5, FOV_MIN = 30, FOV_MAX = 60, CHEST = 1.1;
   const cam = Render.camera;
@@ -355,7 +362,7 @@ const Cam = (() => {
     const dur = keys[keys.length - 1].t;
     let resolve;
     const promise = new Promise((r) => { resolve = r; });
-    scriptedSt = { keys, t: 0, dur, follow: spec.follow || null, followOffset: spec.followOffset ? U.toV3(spec.followOffset) : null, resolve, promise, done: dur <= 0 };
+    scriptedSt = { keys, t: 0, dur, follow: spec.follow || null, followOffset: spec.followOffset ? U.toV3(spec.followOffset) : null, resolve, promise, done: dur <= 0, far: +spec.far || 0 };
     stepScripted(0);
     apply(0);
     if (scriptedSt.done) { scriptedSt.resolve = null; resolve(); }
@@ -414,9 +421,12 @@ const Cam = (() => {
       cam.translateX(n(37, 0.3) * amp * 0.05); cam.translateY(n(41, 1.9) * amp * 0.05);
       cam.rotateZ(n(29, 4.1) * amp * 1.4 * D2R); cam.rotateX(n(33, 2.7) * amp * 0.9 * D2R);
     }
-    if (Math.abs(cam.fov - view.fov) > 1e-4) { cam.fov = view.fov; cam.updateProjectionMatrix(); }
+    // far plane (CONTRACT+): a scripted move's `far`, else the current camera def's, else the room's `far`, else 200 m
+    const far = (scriptedSt && scriptedSt.far) || (!scriptedSt && current && current.far) || roomFar() || 200;
+    if (Math.abs(cam.fov - view.fov) > 1e-4 || cam.far !== far) { cam.fov = view.fov; cam.far = far; cam.updateProjectionMatrix(); }
     cam.updateMatrixWorld(true);
   }
+  const roomFar = () => { const d = roomId && ROOMS[roomId]; return (d && +d.far) || 0; };
   function update(dt = 0) {
     if (defs.length && Math.abs(curAspect() - aspectUsed) > 0.01) refit();
     const p = subject(_subj);
@@ -472,6 +482,37 @@ const Cam = (() => {
     }
     return true;
   }
+  // the meshes that can hide Aidan from a camera: visible, opaque, in this world (world-tagged groups of the other world
+  // excluded); sprites, lines, points, transparent / alpha-tested materials and actors aren't occluders
+  const _ray = new THREE.Raycaster();
+  function occluders(rb, outage) {
+    const hidden = new Set();
+    for (const t of rb.tagged || []) if (!matchWorld(t.world, outage)) hidden.add(t.obj);
+    const list = [];
+    const walk = (o) => {
+      if (!o.visible || hidden.has(o) || o.userData.rig || o.userData.noOcclude) return;
+      if (o.isMesh && !o.isInstancedMesh) {
+        const ms = Array.isArray(o.material) ? o.material : [o.material];
+        if (ms.some((m) => m && !m.transparent && m.opacity >= 0.99 && m.visible !== false && !m.alphaTest)) list.push(o);
+      }
+      for (const c of o.children) walk(c);
+    };
+    rb.group.updateMatrixWorld(true);
+    walk(rb.group);
+    list.root = rb.group;
+    return list;
+  }
+  function occludedBy(list, from, to) {
+    const d = _e.copy(to).sub(from), len = d.length();
+    if (len < 0.5) return null;
+    _ray.set(from, d.divideScalar(len));
+    _ray.near = 0.05; _ray.far = len - 0.35;
+    const hits = _ray.intersectObjects(list, false);
+    if (!hits.length) return null;
+    let o = hits[0].object, name = o.name;
+    while ((!name || /^(merged|mesh|part|leaf)/i.test(name)) && o.parent && o.parent !== list.root) { o = o.parent; name = o.name || name; }
+    return name || 'mesh';
+  }
   function check(id = roomId, o = {}) {
     if (id === '*' || id === 'all') {
       const all = [];
@@ -480,7 +521,8 @@ const Cam = (() => {
     }
     const def = ROOMS[id];
     if (!def) return [{ cam: null, x: 0, z: 0, why: 'noroom', room: id }];
-    const aspect = o.aspect ?? 16 / 9, step = o.step ?? 0.5;
+    if (def.cutsceneOnly && !o.force) return [];                     // the player never walks it: no coverage needed
+    const aspect = o.aspect ?? 16 / 9, step = o.step ?? (o.occlusion ? 1 : 0.5);
     let rb = null, temp = false;
     if (typeof World !== 'undefined' && World && World.room === id && World.build) rb = World.build;
     else { rb = Kit.build(def); temp = true; }
@@ -498,9 +540,11 @@ const Cam = (() => {
       const x0 = Math.ceil(b[0] / step - 1e-6) * step, z0 = Math.ceil(b[1] / step - 1e-6) * step;
       for (const w of worlds) {
         const outage = w === 'outage';
+        const occ = o.occlusion ? occluders(rb, outage) : null;
         for (let x = x0; x <= b[2] + 1e-6; x += step) for (let z = z0; z <= b[3] + 1e-6; z += step) {
           const xx = Math.round(x * 1000) / 1000, zz = Math.round(z * 1000) / 1000;
-          const y = Kit.floorAt(rb.floors, xx, zz, outage);
+          const layers = def.stackedFloors ? Kit.floorLayers(rb.floors, xx, zz, outage) : [Kit.floorAt(rb.floors, xx, zz, outage)];
+          for (const y of layers) {
           if (y === null || !walkable(rb, xx, zz, y, outage)) continue;
           const containing = cams.filter((c) => matchWorld(c.world, outage) && inVol(c, xx, zz, y));
           if (!containing.length) { problems.push({ cam: null, x: xx, z: zz, y, why: 'uncovered', world: w }); continue; }
@@ -508,10 +552,16 @@ const Cam = (() => {
           for (const c of containing) {
             if (!c.when && c.pri < top) continue;
             steadyView(c, xx, y, zz, tmp);
+            let bad = false;
             for (const h of [0.1, 1.8]) {
               const why = visibility(tmp, _b.set(xx, y + h, zz), aspect);
-              if (why) { problems.push({ cam: c.id, x: xx, z: zz, y, h, why, world: w }); break; }
+              if (why) { problems.push({ cam: c.id, x: xx, z: zz, y, h, why, world: w }); bad = true; break; }
             }
+            if (!bad && occ) {
+              const hit = occludedBy(occ, tmp.pos, _b.set(xx, y + CHEST, zz));
+              if (hit) problems.push({ cam: c.id, x: xx, z: zz, y, h: CHEST, why: 'occluded', hit, world: w });
+            }
+          }
           }
         }
       }

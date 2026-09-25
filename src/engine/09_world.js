@@ -40,11 +40,18 @@
 //   Room def extras read here: grade (Render grade name), outageFog {density,color}, env (extra Render.setEnvironment
 //   opts), surfaces, outageSurface.  Bus: 'outage:begin'(on) at the start of a transition (the 'outage'(on) event
 //   fires at the swap).
+// CONTRACT+ (maintenance): cancelTransition(), recheckMarks() (automatic map X → tick when its reason is gone; runs on
+//   load and on flag/pickup/chapter/outage), mapXform(xform, x, z) (array | fn(x,z) | [{box, xform}]), heightAt(x, z,
+//   refY) + room stackedFloors, yBand on exits / triggers / interactables, interactable kind priorities (prio), crawl
+//   interactables, room outageAmbient / outageEnv; goto / doors / exits to a missing room are inert (a warning).
 const World = (() => {
   const D2R = Math.PI / 180;
   const matchWorld = (w, outage) => Kit.matchWorld(w, outage);
   const safeWhen = (fn) => { try { return !fn || !!fn(S); } catch (e) { console.error('[World] when() failed', e); return false; } };
   const inBox = (b, x, z) => x >= b[0] && x <= b[2] && z >= b[1] && z <= b[3];
+  // CONTRACT+ y bands: exits, triggers and interactables with yBand:[y0,y1] only count while Aidan's feet are in it
+  // (stacked landings sharing a footprint)
+  const inBand = (band, y) => !band || y === undefined || y === null || (y >= band[0] - 0.01 && y <= band[1] + 0.01);
   const hasUI = () => typeof UI !== 'undefined' && !!UI;
   const ui = (fn, ...a) => { try { if (hasUI() && typeof UI[fn] === 'function') return UI[fn](...a); } catch (e) { console.error('[World] UI.' + fn, e); } return undefined; };
   const sfx = (name, o) => { try { if (typeof Snd !== 'undefined' && Snd.play) return Snd.play(name, o); } catch (e) { /* audio not ready */ } return null; };
@@ -138,9 +145,14 @@ const World = (() => {
   // ---------------------------------------------------------------------------------------------------------------
   // Room load / unload / transitions
   // ---------------------------------------------------------------------------------------------------------------
+  // Room environment. CONTRACT+ room fields for the Outage: outageAmbient [color, intensity] (the hemisphere light —
+  // the built-in outdoor Outage look is near-black beyond the torch) and outageEnv {…Render.setEnvironment opts};
+  // both apply whenever the Outage shows (load, setOutage, the transition's cross-fade), no polling needed.
   function envOpts(outage, extra = {}) {
     const d = def || {};
-    return { outdoor: !!d.outdoor, outage: !!outage, fog: (outage && d.outageFog) || d.fog || null, noFog: !!d.noFog, grade: outage ? 'outage' : d.grade || undefined, ...(d.env || {}), ...extra };
+    const o = { outdoor: !!d.outdoor, outage: !!outage, fog: (outage && d.outageFog) || d.fog || null, noFog: !!d.noFog, grade: outage ? 'outage' : d.grade || undefined, ...(d.env || {}) };
+    if (outage) { if (d.outageEnv) Object.assign(o, d.outageEnv); if (d.outageAmbient) o.ambient = d.outageAmbient; }
+    return { ...o, ...extra };
   }
   function load(id, entry = null, o = {}) {
     const d = ROOMS[id];
@@ -166,6 +178,7 @@ const World = (() => {
     trigIn.clear(); contacts.clear(); exitArm.clear(); exitCols.clear(); failedAnim.clear();
     const p = Player.pos;
     for (const ex of build.exits) exitArm.set(ex, !inBox(ex.box, p.x, p.z));
+    try { recheckMarks(); } catch (e) { console.error('[World] map marks', e); }
     Bus.emit('room:enter', id);
     if (!o.deferEnter) runEnter(from);
     return build;
@@ -184,7 +197,7 @@ const World = (() => {
       const p = entry.pos || [entry.x || 0, entry.z || 0];
       if (p.length === 3) { x = p[0]; y = p[1]; z = p[2]; } else { x = p[0]; z = p[1]; }
       yawDeg = entry.yaw ?? 0;
-      if (y !== undefined && heightAt(x, z) !== null) y = undefined;       // snap saved positions to the floor
+      if (y !== undefined && heightAt(x, z, y) !== null) y = def.stackedFloors ? heightAt(x, z, y) : undefined;   // snap saved positions to the floor
     } else {
       const e = (Array.isArray(entry) && entry) || (entry && E[entry]) || (from && E[from]) || E.start || E[Object.keys(E)[0]] || [0, 0, 0];
       if (entry && typeof entry === 'string' && !E[entry]) console.warn(`[World] room "${roomId}" has no entry "${entry}"`);
@@ -210,10 +223,12 @@ const World = (() => {
     trigIn.clear(); exitArm.clear(); exitCols.clear(); contacts.clear(); doorAnims.clear();
   }
   // World.goto: fade to black, door sounds (handle, creak … close), 1.5 s of black while the room builds, fade in
+  let gotoGen = 0;
   async function goto(id, entry = null, o = {}) {
     if (transitioning) return false;
-    if (!ROOMS[id]) { console.error(`[World] goto: unknown room "${id}"`); return false; }
+    if (!ROOMS[id]) { console.warn(`[World] goto: unknown room "${id}" — ignored`); return false; }
     transitioning = true;
+    const gen = ++gotoGen, stale = () => gen !== gotoGen;
     const from = roomId, sound = o.sound ?? 'door', fade = o.fade !== false, street = sound !== 'door';
     const style = o.style || 'wood';
     Player.lock('goto', true);
@@ -221,19 +236,29 @@ const World = (() => {
       if (sound === 'door') { sfx('handle'); later(0.22, () => sfx('door_open', { style })); }
       else if (sound === 'steps') steps(3, 0.33);
       if (fade) await Promise.resolve(ui('fade', 1, street ? 0.35 : 0.3));
+      if (stale()) return false;
       const black = o.black ?? (sound === 'door' ? 1.5 : fade ? 0.45 : 0);
       const t0 = clock;
       await wait(0.03);
+      if (stale()) return false;
       load(id, entry, { fromRoom: from, deferEnter: true });
-      if (sound === 'door') later(Math.max(0.05, black - 0.6 - (clock - t0)), () => sfx('door_close', { style }));
+      if (sound === 'door') later(Math.max(0.05, black - 0.6 - (clock - t0)), () => { if (!stale()) sfx('door_close', { style }); });
       const rest = black - (clock - t0);
       if (rest > 0) await wait(rest);
+      if (stale()) return false;
       Player.lock('goto', false);
       runEnter(from);
       if (fade) await Promise.resolve(ui('fade', 0, street ? 0.4 : 0.55));
-      return true;
+      return !stale();
     } catch (e) { console.error('[World] goto failed', e); return false; }
-    finally { transitioning = false; Player.lock('goto', false); }
+    finally { if (!stale()) { transitioning = false; Player.lock('goto', false); } }
+  }
+  // CONTRACT+: World.cancelTransition() — a running goto stops where it is and never loads its room (Game's teardown:
+  // a new game / chapter select / load must not be overtaken by the previous flow's transition finishing later)
+  function cancelTransition() {
+    gotoGen++;
+    transitioning = false;
+    try { Player.lock('goto', false); } catch (e) { /* no player */ }
   }
   function steps(n, gap) {
     const surf = def ? surfaceAt(Player.pos.x, Player.pos.z) : 'bitumen';
@@ -265,7 +290,9 @@ const World = (() => {
   // ---------------------------------------------------------------------------------------------------------------
   // Collision and queries
   // ---------------------------------------------------------------------------------------------------------------
-  function heightAt(x, z) { return build ? Kit.floorAt(build.floors, x, z, S.outage) : null; }
+  // heightAt(x, z, refY?) → floor y | null. In a room with stackedFloors:true the floor is the highest one at or just
+  // above refY's step (refY = the mover's feet); elsewhere (and without refY) the last registered floor wins.
+  function heightAt(x, z, refY) { return build ? Kit.floorAt(build.floors, x, z, S.outage, def && def.stackedFloors ? refY : undefined) : null; }
   const activeCol = (c) => c.enabled !== false && matchWorld(c.world, S.outage);
   function exitCollider(ex) {
     let c = exitCols.get(ex);
@@ -295,7 +322,7 @@ const World = (() => {
   }
   function floorCheck(x, z, y, o) {
     if (o.noFloor) return y;
-    const f = heightAt(x, z);
+    const f = heightAt(x, z, y);
     if (f === null) return false;
     if (f - y > (o.maxStep ?? 0.45)) return false;
     if (y - f > (o.maxDrop ?? 1.0)) return false;
@@ -316,13 +343,13 @@ const World = (() => {
       cols.push(c);
     }
     for (const ex of build.exits) {
-      if (!matchWorld(ex.world, S.outage) || !ex.when || safeWhen(ex.when)) continue;
+      if (!matchWorld(ex.world, S.outage) || !ex.when || !inBand(ex.yBand, feet) || safeWhen(ex.when)) continue;
       const b = ex.box;
       if (b[2] < minx || b[0] > maxx || b[3] < minz || b[1] > maxz) continue;
       cols.push(exitCollider(ex));
     }
     let x = pos.x, z = pos.z;
-    let y = o.noFloor ? feet : heightAt(x, z);
+    let y = o.noFloor ? feet : heightAt(x, z, feet);
     if (y === null) y = feet;
     const n = Math.max(1, Math.ceil(len / (r * 0.5)));
     const sx = dx / n, sz = dz / n;
@@ -423,7 +450,11 @@ const World = (() => {
     if (!matchWorld(it.world, S.outage)) return false;
     return safeWhen(it.when);
   }
-  // nearestInteractable(pos, yawRadians, maxDist=3, {cone (deg, default 100), use (within its own r), look (skip look:false)})
+  // nearestInteractable(pos, yawRadians, maxDist=3, {cone (deg, default 100), use (within its own r), look (skip
+  // look:false), crawl (only crawl:true ones)}). Score = distance + angle off the facing + the kind's priority (m):
+  // doors, pickups, payphones, ladders 0 · docs, stickers 0.1 · interacts 0.15 · people (npc) 0.35 · examines 0.6 —
+  // an examine or a person beside a door or a pickup no longer takes the E press meant for it. it.prio overrides.
+  const KIND_PRIO = { door: 0, pickup: 0, payphone: 0, break: 0, ladder: 0, doc: 0.1, sticker: 0.1, interact: 0.15, npc: 0.35, examine: 0.6 };
   function nearestInteractable(pos, yaw, maxDist = 3, o = {}) {
     if (!build) return null;
     const cone = (o.cone ?? (o.use ? 95 : 100)) * D2R;
@@ -431,6 +462,8 @@ const World = (() => {
     for (const it of build.interactables) {
       if (!isActive(it)) continue;
       if (o.look && it.look === false) continue;
+      if (o.crawl && !it.crawl) continue;
+      if (!inBand(it.yBand, pos.y)) continue;
       const dx = it.pos.x - pos.x, dz = it.pos.z - pos.z, d = Math.hypot(dx, dz);
       const dy = it.pos.y - (pos.y || 0);
       if (dy < -1.0 || dy > 2.6) continue;                          // another level (ladder top, balcony)
@@ -438,7 +471,7 @@ const World = (() => {
       if (d > lim) continue;
       const ang = d < 0.35 ? 0 : Math.abs(U.angleDiff(yaw, Math.atan2(dx, dz)));
       if (ang > cone) continue;
-      const s = d + ang * 0.9;
+      const s = d + ang * 0.9 + (it.prio ?? KIND_PRIO[it.kind] ?? 0);
       if (s < bs) { bs = s; best = it; }
     }
     return best;
@@ -493,11 +526,25 @@ const World = (() => {
     for (const [id, m] of Object.entries(MAPS)) if (m && m.kind === 'receipt' && (m.of === rm.id || m.base === rm.id || m.for === rm.id)) return id;
     return null;
   }
+  // CONTRACT+ World.mapXform(xform, x, z) → [ox, oz, scale, rotDeg] | null. room.map.xform / rxform may be the plain
+  // array, a function (x, z) → array (set pieces whose parts sit apart), or a list [{box:[x0,z0,x1,z1], xform}, …]
+  // (the first box containing the point; an entry without a box is the default).
+  function mapXform(xf, x, z) {
+    if (!xf) return null;
+    if (typeof xf === 'function') { try { return mapXform(xf(x, z), x, z); } catch (e) { console.error('[World] map xform()', e); return null; } }
+    if (Array.isArray(xf) && xf.length && typeof xf[0] === 'object' && xf[0] !== null && !Array.isArray(xf[0])) {
+      let dflt = null;
+      for (const e of xf) { if (!e) continue; if (!e.box) { dflt = dflt || e.xform; continue; } if (inBox([Math.min(e.box[0], e.box[2]), Math.min(e.box[1], e.box[3]), Math.max(e.box[0], e.box[2]), Math.max(e.box[1], e.box[3])], x, z)) return e.xform; }
+      return dflt;
+    }
+    return Array.isArray(xf) ? xf : null;
+  }
   function autoMark(key, x, z, t) {
     const rm = def && def.map;
     if (!rm || !rm.id) return;
     S.mapMarks = S.mapMarks || {};
-    const put = (id, map, xf, floor) => {
+    const put = (id, map, xf0, floor) => {
+      const xf = mapXform(xf0, x, z);
       if (!map || !Array.isArray(xf)) return;
       const [ox, oz, sc = 1, rot = 0] = xf, c = Math.cos(rot * D2R), s = Math.sin(rot * D2R);
       const mx = ox + (x * c - z * s) * sc, my = oz + (x * s + z * c) * sc;
@@ -507,9 +554,37 @@ const World = (() => {
     const rid = receiptOf(rm);
     if (rid) put('auto:' + key + ':r', rid, rm.rxform || (typeof MAPS !== 'undefined' && MAPS[rid] && MAPS[rid].sameFrame ? rm.xform : null), rm.rfloor ?? rm.floor);
   }
+  // Marks written earlier turn into ticks when their reason is gone: a door that is no longer locked (a locked()
+  // function that turned false, not only an unlock), an exit whose when() passes now, a blocker that isn't built any
+  // more (the story moved on). Re-checked for the current room on load and on 'flag' / 'pickup' / 'chapter' / 'outage'.
+  const coordKey = (c) => `${Math.round(c.x0 * 2)},${Math.round(c.z0 * 2)},${Math.round(c.x1 * 2)},${Math.round(c.z1 * 2)}`;
+  function recheckMarks() {
+    if (!build || !roomId || !S.mapMarks) return;
+    const M = S.mapMarks;
+    const tick = (id) => { for (const k of [id, id + ':r']) { const m = M[k]; if (m && m.t === 'x') m.t = 'tick'; } };
+    for (const d of Object.values(build.doors)) {
+      const id = 'auto:door:' + d.id, m = M[id] || M[id + ':r'];
+      if (m && m.t === 'x' && d.mapMark !== false && !isLocked(d)) tick(id);
+    }
+    const pre = 'auto:blk:' + roomId + ':';
+    let keys = null;
+    for (const id0 of Object.keys(M)) {
+      if (!id0.startsWith(pre)) continue;
+      const id = id0.endsWith(':r') ? id0.slice(0, -2) : id0;
+      if (id !== id0 && M[id]) continue;                              // the receipt copy follows its paper mark
+      const m = M[id0];
+      if (!m || m.t !== 'x') continue;
+      const key = id.slice(pre.length);
+      const ex = build.exits.find((e) => e.id === key);
+      if (ex) { if (!ex.when || safeWhen(ex.when)) tick(id); continue; }
+      if (!keys) { keys = new Set(); for (const c of build.colliders) if (c && c.blocker) keys.add(c.exit || c.name || coordKey(c)); }
+      if (!keys.has(key)) tick(id);
+    }
+  }
+  for (const ev of ['flag', 'pickup', 'chapter', 'outage']) Bus.on(ev, () => { try { recheckMarks(); } catch (e) { console.error('[World] map marks', e); } });
   function blockerMark(c) {
     if (!c.mapMark || !roomId) return;
-    const key = 'blk:' + roomId + ':' + (c.exit || c.name || `${Math.round(c.x0 * 2)},${Math.round(c.z0 * 2)},${Math.round(c.x1 * 2)},${Math.round(c.z1 * 2)}`);
+    const key = 'blk:' + roomId + ':' + (c.exit || c.name || coordKey(c));
     if (S.mapMarks && S.mapMarks['auto:' + key]) return;
     autoMark(key, (c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2, 'x');
   }
@@ -560,6 +635,7 @@ const World = (() => {
         return false;
       }
     }
+    if (d.to && !ROOMS[d.to]) { sfx('door_locked', { pos: doorPos(d) }); msg(d.lockMsg || "It won't open."); console.warn(`[World] door ${d.id}: no room "${d.to}"`); return false; }
     if (d.openMsg && !S.done['doormsg:' + d.id]) { S.done['doormsg:' + d.id] = true; msg(d.openMsg); await wait(1.2); }
     if (d.to) { await goto(d.to, d.entry, { sound: d.sound || 'door', style: d.style, door: d.id }); return true; }
     if (d.open) closeDoor(d); else openDoor(d);
@@ -587,7 +663,7 @@ const World = (() => {
     for (const t of build.triggers) {
       if (!ctl && !t.anytime) continue;
       const active = !t.removed && t.enabled !== false && matchWorld(t.world, S.outage) && safeWhen(t.when);
-      const inside = active && inBox(t.box, p.x, p.z), prev = trigIn.get(t) || false;
+      const inside = active && inBox(t.box, p.x, p.z) && inBand(t.yBand, p.y), prev = trigIn.get(t) || false;
       trigIn.set(t, inside);
       if (inside === prev || !active || (t.enter !== false) !== inside) continue;
       const key = 'trig:' + t.id;
@@ -600,8 +676,8 @@ const World = (() => {
   // and back in. A scene that wants a transition calls G.goto itself.
   function checkExits(p, ctl) {
     for (const ex of build.exits) {
-      if (!matchWorld(ex.world, S.outage) || !ex.to) continue;
-      const inside = inBox(ex.box, p.x, p.z);
+      if (!matchWorld(ex.world, S.outage) || !ex.to || !ROOMS[ex.to]) continue;       // (an exit to a missing room is inert)
+      const inside = inBox(ex.box, p.x, p.z) && inBand(ex.yBand, p.y);
       if (!ctl) { exitArm.set(ex, !inside); continue; }
       if (!exitArm.get(ex)) { if (!inside) exitArm.set(ex, true); continue; }
       if (!inside || (ex.when && !safeWhen(ex.when))) continue;
@@ -796,7 +872,7 @@ const World = (() => {
   }
 
   const api = {
-    load, unload, goto, update, move, heightAt, los, raycast, pointFree, surfaceAt,
+    load, unload, goto, cancelTransition, recheckMarks, mapXform, update, move, heightAt, los, raycast, pointFree, surfaceAt,
     nearestInteractable, isActive, interact, useDoor, door, setOutage, outageTransition, lightsOut, lightsOn, light,
     runScript, wait,
     mark: (n) => (build && build.marks[n]) || null,

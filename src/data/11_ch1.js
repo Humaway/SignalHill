@@ -21,6 +21,8 @@
   const pickDoc = (base) => (typeof DOC_pick === 'function' ? DOC_pick(base) : base);
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const isPad = () => { try { return Input.lastDevice === 'gamepad'; } catch (e) { return false; } };
+  // an actor move/turn started without await: keep its rejection (Script.ABORT when the scene is cut short) handled
+  const q = (p) => { if (p && typeof p.catch === 'function') p.catch(() => {}); return p; };
 
   // ---------------------------------------------------------------------------------------------------------------
   // Canvas textures (drawn once, shared, never disposed)
@@ -628,8 +630,7 @@
       K.door({ id: 'c1_corridor:dock', x: 40, z: 1.5, rot: 90, w: 0.95, style: 'metal', to: 'c1_dock', entry: 'corridor', sign: 'LOADING DOCK', signBack: 'GOODS IN' });
       K.door({ id: 'c1_corridor:security', x: 31, z: 3.075, rot: 0, w: 0.9, style: 'wood', to: 'c1_security', entry: 'door', sign: 'SECURITY', color: '#d8d0bc' });
       K.door({ id: 'c1_corridor:staff', x: 13, z: 3.075, rot: 0, w: 0.9, style: 'wood', to: 'c1_staffroom', entry: 'door', locked: true, key: 'staff_key', lockMsg: 'It\'s locked.', sign: 'STAFF ROOM', color: '#d8d0bc' });
-      const fire = K.door({ id: 'c1_corridor:fire', x: 5, z: -0.075, rot: 180, w: 0.95, style: 'fire', to: 'c1_concourse', entry: 'fire', when: () => !ringing() });
-      void fire;
+      K.door({ id: 'c1_corridor:fire', x: 5, z: -0.075, rot: 180, w: 0.95, style: 'fire', to: 'c1_concourse', entry: 'fire' });
       // tubes: a real light every other one, one flickering (x 22.5), two dead
       const tubes = [[2.5, 'on'], [7.5, 'glow'], [12.5, 'on'], [17.5, 'dead'], [22.5, 'flick'], [27.5, 'glow'], [32.5, 'on'], [37.5, 'dead']];
       tubes.forEach(([x, st], i) => {
@@ -666,8 +667,6 @@
       K.examine(34.8, 0.8, 0.5, ['Boxes from the dock. Nobody finished bringing them in.', 'The tape\'s never been cut.'], { id: 'c1co:boxes', r: 1.4 });
       K.examine(22.5, 2.4, 1.5, 'The tube keeps trying. Like it\'s swallowing something.', { id: 'c1co:tube', r: 1.6 });
       K.examine(6.8, 1.5, 0.3, 'Faded marker. Somebody wrote it here, then somebody painted over it. It came through anyway.', { id: 'c1co:writing', r: 1.3 });
-      // while the payphone rings, he won't leave for the fire door (the game waits for the call)
-      K.interact(5, 1.0, 0.1, async (G) => { await G.think('That phone. [beat] It\'s ringing for me. I know it is.'); }, { id: 'c1co:ringing', r: 1.3, when: () => ringing() });
     },
     async onEnter(G, from) {
       // CALL 1: leaving the staff room the first time
@@ -741,6 +740,7 @@
   // the key register desk (staff room key, the Plaza Directory), coffee on the filing cabinet, sticker03 under the desk.
   // =================================================================================================================
   const SO = { h: 2.7, bank: [7.42, 3.0] };
+  const C1_V = new THREE.Vector3();
     defineRoom({
     id: 'c1_security', name: 'SECURITY OFFICE', area: 'SIGNAL HILL PLAZA', chapter: 1, outdoor: false, surface: 'lino', ambient: 'office',
     fog: { density: 0.032, color: '#394240' },
@@ -780,10 +780,12 @@
         const P = Player.pos; if (!P) return;
         const dx = SO.bank[0] - P.x, dz = SO.bank[1] - P.z, dd = Math.hypot(dx, dz) || 1;
         const facing = (Math.sin(Player.yaw) * dx + Math.cos(Player.yaw) * dz) / dd;
-        const sees = dd < 3.6 && facing > 0.55;
+        let onScreen = true;
+        try { onScreen = Render.project(C1_V.set(SO.bank[0] - 0.1, 1.45, SO.bank[1])).visible; } catch (e) { /* no render */ }
+        const sees = dd < 4.2 && facing > 0.6 && onScreen;
         if (!figureOn()) return;
         if (sees) { C1.cctv.seenT += 0.07; C1.cctv.away = false; }
-        else if (C1.cctv.seenT > 1.2) { C1.cctv.away = true; S.done['c1:cctvGone'] = true; }
+        else if (C1.cctv.seenT > 2.0) { C1.cctv.away = true; S.done['c1:cctvGone'] = true; }
       });
       // the steel bar leaning on the monitor bank (a pickup: the examine line first)
       const barTaken = !!(S.taken && S.taken['c1_security:bar']);
@@ -828,10 +830,40 @@
       K.prop('mug', 6.9, 2.35, 20, { y: 0.75, text: 'World\'s Okayest Manager' });
       K.prop('sandwich', 6.95, 3.75, 40, { y: 0.75 });
       K.dress('papers', [0.5, 0.5, 6, 5.5], 5, { seed: 51 });
+      // the wall calendar (every day crossed off but the last), the key cabinet (the stock hook empty), lost property,
+      // the radio charger on the desk
+      K.plane(6.3, 1.55, 0.09, 0.46, 0.6, C1_tex('seccal', 256, 334, (x, w, h, r) => {
+        x.fillStyle = '#f2efe4'; x.fillRect(0, 0, w, h);
+        x.fillStyle = '#1d3d4a'; x.fillRect(0, 0, w, 110);
+        tx(x, 'SIGNAL HILL PLAZA', w / 2, 40, 16, '#e6dfc9', { font: FN.serif, weight: 'bold', align: 'center', spacing: 2 });
+        tx(x, 'SEPTEMBER', w / 2, 86, 30, '#ffcc00', { font: FN.heavy, weight: '900', align: 'center' });
+        for (let d = 1; d <= 30; d++) {
+          const c = (d + 1) % 7, rw = Math.floor((d + 1) / 7), cx = 14 + c * 33, cy = 130 + rw * 38;
+          tx(x, String(d), cx + 4, cy + 14, 12, '#333', { font: FN.mono });
+          if (d < 30) { x.strokeStyle = 'rgba(180,30,30,0.8)'; x.lineWidth = 2; x.beginPath(); x.moveTo(cx, cy); x.lineTo(cx + 28, cy + 30); x.moveTo(cx + 28, cy); x.lineTo(cx, cy + 30); x.stroke(); }
+        }
+        age(x, w, h, r, 0.6);
+      }), {});
+      K.box(0.12, 1.1, 3.75, 0.16, 0.8, 0.62, { tex: 'metal', color: '#4c5552' });
+      K.plane(0.205, 1.5, 3.75, 0.56, 0.74, C1_tex('keycab', 192, 256, (x, w, h) => {
+        x.fillStyle = '#3a4240'; x.fillRect(0, 0, w, h);
+        tx(x, 'KEYS', w / 2, 24, 16, '#e8e0c8', { weight: 'bold', align: 'center', spacing: 2 });
+        const tags = ['DOCK', 'BIN RM', 'PLANT', 'STAFF RM', 'STOCK', 'ROOF', 'TOILETS', 'FIRE', 'SEC 2'];
+        tags.forEach((t, i) => {
+          const cx = 34 + (i % 3) * 62, cy = 60 + Math.floor(i / 3) * 64;
+          x.fillStyle = '#b9bcb6'; x.fillRect(cx - 2, cy - 4, 4, 8);
+          tx(x, t, cx, cy + 40, 9, '#d8d4c4', { align: 'center', font: FN.mono });
+          if (t !== 'STOCK' && t !== 'STAFF RM') { x.fillStyle = ['#c9a822', '#8a8e8c', '#b3261e'][i % 3]; x.fillRect(cx - 6, cy + 4, 12, 16); x.fillStyle = '#d8d0b0'; x.beginPath(); x.arc(cx, cy + 24, 5, 0, Math.PI * 2); x.fill(); }
+        });
+      }), { rotY: 90 });
+      K.prop('box', 6.55, 5.45, -10, { open: true, text: 'LOST PROPERTY', w: 0.5, h: 0.36, d: 0.4 });
+      for (const [dx, a] of [[-0.1, 12], [0.05, -8], [0.14, 20]]) K.cyl(6.55 + dx, 0.3, 5.4, 0.018, 0.75, { color: ['#1d1d1d', '#6a2a3a', '#1f3f5c'][Math.abs(Math.round(dx * 10)) % 3], roughness: 0.6 }, { rz: a });
+      K.box(1.62, 0.745, 1.5, 0.16, 0.05, 0.3, { color: '#1c1f1e', roughness: 0.5 });
+      for (let k = 0; k < 3; k++) { K.box(1.62, 0.795, 1.4 + k * 0.1, 0.06, 0.2, 0.05, { color: '#222524', roughness: 0.5 }); K.cyl(1.64, 0.995, 1.4 + k * 0.1, 0.006, 0.12, { color: '#111' }); }
       // examine
       K.examine(6.9, 1.5, 3.0, async (G) => {
         if (!done('c1:cctvGone')) {
-          C1.cctv.seenT = Math.max(C1.cctv.seenT, 2);
+          C1.cctv.seenT = Math.max(C1.cctv.seenT, 2.5);
           await G.think('Camera three. The concourse. [beat] Someone\'s standing outside the store.');
           await G.think('Just standing there.');
         } else await G.think('It\'s gone. [beat] It was right there.');
@@ -843,6 +875,10 @@
       K.examine(1.0, 0.85, 0.7, 'Half a crossword in blue biro. Seven across: "Left on hold". Somebody gave up on it.', { id: 'c1so:crossword', r: 1.0 });
       K.examine(7.9, 2.1, 1.2, 'Eight fifty-nine. Every clock in the building.', { id: 'c1so:clock', r: 1.8 });
       K.examine(5.1, 1.0, 5.5, 'The bar fridge. A carton of milk and a note: "PLEASE WASH YOUR MUG".', { id: 'c1so:fridge', r: 1.2 });
+      K.examine(6.3, 1.55, 0.2, ['September. Every day crossed off. [beat] Except the thirtieth.', 'The last day of the month. Somebody never got to cross it off.'], { id: 'c1so:calendar', r: 1.3 });
+      K.examine(0.3, 1.5, 3.75, ['The key cabinet. Two hooks empty. Staff room. Stock.', 'The staff room key\'s on the desk. [beat] Somebody still has the stockroom.'], { id: 'c1so:keys', r: 1.2 });
+      K.examine(6.55, 0.6, 5.45, 'Lost property. A kid\'s jumper, a set of car keys, three umbrellas. Nobody came back for any of it.', { id: 'c1so:lost', r: 1.1 });
+      K.examine(1.62, 0.95, 1.5, 'Two-way radios in the charger. All three flat.', { id: 'c1so:radios', r: 0.9 });
     },
     onUpdate() {
       // the ceiling camera's shot is its own grainy black-and-white feed
@@ -971,7 +1007,7 @@
   const CN = { h: 8, bal: 4.4, storeX: 51, fireX: 43, fountain: [20.5, 6.2] };
   defineRoom({
     id: 'c1_concourse', name: 'CONCOURSE', area: 'SIGNAL HILL PLAZA', chapter: 1, outdoor: false, surface: 'carpet', ambient: 'interior',
-    fog: { density: 0.03, color: '#3a4442' }, outageFog: { density: 0.03, color: '#122423' },
+    fog: { density: 0.03, color: '#3a4442' }, outageFog: { density: 0.03, color: '#17312e' },
     surfaces: [{ box: [0, -1, 60, 0.4], s: 'tile' }],
     bounds: [0, -1, 60, 12],
     entries: { fire: [CN.fireX, 11.0, 180], food: [7, 1.2, 0], store: [CN.storeX, 1.1, 0], start: [CN.fireX, 11.0, 180] },
@@ -1071,7 +1107,9 @@
       K.box(57.9, 0, 12.25, 4.2, 4.4, 0.5, 'plaster_stained');
       K.prop('escalator', 26.9, 11.1, -90, { h: B, w: 1.0 });
       K.blocker(25.6, 10.3, 26.5, 11.95, 'It\'s chained.');
-      K.door({ id: 'c1_concourse:fire', x: CN.fireX, z: 12.0, rot: 0, w: 0.95, style: 'fire', to: 'c1_corridor', entry: 'concourse', locked: () => !!S.outage, lockMsg: 'It won\'t open from this side.', frame: true });
+      K.door({ id: 'c1_concourse:fire', x: CN.fireX, z: 12.0, rot: 0, w: 0.95, style: 'fire', to: 'c1_corridor', entry: 'concourse', locked: () => !!S.outage, lockMsg: 'It won\'t open from this side.', frame: true, when: () => !ringing() });
+      // while the food court payphone rings he won't leave the centre (the game waits for the call)
+      K.interact(CN.fireX, 1.1, 11.7, async (G) => { await G.think('That phone. [beat] It\'s ringing for me. I know it is.'); }, { id: 'c1cn:ringing', r: 1.4, when: () => ringing() });
       K.light('led', CN.fireX, 2.35, 11.85, { color: '#2aff5a', intensity: 2.5 });
       K.prop('exit_sign', CN.fireX, 11.99, 180, { mount: 2.4 });
       // ---- the west end: the chained front doors, the vestibule, the fog beyond --------------------------------------
@@ -1106,7 +1144,8 @@
         K.light('fluoro', 16, B - 0.02, 2.2, { len: 1.2, intensity: 5, distance: 9, bank: 2, flicker: true });
         K.light('fluoro', 36, B - 0.02, 9.8, { len: 1.2, intensity: 4, distance: 8, bank: 3 });
         for (const x of [6, 26, 46]) K.light('fluoro', x, B - 0.02, 9.8, { len: 1.2, on: false });
-        for (const x of [26, 56]) K.light('fluoro', x, B - 0.02, 2.2, { len: 1.2, on: false });
+        for (const [x, bank] of [[21, 6], [26, 7], [31, 8]]) K.light('fluoro', x, B - 0.02, 2.2, { len: 1.2, intensity: 4, distance: 8, bank, real: false });
+        K.light('fluoro', 56, B - 0.02, 2.2, { len: 1.2, on: false });
       });
       K.light('led', 0.2, 2.6, 7.3, { color: '#2aff5a', intensity: 2.5 });
       // ---- the Outage: contract walls, hanging tethers and receipts, the store walled off, red light ------------------
@@ -1127,6 +1166,8 @@
         K.light('fluoro', 30, B - 0.02, 2.2, { len: 1.2, intensity: 6, distance: 11, flicker: true, color: '#cfe8dc' });
         K.light('fluoro', 12, B - 0.02, 9.8, { len: 1.2, intensity: 5, distance: 10, flicker: true, color: '#bfe0d4' });
         K.light('fluoro', 44, B - 0.02, 9.8, { len: 1.2, intensity: 4, distance: 9, color: '#bfe0d4' });
+        K.light('fluoro', 22, B - 0.02, 9.8, { len: 1.2, intensity: 4.5, distance: 10, flicker: true, color: '#bfe0d4' });
+        K.light('fluoro', 39, B - 0.02, 2.2, { len: 1.2, intensity: 4, distance: 9, color: '#cfe8dc' });
         K.light('point', 51, 3.5, 1.4, { color: '#ff2a1c', intensity: 4, distance: 11 });
         K.light('point', 20.5, 2.2, 6.2, { color: '#e8c21a', intensity: 2.2, distance: 8 });
         K.light('led', 13.2, 2.4, 11.9, { color: '#ff2a1c', blink: 1.4 });
@@ -1147,17 +1188,17 @@
       K.examine(CN.storeX, 1.6, 1.4, ['Contracts. All the way up. [beat] Every page has a signature line.', 'I can\'t get to the store this way.'], { id: 'c1cn:wall', r: 2.6, world: 'outage' });
       // ---- 1-2 (shot 3, cutscene-only): a strip of carpet tiles that lift and curl back over circuit board ------------
       {
-        const under = new THREE.Mesh(new THREE.PlaneGeometry(22.4, 2.0), Tex.mat('circuit', { repeat: [22.4, 2.0], outage: false, emissive: '#1f7a3a', emissiveIntensity: 0.28, emissiveMap: true, polygonOffset: true }));
-        under.rotation.x = -Math.PI / 2; under.position.set(26.4, 0.004, 5.8); under.visible = false; under.userData.ownedGeo = true;
+        const under = new THREE.Mesh(new THREE.PlaneGeometry(24.0, 1.2), Tex.mat('circuit', { repeat: [24.0, 1.2], outage: false, emissive: '#1f7a3a', emissiveIntensity: 0.34, emissiveMap: true, polygonOffset: true }));
+        under.rotation.x = -Math.PI / 2; under.position.set(26.1, 0.004, 1.65); under.visible = false; under.userData.ownedGeo = true;
         K.mesh(under, { name: 'c1cn_circuit' });
         const top = Tex.mat('carpet', { color: '#6a6f68', repeat: [0.6, 0.6], outage: false });
         const edge = new THREE.MeshStandardMaterial({ color: '#242624', roughness: 1 });
-        const geo = new THREE.BoxGeometry(0.6, 0.014, 0.6); geo.translate(-0.3, 0.007, 0);        // the pivot on its east edge
+        const geo = new THREE.BoxGeometry(0.6, 0.014, 0.6); geo.translate(0, 0.007, 0.3);         // the pivot on its north edge
         const mats = [edge, edge, top, edge, edge, edge];
         const g = new THREE.Group(); g.visible = false;
-        for (let c = 0; c < 36; c++) for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 40; c++) for (let r = 0; r < 2; r++) {
           const m = new THREE.Mesh(geo, mats);
-          const x = 37.1 - c * 0.6, z = 5.2 + r * 0.6;
+          const x = 37.8 - c * 0.6, z = 1.05 + r * 0.6;
           m.position.set(x, 0.002, z); m.userData.ord = x - r * 0.21 - ((c * 7 + r * 3) % 5) * 0.05;
           m.castShadow = false; m.receiveShadow = true;
           g.add(m);
@@ -1166,7 +1207,7 @@
         K.mesh(g, { name: 'c1cn_tiles' });
       }
     },
-    onUpdate() { C1_ringTick('c1_concourse'); C1_ambient(['#74827f', 0.5], ['#2a8a84', 0.3]); },
+    onUpdate() { C1_ringTick('c1_concourse'); C1_ambient(['#74827f', 0.5], ['#2a8a84', 0.42]); },
     onLeave() { C1_ringStop(); C1_ambientOff(); },
   });
 
@@ -1180,7 +1221,7 @@
   C1.ringPos = [0.35, 1.4, FC.phone[1]];
   defineRoom({
     id: 'c1_foodcourt', name: 'FOOD COURT', area: 'SIGNAL HILL PLAZA', chapter: 1, outdoor: false, surface: 'carpet', ambient: 'interior',
-    fog: { density: 0.03, color: '#3a4442' }, outageFog: { density: 0.03, color: '#122423' },
+    fog: { density: 0.03, color: '#3a4442' }, outageFog: { density: 0.03, color: '#17312e' },
     bounds: [0, 0, 30, 21],
     entries: { concourse: [15, 19.3, 180], kitchen: [FC.kitchen[0], 1.0, 0], phone: [0.95, FC.phone[1], 90], start: [15, 19.3, 180] },
     cameras: [
@@ -1228,6 +1269,9 @@
       K.animate(() => { if (payObj && payObj.userData.setHanging) { const want = !ringing() && !C1.onPhone; if (payObj.userData.hanging !== want) { payObj.userData.hanging = want; payObj.userData.setHanging(want); } } });
       K.interact(FC.phone[0] + 0.25, 1.3, FC.phone[1], (G) => G.cutscene('1-8'), { id: 'c1_foodcourt:ringing', r: 1.4, when: () => ringing() });
       K.sign('PHONE', FC.phone[0] + 0.03, 2.3, FC.phone[1], 0.5, 0.14, { rotY: 90, style: 'shop', bg: '#1f4b73', fg: '#e8eef0' });
+      K.box(FC.phone[0] + 0.2, 2.02, FC.phone[1], 0.4, 0.06, 0.72, { tex: 'metal', color: '#3a3f3d' });                 // the hood
+      K.fogOnly(() => K.light('lamp', FC.phone[0] + 0.32, 1.98, FC.phone[1], { color: '#f2dcae', intensity: 2.2, distance: 4.2 }));
+      K.outageOnly(() => K.light('lamp', FC.phone[0] + 0.32, 1.98, FC.phone[1], { color: '#b8e8dc', intensity: 1.8, distance: 4.0, flicker: true }));
       // tables and chairs, a high chair, trays, the tray-return rack, bins, the condiment bench, the drinks fridge
       const tables = [[5, 5.5], [10, 6.5], [15.5, 5.2], [22, 5.8], [4.5, 10.5], [9.5, 11.5], [14.5, 10.6], [20, 11.8], [25, 11], [6, 16.5], [12, 16.2], [21.5, 16.8], [26, 17]];
       tables.forEach(([x, z], i) => K.prop('cafe_table', x, z, i * 37, { chairs: 2 + (i % 3), radius: 0.42 }));
@@ -1266,6 +1310,8 @@
         K.dress('receipts', [2, 2, 28, 18], 26, { seed: 84 });
         K.writing('FOLLOW UP TOMORROW', 0.1, 2.6, 9.5, 2.6, { rotY: 90, style: 'receipt' });
         K.light('fluoro', 15, H - 0.02, 16, { len: 1.2, intensity: 5, distance: 10, flicker: true, color: '#bfe0d4' });
+        K.light('fluoro', 9, H - 0.02, 8, { len: 1.2, intensity: 4.5, distance: 10, flicker: true, color: '#cfe8dc' });
+        K.light('fluoro', 22, H - 0.02, 12, { len: 1.2, intensity: 3.5, distance: 9, color: '#bfe0d4' });
         K.light('point', 27.6, 2.6, 1.2, { color: '#e8c21a', intensity: 2.5, distance: 7 });
         K.light('led', 4.2, 1.2, 8.56, { color: '#ff2a1c', blink: 0.7 });
         K.prop('receipt_strip', 4.2, 8.62, 0, { ceil: 1.25, len: 1.2 });
@@ -1284,7 +1330,7 @@
       K.examine(3.0, 1.1, 19.4, 'Sachets. Tomato sauce, sugar, salt. Hundreds of them. For all the people.', { id: 'c1fc:condiments', r: 1.3 });
       K.examine(0.4, 1.5, 6, 'The toilets. Locked. A sign says "Please ask at the Food Court counter for the key."', { id: 'c1fc:toilets', r: 0.9, world: 'fog' });
     },
-    onUpdate() { C1_ringTick('c1_foodcourt'); C1_ambient(['#74827f', 0.5], ['#2a8a84', 0.3]); },
+    onUpdate() { C1_ringTick('c1_foodcourt'); C1_ambient(['#74827f', 0.5], ['#2a8a84', 0.42]); },
     onLeave() { C1_ringStop(); C1_ambientOff(); C1.onPhone = false; },
   });
 
@@ -1349,7 +1395,7 @@
   // Outage: the front is gone — the sales floor runs back into the dark in rows of demo tables, every phone ringing;
   // the counter holds the stack of contracts (Account Note 2); Chloe is gone.
   // =================================================================================================================
-  const ST = { h: 3.3, chloe: [10, 2.25], deep: 56 };
+  const ST = { h: 3.3, chloe: [10, 2.25], deep: 56, tables: [[5.4, 6.8], [14.6, 6.8], [5.4, 9.8], [14.6, 9.8], [5.4, 12.8], [14.6, 12.8]] };
   const C1_ringMat = new THREE.MeshBasicMaterial({ map: null, color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false });
   C1_ringMat.userData.shared = true;
   const ringScreenTex = () => C1_tex('ringscr', 128, 256, (x, w, h) => {
@@ -1362,6 +1408,19 @@
     x.fillStyle = '#c0392b'; x.beginPath(); x.arc(w * 0.7, h * 0.82, 16, 0, Math.PI * 2); x.fill();
   });
   C1_ringMat.map = ringScreenTex();
+  const C1_standeeTex = (i) => C1_tex('standee' + i, 192, 512, (x, w, h, r) => {
+    x.fillStyle = '#0e6f6e'; x.fillRect(0, 0, w, h);
+    x.fillStyle = '#ffcc00'; x.fillRect(0, h * 0.62, w, h * 0.38);
+    const [a, b, c] = i ? ['SWITCH', '& SAVE', 'ASK US HOW'] : ['UNLIMITED', 'DATA', 'EVERYWHERE YOU GO*'];
+    tx(x, a, w / 2, 90, 30, '#ffffff', { font: FN.heavy, weight: '900', align: 'center' });
+    tx(x, b, w / 2, 128, 30, '#ffcc00', { font: FN.heavy, weight: '900', align: 'center' });
+    x.fillStyle = 'rgba(255,255,255,0.12)'; x.beginPath(); x.arc(w / 2, 230, 60, 0, Math.PI * 2); x.fill();
+    x.fillStyle = '#1c1f22'; x.fillRect(w / 2 - 26, 185, 52, 96); x.fillStyle = '#8fd8cc'; x.fillRect(w / 2 - 22, 191, 44, 84);
+    tx(x, c, w / 2, h * 0.7, 13, '#10403f', { weight: 'bold', align: 'center' });
+    Tex.drawWordmark(x, w / 2 - 40, h - 40, 26, { color: '#10403f' });
+    if (!i) tx(x, '*where coverage is available', w / 2, h - 12, 9, '#10403f', { align: 'center' });
+    age(x, w, h, r, 0.4);
+  });
   defineRoom({
     id: 'c1_store', name: 'THE STORE', area: 'SIGNAL HILL PLAZA', chapter: 1, outdoor: false, surface: 'vinyl', ambient: 'store',
     fog: { density: 0.026, color: '#5a6664' }, outageFog: { density: 0.045, color: '#0c1a19' },
@@ -1370,7 +1429,7 @@
     entries: { door: [10, 15.2, 180], office: [17.5, 1.05, 0], start: [10, 15.2, 180] },
     cameras: [
       // low behind the counter, looking out over it to the front (panning after him)
-      { id: 'c1_store:counter', vol: [0, 9.5, 20, 17.6], type: 'pan', pos: [12.8, 1.3, 0.8], target: [10, 1.0, 12.5], fov: 50, pan: { lag: 0.35, yaw: 55, pitch: 25 } },
+      { id: 'c1_store:counter', vol: [0, 9.5, 20, 17.6], type: 'pan', pos: [14.7, 1.32, 1.05], target: [10, 1.0, 12.5], fov: 50, pan: { lag: 0.35, yaw: 55, pitch: 25 } },
       // the reverse, from the door: the floor, the demo tables, the counter and whoever is behind it
       { id: 'c1_store:door', vol: [0, 2.6, 20, 9.5], type: 'pan', pos: [10, 2.2, 16.1], target: [10, 1.2, 3.8], fov: 46, pan: { lag: 0.35, yaw: 60, pitch: 30 } },
       // high corner (north-east), along the staff side behind the counter
@@ -1413,11 +1472,18 @@
       K.prop('shelf', 2.2, 0.35, 0, { len: 3.2, h: 2.2, load: 'stock' });
       K.prop('shelf', 5.4, 0.35, 0, { len: 2.4, h: 2.2, load: 'boxes' });
       K.box(13.1, 0, 0.45, 0.6, 0.9, 0.6, { tex: 'metal', color: '#3a3f3d', metalness: 0.4 }, { collide: true });
-      K.prop('stool', 11.2, 2.1, 20, { variant: 'bar' });
+      K.prop('stool', 6.7, 1.85, 20, { variant: 'bar' });
       K.box(15.3, 0.9, -0.6, 2.4, 1.4, 0.02, { color: '#0e1110', roughness: 1 });
       K.box(15.8, 0.95, -0.4, 0.5, 0.32, 0.04, { color: '#3a6a8a', emissive: '#2a5a7a', emissiveIntensity: 0.6 });
-      // six demo tables, every lock screen 8:59
-      for (const [x, z] of [[5, 7.4], [10, 7.4], [15, 7.4], [5, 11.4], [10, 11.4], [15, 11.4]]) K.prop('demo_table', x, z, 0, { len: 1.8, n: 6, time: '8:59' });
+      // six demo tables either side of the aisle from the door to the counter, every lock screen 8:59
+      for (const [x, z] of ST.tables) K.prop('demo_table', x, z, 0, { len: 1.8, n: 6, time: '8:59' });
+      // two standees flanking the entrance
+      for (const [x, i] of [[7.2, 0], [12.8, 1]]) {
+        K.box(x, 0, 15.4, 0.5, 0.04, 0.32, { tex: 'metal', color: '#3a3f3d' });
+        K.box(x, 0.04, 15.42, 0.62, 1.62, 0.03, { color: '#10403f', roughness: 0.5 }, { collide: true });
+        K.plane(x, 0.9, 15.44, 0.58, 1.5, C1_standeeTex(i), {});
+        K.plane(x, 0.9, 15.4, 0.58, 1.5, C1_standeeTex(i), { rotY: 180 });
+      }
       // the accessory wall (west), the leaderboard (east), plan posters, the waiting chairs, a queue barrier
       for (const z of [4.4, 7.0, 9.6, 12.2]) K.prop('accessory_wall', 0.35, z, 90, { len: 2.5 });
       K.prop('leaderboard', 19.92, 5.6, -90, { mount: 2.1, w: 1.4, text: 'STORE LEADERBOARD — SEPTEMBER' });
@@ -1440,14 +1506,14 @@
         K.wall(20.075, 16.4, 20.075, ST.deep, H, { tex: 'plaster', color: '#e2e0d8' });
         K.fogWall(0, ST.deep - 2.4, 20, ST.deep, 'It just keeps going. There\'s nothing at the end of it.');
         const ringGeo = [];
-        for (let z = 17.5; z < ST.deep - 3; z += 4.2) for (const x of [5, 10, 15]) {
+        for (let z = 15.8; z < ST.deep - 3; z += 3) for (const x of [5.4, 14.6]) {
           K.prop('demo_table', x, z, 0, { len: 1.8, n: 6, time: 'CALL' });
           ringGeo.push([x, z]);
         }
         // a flashing overlay on every table's screens (one mesh, one material, ringing in time)
         const g = new THREE.PlaneGeometry(1.6, 0.36); g.rotateX(-Math.PI / 2 + 0.96);
         const items = [];
-        for (const [x, z] of [...ringGeo, [5, 7.4], [10, 7.4], [15, 7.4], [5, 11.4], [10, 11.4], [15, 11.4]]) for (const dz of [0.24, -0.22]) items.push({ geo: g, m: new THREE.Matrix4().compose(new THREE.Vector3(x, 0.99, z + dz), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dz < 0 ? Math.PI : 0), new THREE.Vector3(1, 1, 1)) });
+        for (const [x, z] of [...ringGeo, ...ST.tables]) for (const dz of [0.24, -0.22]) items.push({ geo: g, m: new THREE.Matrix4().compose(new THREE.Vector3(x, 0.99, z + dz), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dz < 0 ? Math.PI : 0), new THREE.Vector3(1, 1, 1)) });
         const ov = new THREE.Mesh(Kit.mergeGeometries(items), C1_ringMat); ov.renderOrder = 2; ov.userData.ownedGeo = true;
         K.mesh(ov, { name: 'c1st_ringov' });
         K.animate((dt, t) => { C1_ringMat.opacity = 0.35 + 0.55 * (Math.sin(t * 9) > 0.2 ? 1 : 0) * ((t % 1.6) < 1.1 ? 1 : 0.2); });
@@ -1472,9 +1538,11 @@
         K.examine(10, 1.3, 21.6, ['Every phone. Every one of them ringing.', 'The same number on every screen.'], { id: 'c1st:ringing', r: 2.2 });
       });
       // ---- Chloe (the Fog world, from 1-1 on) --------------------------------------------------------------------------
-      K.npc('chloe', 'chloe', ST.chloe[0], ST.chloe[1], 0, { anim: 'idle', world: 'fog', talk: (G) => C1_chloeTalk(G), whenTalk: () => !S.outage && done('cs:1-1') });
+      K.npc('chloe', 'chloe', ST.chloe[0], ST.chloe[1], 0, { anim: 'idle', world: 'fog', r: 2.1, talk: (G) => C1_chloeTalk(G), whenTalk: () => !S.outage && done('cs:1-1') });
       // ---- examine (the spec's lines) ------------------------------------------------------------------------------
-      K.examine(10, 1.1, 7.4, 'Every phone says 8:59.', { id: 'c1st:demo', r: 1.5, world: 'fog' });
+      K.examine(5.4, 1.1, 9.8, 'Every phone says 8:59.', { id: 'c1st:demo', r: 1.6, world: 'fog' });
+      K.examine(14.6, 1.1, 9.8, ['Every phone says 8:59.', 'Somebody set them all. Or nobody did.'], { id: 'c1st:demo2', r: 1.6, world: 'fog' });
+      K.examine(7.2, 1.2, 15.2, 'Unlimited data. [beat] Everywhere you go.', { id: 'c1st:standee', r: 1.1, world: 'fog' });
       K.examine(0.9, 1.4, 8.3, 'Screen protectors. Cases. Chargers. I put one of each on every sale.', { id: 'c1st:accessories', r: 1.7 });
       K.examine(12.9, 1.15, 3.0, 'The contract printer\'s warm. Like someone just printed one.', { id: 'c1st:printer', r: 1.2, world: 'fog' });
       K.examine(19.7, 2.0, 5.6, 'CHLOE, number one. [beat] Me, twenty-third. Out of twenty-four.', { id: 'c1st:leaderboard', r: 2.0 });
@@ -1486,8 +1554,8 @@
     },
     async onEnter(G, from) {
       if (S.outage || S.chapter !== 1) return;
+      if (!done('cs:1-1')) { await G.cutscene('1-1'); return; }
       if (from === 'c1_concourse') G.sfx('chime', { vol: 0.9 });
-      if (!done('cs:1-1')) await G.cutscene('1-1');
     },
     onUpdate() {
       C1_ringTick('c1_store');
@@ -1496,12 +1564,14 @@
       if (S.outage && !C1.storeRings && typeof Snd !== 'undefined') { try { C1.storeRings = [[5, 20], [15, 27], [10, 36], [4, 44]].map(([x, z]) => Snd.play('ring', { loop: true, pos: [x, 1.0, z], vol: 0.55, gap: 0.6 + (x % 3) * 0.2 })); } catch (e) { C1.storeRings = []; } }
       if (!S.outage && C1.storeRings) C1_storeRingsOff();
     },
-    onLeave() { C1_ringStop(); C1_ambientOff(); C1_storeRingsOff(); },
+    onLeave() { C1_ringStop(); C1_ambientOff(); C1_storeRingsOff(); if (C1.pinLight) { try { C1.pinLight.free(); } catch (e) { /* pool */ } C1.pinLight = null; } },
   });
   function C1_storeRingsOff() { for (const h of C1.storeRings || []) { try { h.stop(0.2); } catch (e) { /* audio */ } } C1.storeRings = null; }
   // Chloe, talked to again: the terminal line, then "Eleven." — cycling; after 1-4 she's got it
   async function C1_chloeTalk(G) {
     const A = G.actor('chloe');
+    // a two-shot across the counter from its west end (the room's cameras are wide out here)
+    if (G.aidan.pos.z < 6.5 && G.aidan.pos.x > 6.5 && G.aidan.pos.x < 13.5) G.cam({ pos: [6.0, 1.42, 5.0], target: [(G.aidan.pos.x + 10) / 2, 1.33, 3.3], fov: 38 });
     if (flag('c1_bossDone')) { A.eyes('down'); await G.say('CHLOE', 'Go on. I\'ve got it.'); return; }
     const n = (S.done['c1:chloeTalk'] | 0); S.done['c1:chloeTalk'] = n + 1;
     if (n % 2 === 0) {
@@ -1613,7 +1683,32 @@
   // shelving on the north, south and west walls; the chain-link returns cage across the east end.
   // =================================================================================================================
   const SK = { h: 5, door: [0, 7], cage: [10.2, 5] };
-  const SK_RET = [[3.2, 2.6], [6.4, 7.8], [2.6, 5.4], [7.2, 3.0], [4.8, 5.8]];            // where returns 5–9 land
+  const SK_RET = [[3.2, 2.6], [6.4, 7.8], [2.6, 5.4], [7.2, 3.0], [4.6, 6.6]];            // where returns 5–9 land
+  const SK_KNEEL = [6.35, 5.0];                                                            // where he kneels in 1-4 (facing +X)
+  const SK_NOTES = [[6.9, 4.45, 0.1], [7.07, 4.83, -0.06], [7.07, 5.2, 0.05], [6.9, 5.58, -0.12]];   // Returns Notes 1–4
+  // the mound it collapses into (static: built once per room load, shown once S.done['c1:collapsed'])
+  function C1_heapBuild(g) {
+    const M = C1_cgMats(), rr = U.rng(907), cx = 8.45, cz = 5.0, list = [];
+    { const k = SPH(1.0, 18, 10); const pa = k.attributes.position;
+      for (let i = 0; i < pa.count; i++) { const x = pa.getX(i), y = pa.getY(i), z = pa.getZ(i); const w = 1 + Math.sin(x * 7 + z * 5) * 0.08 + Math.sin(z * 9) * 0.05; pa.setXYZ(i, x * w, y, z * w); }
+      k.computeVertexNormals(); list.push([k, M4(cx + 0.25, 0.02, cz + 0.1, 0, 0.4, 0, [1.0, 0.22, 0.95]), M.knit]); }
+    list.push([BX(0.5, 0.05, 0.9), M4(cx - 0.6, 0.03, cz - 1.25, 0, 1.2, 0.1), M.knitDk]);                     // a sleeve, flung out
+    list.push([BX(0.5, 0.05, 0.8), M4(cx + 0.2, 0.03, cz + 1.3, 0, -0.9, 0), M.knitDk]);
+    for (let i = 0; i < 34; i++) {
+      const a = rr() * Math.PI * 2, rad = Math.sqrt(rr()) * 1.35, x = cx + Math.cos(a) * rad * 1.05, z = cz + Math.sin(a) * rad;
+      const w = 0.24 + rr() * 0.26, h = 0.14 + rr() * 0.2, d = 0.2 + rr() * 0.2, y = Math.max(0, (1 - rad / 1.35) * 0.75 * rr());
+      if (x < SK_KNEEL[0] + 1.15) continue;                                                // keep clear of where he kneels and the notes
+      list.push([BX(w, h, d), M4(x, y + h / 2, z, (rr() - 0.5) * 0.9, rr() * 3, (rr() - 0.5) * 0.9), rr() < 0.2 ? M.satchel : rr() < 0.45 ? M.cardDk : rr() < 0.6 ? M.cardWet : M.card]);
+      if (rr() < 0.35) list.push([BX(w + 0.02, h * 0.3, 0.05), M4(x, y + h / 2, z, (rr() - 0.5) * 0.9, rr() * 3, 0), M.tape]);
+    }
+    for (let i = 0; i < 12; i++) { const a = rr() * Math.PI * 2, rad = 0.4 + rr() * 1.3; const x = cx + Math.cos(a) * rad, z = cz + Math.sin(a) * rad; if (x < SK_KNEEL[0] + 0.9) continue; list.push([BX(0.085, 0.012, 0.17), M4(x, 0.02 + rr() * 0.3, z, rr() * 0.4, rr() * 6, rr() * 0.4), M.phone]); }
+    for (let i = 0; i < 3; i++) list.push([helix(0.9, 0.2, 4, 0.018), M4(cx - 0.6 + i * 0.6, 0.12, cz - 0.9 + i * 0.8, Math.PI / 2, rr() * 3, 0.3), M.tether]);
+    // the satchel it wore for a head, the note still pinned to it
+    list.push([SPH(0.36, 14, 10), M4(cx - 0.35, 0.18, cz - 0.95, 0.2, 0.7, 0.1, [1.15, 0.5, 0.95]), M.satchel]);
+    C1_merge(g, list);
+    const nt = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), M.note); nt.position.set(cx - 0.3, 0.37, cz - 0.83); nt.rotation.set(-1.2, 0.5, 0.2); g.add(nt);
+    g.traverse((c) => { if (c.isMesh) { c.castShadow = false; c.receiveShadow = true; } });
+  }
   defineRoom({
     id: 'c1_stockroom', name: 'STOCKROOM', area: 'SIGNAL HILL PLAZA', chapter: 1, outdoor: false, surface: 'concrete', ambient: 'interior',
     fog: { density: 0.03, color: '#3b4543' }, outageFog: { density: 0.036, color: '#0c1a19' },
@@ -1624,8 +1719,11 @@
       { id: 'c1_stockroom:door', vol: [4.4, 0, 12, 7.4], type: 'static', pos: [0.35, 3.6, 6.9], target: [8.6, 1.3, 4.2], fov: 'fit' },
       // high over the west shelving, down along the south aisle to the cage
       { id: 'c1_stockroom:shelves', vol: [4.4, 7.4, 12, 10], type: 'static', pos: [0.9, 4.4, 0.7], target: [8.2, 0.9, 8.2], fov: 'fit' },
-      // high in the far corner, down over the door end
-      { id: 'c1_stockroom:high', vol: [0, 0, 4.4, 10], type: 'static', pos: [11.5, 4.75, 9.6], target: [1.8, 0.6, 5.0], fov: 'fit' },
+      // low, from behind the north shelving (beyond the cutaway north wall): through the gap between two units, across
+      //   the floor to the door end — the first thing he sees of the room is being watched from the stock
+      { id: 'c1_stockroom:gap', vol: [0, 4.2, 4.4, 10], type: 'static', pos: [2.55, 1.0, -0.8], target: [2.2, 1.0, 7.4], fov: 'fit' },
+      // high on the south wall, down over the north-west end
+      { id: 'c1_stockroom:high', vol: [0, 0, 4.4, 4.2], type: 'static', pos: [2.3, 4.7, 9.72], target: [2.3, 0.5, 1.7], fov: 'fit' },
     ],
     // the Returns Cage: a heap of returns in front of the cage until 1-3 raises it
     spawns: [
@@ -1635,13 +1733,14 @@
       const H = SK.h;
       K.floor(0, 0, 12, 10, { tex: 'concrete', color: '#8a877e' });
       K.ceiling(0, 0, 12, 10, H, 'concrete');
-      K.wall(-0.15, -0.075, 12.15, -0.075, H, 'concrete');
-      K.wall(12.15, 10.075, -0.15, 10.075, H, 'concrete', { both: false });                   // south (the shelves cutaway)
+      K.wall(-0.15, -0.075, 12.15, -0.075, H, 'concrete', { both: false });                   // north (cutaway for the low shot)
+      K.wall(12.15, 10.075, -0.15, 10.075, H, 'concrete');
       K.wall(-0.075, 10.15, -0.075, -0.15, H, 'concrete', { openings: [{ at: 3.15, w: 0.95, h: 2.15 }] });
       K.wall(12.075, -0.15, 12.075, 10.15, H, 'concrete');
       K.door({ id: 'c1_stockroom:door', x: -0.075, z: SK.door[1], rot: 90, w: 0.9, style: 'metal', to: 'c1_backoffice', entry: 'stock', locked: () => C1.bossLock, lockMsg: 'It won\'t open.' });
       // steel shelving on three walls (north, south, west), the returns cage across the east end
-      for (let x = 1.4; x < 9.5; x += 2.0) K.prop('shelf', x, 0.4, 0, { len: 1.9, h: 2.6, load: x < 5 ? 'returns' : 'mixed' });
+      for (const [x, len] of [[1.2, 1.5], [4.05, 1.9], [6.05, 1.9], [8.05, 1.9]]) K.prop('shelf', x, 0.4, 0, { len, h: 2.6, load: x < 5 ? 'returns' : 'mixed' });
+      K.box(2.55, 0, -0.35, 1.3, 0.02, 0.5, { tex: 'concrete', color: '#5a5852' });                  // (under the low camera)
       for (let x = 1.4; x < 9.5; x += 2.0) K.prop('shelf', x, 9.6, 180, { len: 1.9, h: 2.6, load: x > 5 ? 'returns' : 'boxes' });
       for (const z of [1.6, 3.8]) K.prop('shelf', 0.4, z, 90, { len: 2.0, h: 2.6, load: 'stock' });
       const cage = K.prop('returns_cage', SK.cage[0], SK.cage[1], -90, { w: 7.6, d: 3.2, h: 2.8, name: 'c1sk_cage', open: false, fill: true });
@@ -1654,8 +1753,8 @@
       K.prop('box_stack', 7.4, 8.7, 0, { n: 7 });
       K.prop('pallet', 2.2, 8.4, 20, { load: 'boxes' });
       K.box(3.7, 0, 8.5, 0.5, 0.2, 1.4, { tex: 'metal', color: '#c9a822' }, { collide: true });
-      K.prop('satchel', 6.8, 5.6, 40, {}); K.prop('satchel', 3.4, 4.2, -30, {});
-      K.dress('boxes', [2, 2.4, 8, 7.6], 5, { seed: 121 });
+      K.prop('satchel', 5.4, 7.6, 40, {}); K.prop('satchel', 3.4, 4.2, -30, {});
+      K.dress('boxes', [1.2, 6.4, 4.6, 8.8], 3, { seed: 121 });
       K.dress('papers', [1, 1, 8.4, 9], 10, { seed: 122 });
       // light: caged tubes (dead in the Fog world but one); the Outage: flickering, red over the cage
       K.fogOnly(() => { K.light('fluoro', 4, H - 0.3, 5, { len: 1.2, intensity: 6, distance: 10, bank: 1 }); K.light('fluoro', 8.5, H - 0.3, 5, { len: 1.2, on: false }); });
@@ -1663,8 +1762,8 @@
         K.light('fluoro', 4, H - 0.3, 5, { len: 1.2, intensity: 7, distance: 12, flicker: true, color: '#cfe8dc' });
         K.light('point', 9.2, 3.6, 5, { color: '#ff2a1c', intensity: 5, distance: 11 });
         K.light('point', 2, 2.6, 8.2, { color: '#e8c21a', intensity: 1.6, distance: 6 });
-        for (const [x, z, len] of [[3, 3, 2.4], [6, 7, 2.8], [8.5, 2.2, 2.2], [2.2, 6.5, 2.0]]) K.prop('tether_hanging', x, z, 0, { ceil: H, len });
-        K.prop('receipt_curtain', 5.5, 0.9, 0, { ceil: H, w: 6, len: 2.4 });
+        for (const [x, z, len] of [[3.4, 3.2, 2.2], [5.2, 8.9, 2.4], [8.5, 2.2, 2.2], [10.9, 8.6, 2.0]]) K.prop('tether_hanging', x, z, 0, { ceil: H, len });
+        K.prop('receipt_curtain', 10.9, 1.4, 90, { ceil: H, w: 2.4, len: 2.0 });
         K.dress('receipts', [1, 1, 8.4, 9], 24, { seed: 123 });
         K.writing('YOU SAID IT WOULD WORK HERE', 11.98, 3.6, 5, 4.2, { rotY: -90, style: 'marker' });
       });
@@ -1681,18 +1780,28 @@
         K.animate(() => { const v = done(key); if (grp.visible !== v && S.outage) grp.visible = v; });
         K.doc('returns' + n, x, 0.05, z, { id: 'c1_stockroom:ret' + n, model: 'none', r: 1.2, when: () => done(key) && S.outage });
       });
-      // 1-4: Returns Notes 1–4 face-up round him (the cutscene places the group where he kneels; hidden until then)
+      // what is left of it (shown once it has collapsed): a mound of returns, the cardigan spread under them, tape and
+      // tethers; the returns box he stuffs the notes into; Returns Notes 1–4 face-up round where he kneels (1-4)
       {
+        const outer = new THREE.Group(), heap = new THREE.Group(); heap.name = 'c1sk_heap'; outer.add(heap);
+        C1_heapBuild(heap);
+        heap.visible = done('c1:collapsed');
+        K.mesh(outer, { world: 'outage' });
+        K.obj('c1sk_heap', heap);
+        const hc = K.collider(7.4, 3.9, 9.4, 6.1, { h: 0.6, name: 'c1sk_heapcol' });
+        hc.enabled = done('c1:collapsed') && !!S.outage;
+        K.animate(() => { const v = done('c1:collapsed'); if (heap.visible !== v) heap.visible = v; hc.enabled = v && !!S.outage; });
         const g = new THREE.Group(); g.name = 'c1sk_notes'; g.visible = false;
-        for (let i = 0; i < 4; i++) {
+        SK_NOTES.forEach(([x, z, jit], i) => {
           const t = DOCUMENTS['returns' + (i + 1)] ? DOCUMENTS['returns' + (i + 1)].text : '';
           const m = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), new THREE.MeshStandardMaterial({ map: slipTex(t, { size: 34 }), roughness: 0.8 }));
           m.name = 'c1_note' + i; m.userData.ownedGeo = true;
-          m.rotation.set(-Math.PI / 2, 0, Math.PI + [-0.12, 0.08, -0.04, 0.14][i]);           // text top away from him
-          m.position.set(0.66 - i * 0.44, 0.006 + i * 0.0015, 0.72 + [0.02, -0.04, 0.05, -0.01][i]);
+          m.rotation.set(-Math.PI / 2, 0, -Math.PI / 2 + jit);                       // text top toward the heap (+X), read from where he kneels
+          m.position.set(x, 0.006 + i * 0.0015, z);
           g.add(m);
-        }
-        K.mesh(g, { name: 'c1sk_notes' });
+        });
+        K.mesh(g, { name: 'c1sk_notes', world: 'outage' });
+        K.prop('box', SK_KNEEL[0] + 0.25, SK_KNEEL[1] - 1.05, 24, { open: true, text: 'RETURNS', collide: false, w: 0.42, h: 0.3, d: 0.34 });
       }
       // the tear: while it kneels, E at the glow in its chest (the point follows its chest)
       const tear = K.interact(8.2, 1.4, 5, (G) => C1_tear(G), { id: 'c1_stockroom:tear', r: 2.6, world: 'outage', when: () => !!(C1.boss && C1.boss.data.state === 'kneel') });
@@ -1708,13 +1817,14 @@
       K.examine(8.3, 1.8, 5, ['"Returns. Do not sell."', 'Somebody still has to open every one of them.'], { id: 'c1sk:sign', r: 1.8, when: () => !C1.bossOn && !done('c1:collapsed') });
       K.examine(2.2, 0.6, 8.4, 'A pallet of boxes. Delivered. Never signed for.', { id: 'c1sk:pallet', r: 1.3 });
       K.examine(3.7, 0.4, 8.5, 'The pallet jack. Someone snapped the handle off.', { id: 'c1sk:jack', r: 1.1 });
-      K.examine(6.8, 0.3, 5.6, 'A returns satchel, taped shut. There\'s a note under the tape. I can\'t make it out.', { id: 'c1sk:satchel', r: 1.1, when: () => !C1.bossOn });
+      K.examine(5.4, 0.3, 7.6, 'A returns satchel, taped shut. There\'s a note under the tape. I can\'t make it out.', { id: 'c1sk:satchel', r: 1.1, when: () => !C1.bossOn });
       K.examine(11.4, 1.8, 5, ['"You said it would work here."', 'I did. I said it to everyone.'], { id: 'c1sk:writing', r: 2.2, world: 'outage', when: () => !C1.bossOn });
       K.examine(3, 1.5, 3, 'Security tethers. Coiled tight, like they\'re still holding something.', { id: 'c1sk:tethers', r: 1.3, world: 'outage' });
       K.examine(8.2, 0.6, 5, ['Cardboard. Tape. Phones with the film still on the screens.', 'That\'s all it was.'], { id: 'c1sk:heap', r: 2.2, world: 'outage', when: () => done('c1:collapsed') });
     },
+    async onEnter() { if (!C1.boss || !C1.boss.data || !C1.boss.data.fight) { C1.bossLock = false; C1.bossOn = false; } },
     onUpdate() { C1_ambient(['#74827f', 0.45], ['#2a8a84', 0.3]); },
-    onLeave() { C1_ambientOff(); },
+    onLeave() { C1_ambientOff(); if (C1.keyLight) { try { C1.keyLight.free(); } catch (e) { /* pool */ } C1.keyLight = null; } },
   });
 
   // =================================================================================================================
@@ -1723,7 +1833,7 @@
   // =================================================================================================================
   defineRoom({
     id: 'c1_mastshot', name: 'THE SUMMIT (1-2)', area: 'THE MAST', chapter: 1, outdoor: true, surface: 'gravel', ambient: 'wind_heavy',
-    fog: { density: 0.014 }, env: { sheets: 6, specks: true },
+    fog: { density: 0.007 }, env: { sheets: 6, specks: true },
     bounds: [-6, 8, 6, 14],
     entries: { cam: [0, 12, 180], start: [0, 12, 180] },
     cameras: [{ id: 'c1_mastshot:cam', vol: [-6, 8, 6, 14], type: 'static', pos: [3.5, 3.2, 19.5], target: [0, 1.2, 9], fov: 'fit' }],   // (a gameplay fallback: 1-2 drives its own camera)
@@ -1732,13 +1842,13 @@
       K.box(0, -0.05, -10, 120, 0.05, 90, { tex: 'grass', color: '#5f6656' }, { shadow: false });
       // the summit road climbing to the compound, the fence, the huts, the tower
       K.box(0, -0.02, 0, 7, 0.03, 60, 'bitumen', { shadow: false, rot: 8 });
-      const mast = K.prop('mast', 0, -40, 0, { h: 60, name: 'c1ms_mast' });
+      const mast = K.prop('mast', 0, -40, 0, { h: 60, name: 'c1ms_mast', halo: 16 });
       if (mast && mast.userData.aircraft) mast.userData.aircraft.on(false);
       for (let x = -14; x <= 14; x += 4) K.prop('chainlink', x, -30, 0, { len: 4, h: 2.4, barbed: true });
       K.prop('hut', -7, -34, 20, { w: 3, d: 2.4 });
       K.prop('hut', 8, -36, -15, { w: 2.6, d: 2.2 });
-      for (const [x, z] of [[-3, 10], [3.5, -8], [-2.5, -22]]) K.prop('power_pole', x, z, 90, { span: 16 });
-      K.prop('gum_tree', -12, 4, 0, {}); K.prop('gum_tree', 11, -6, 0, {}); K.prop('gum_tree_small', 7, 10, 0, {});
+      K.prop('power_pole', -9, -12, 90, { span: 16 });
+      K.prop('gum_tree', -14, 2, 0, {}); K.prop('gum_tree', 15, -10, 0, {}); K.prop('gum_tree_small', -10, -26, 0, {});
     },
   });
 
@@ -1756,70 +1866,86 @@
     const A = G.aidan, C = C1_prepChloe(G);
     if (A.raw) A.raw.idleLife = false;
     C.look(null); C.eyes('down');
-    // 1. low behind the counter, looking out: he comes in, silhouetted against the dark concourse. The chime.
-    A.place(10, 16.1, 180); A.pose('idle');
-    G.cam({ pos: [11.35, 1.07, 2.35], target: [10.1, 1.25, 14.5], fov: 44 });
-    await G.wait(0.4);
+    // 1. low behind the counter, looking out down the aisle: the empty store a moment, then the chime and he comes in
+    //    out of the dark concourse, framed in the doorway between the demo tables
+    A.place(10, 16.75, 180); A.pose('idle');
+    G.cam({ pos: [9.42, 1.13, 2.5], target: [10.0, 1.22, 16.0], fov: 40, to: { pos: [9.42, 1.12, 2.62], fov: 38 }, dur: 7 });
+    await G.wait(1.0);
     G.sfx('chime', { vol: 0.9 });
-    const walkIn = A.walkTo(10, 11.8, { speed: 1.0 });
-    await G.wait(1.2);
+    const walkIn = q(A.walkTo(10, 12.4, { speed: 0.95 }));
+    await G.wait(1.8);
     C.eyes('ahead'); C.look(G.aidan);
     await walkIn;
     A.look(C);
-    await G.wait(0.5);
-    // 2. the reverse on Chloe: perfect posture, tablet to her chest, the smile; the clock above her at 8:59
-    G.cam({ pos: [10.05, 1.52, 6.9], target: [10, 1.72, 1.6], fov: 32, to: { pos: [10.05, 1.52, 6.3], fov: 30 }, dur: 9 });
+    await G.wait(0.6);
+    // 2. the reverse on Chloe behind the counter: perfect posture, tablet to her chest, the smile on; the clock above her
+    //    reads 8:59. He comes up the aisle and into the edge of frame as she talks.
+    G.cam({ pos: [12.3, 1.5, 8.3], target: [10.0, 1.6, 2.2], fov: 25, to: { pos: [12.15, 1.5, 7.7], fov: 23 }, dur: 14 });
     C.expr('smile_huge');
     await G.say('CHLOE', 'Hi! Welcome in!');
     await G.beat();
     C.expr('wide');
     await G.say('CHLOE', 'Oh— Aidan?');
-    A.walkTo(10, 5.1, { speed: 1.05 });
+    const walkUp = q(A.walkTo(10, 4.3, { speed: 1.0 }));
     await G.say('AIDAN', 'Chloe? What are you— what are you doing here?');
     C.expr('smile');
     await G.say('CHLOE', 'Turning this place around.');
-    C.gesture('laugh').catch(() => {});
+    q(C.gesture('laugh'));
     await G.wait(0.7);
     await G.say('CHLOE', 'They asked for volunteers. Tough store.');
-    // 3. a medium two-shot across the counter; he looks round the empty store — every lock screen 8:59
-    await G.until(() => G.dist(A, [10, 5.1]) < 0.1, { timeout: 4 });
-    A.turn(180, 0.3);
-    G.cam({ pos: [15.6, 1.45, 4.3], target: [10, 1.35, 3.7], fov: 38, to: { pos: [15.4, 1.45, 4.1], fov: 36 }, dur: 12 });
+    await walkUp;
+    // 3. a medium two-shot across the counter; he looks round the empty store — every demo phone lit, every lock
+    //    screen 8:59. She looks past him, at the door.
+    q(A.turn(180, 0.3));
     C.look(null); C.eyes('down');
-    await G.wait(0.5);
-    A.look([5, 1.0, 7.4]);
-    await G.wait(1.2);
-    G.cam({ pos: [10.35, 1.2, 8.3], target: [10, 0.93, 7.25], fov: 30, to: { pos: [9.75, 1.18, 8.2], fov: 28 }, dur: 3 });   // an insert: 8:59, 8:59, 8:59
-    await G.wait(2.0);
-    G.cam({ pos: [15.6, 1.45, 4.3], target: [10, 1.35, 3.7], fov: 36 });
-    A.look(null);
+    G.cam({ pos: [6.0, 1.42, 5.0], target: [10.0, 1.33, 3.3], fov: 38, to: { pos: [6.15, 1.42, 4.85], fov: 36 }, dur: 16 });
+    await G.wait(0.6);
+    A.look([5.4, 1.0, 9.8]);
+    await G.wait(1.1);
+    // (an insert: 8:59, 8:59, 8:59)
+    G.cam({ pos: [5.78, 1.2, 7.72], target: [5.42, 0.93, 6.66], fov: 30, to: { pos: [5.12, 1.18, 7.62], fov: 28 }, dur: 3.2 });
+    await G.wait(2.2);
+    A.look([14.6, 1.0, 9.8]);
+    G.cam({ pos: [6.0, 1.42, 5.0], target: [10.0, 1.33, 3.3], fov: 37, to: { pos: [6.15, 1.42, 4.85], fov: 35 }, dur: 16 });
+    await G.wait(1.0);
+    A.look(C); A.eyes('down');
     await G.say('AIDAN', 'It\'s closed. The whole centre\'s closed. There\'s nobody here.');
-    C.eyes('ahead'); C.look([10, 1.6, 12]);
+    C.eyes('ahead'); C.look([10, 1.6, 13]);
     await G.say('CHLOE', 'It\'s the last day of the month.');
     await G.beat();
     await G.say('CHLOE', 'They always come in the last hour.');
-    A.gesture('rub_neck', { hand: 'L' }).catch(() => {});
+    q(A.gesture('rub_neck', { hand: 'L' }));
+    A.eyes('ahead');
     await G.say('AIDAN', 'How long have you been here?');
     // (checking the tablet)
-    if (C.raw) { try { C.raw.armPose('L', 'tablet_read'); } catch (e) { /* pose */ } }
+    C.hold('L', null); C.hold('L', 'tablet', { pose: 'tablet_read' });
     C.eyes('down'); C.look(null); C.expr('flat');
-    await G.wait(0.6);
+    await G.wait(0.7);
     await G.say('CHLOE', 'Since the start of the month.');
     await G.beat();
-    C.gesture('tremor', { amount: 0.8 }).catch(() => {});
+    q(C.gesture('tremor', { amount: 0.8 }));
     await G.say('CHLOE', 'I\'m eleven short. Eleven. I\'ve never finished a month under target, Aidan. Not once.');
     await G.beat();
     await G.say('CHLOE', 'I have to send my numbers up to Level 4 at close.');
-    // 4. close on her lanyard: the pins drag it down; they clink as she breathes
-    if (C.raw) { try { C.raw.armPose('L', 'shield'); } catch (e) { /* pose */ } }
-    G.cam({ pos: [10.28, 1.22, 3.05], target: [10.0, 1.2, 2.3], fov: 26, to: { pos: [10.22, 1.2, 2.95], fov: 24 }, dur: 3.6 });
+    // 4. close on her lanyard: dozens of gold Top Performer pins drag it down; they clink as she breathes
+    {
+      const v = new THREE.Vector3(10, 1.18, 2.37);
+      try { C.raw.anchors.card.getWorldPosition(v); } catch (e) { /* default */ }
+      if (!C1.pinLight) C1.pinLight = Render.allocLight('point', { color: '#ffd9a0', intensity: 1.6, distance: 1.6, pin: true });
+      try { C1.pinLight.set({ pos: [v.x + 0.35, v.y + 0.45, v.z + 0.55] }); } catch (e) { /* pool */ }
+      G.cam({ pos: [v.x + 0.08, v.y + 0.16, v.z + 0.64], target: [v.x, v.y + 0.07, v.z], fov: 30, to: { pos: [v.x + 0.06, v.y + 0.15, v.z + 0.56], fov: 29 }, dur: 4 });
+    }
+    if (C.raw) C.raw.idleLife = false;
+    await G.wait(0.5);
     G.sfx('pins', { vol: 0.5, pos: [10, 1.2, 2.3] });
-    await G.wait(1.3);
+    await G.wait(1.4);
     G.sfx('pins', { vol: 0.4, pos: [10, 1.2, 2.3] });
-    await G.wait(1.5);
+    await G.wait(1.6);
+    if (C1.pinLight) { try { C1.pinLight.free(); } catch (e) { /* pool */ } C1.pinLight = null; }
     // 5. over her shoulder onto him
-    G.cam({ pos: [9.62, 1.62, 1.35], target: [10.05, 1.45, 5.1], fov: 34 });
-    C.look(G.aidan); C.eyes('at', G.aidan);
+    C.hold('L', null); C.hold('L', 'tablet', { pose: 'shield' });
+    G.cam({ pos: [9.5, 1.63, 1.45], target: [10.12, 1.45, 4.3], fov: 34, to: { pos: [9.52, 1.63, 1.55], fov: 33 }, dur: 9 });
+    C.look(G.aidan); C.eyes('at', G.aidan); C.expr('neutral');
     A.look(C); A.eyes('down');
     await G.say('AIDAN', 'I need to use the system. I need to look up a customer. Her address.');
     // (brightening, too fast)
@@ -1828,16 +1954,18 @@
     await G.beat();
     await G.say('CHLOE', 'Is it a sale?');
     A.eyes('away', C);
-    await G.wait(0.4);
+    await G.wait(0.5);
     await G.say('AIDAN', '...It\'s a follow-up.');
     // (the smile holds a fraction too long) — close on her
-    G.cam({ pos: [10.0, 1.56, 3.55], target: [10, 1.56, 2.25], fov: 28, to: { pos: [10.0, 1.56, 3.35], fov: 26 }, dur: 4 });
+    G.cam({ pos: [10.0, 1.5, 3.62], target: [10, 1.54, 2.25], fov: 23, to: { pos: [10.0, 1.5, 3.45], fov: 21 }, dur: 4 });
     C.expr('smile_huge'); C.eyes('at', G.aidan);
     await G.say('CHLOE', 'Amazing.');
-    await G.wait(1.6);
+    await G.wait(1.7);
     C.expr('smile'); C.eyes('down');
-    await G.wait(0.4);
+    await G.wait(0.5);
     // state (plain statements: a skip lands here the same way)
+    if (C1.pinLight) { try { C1.pinLight.free(); } catch (e) { /* pool */ } C1.pinLight = null; }
+    C.hold('L', null); C.hold('L', 'tablet', { pose: 'shield' });
     C.look(null);
     if (A.raw) A.raw.idleLife = true;
     if (C.raw) C.raw.idleLife = true;
@@ -1929,6 +2057,8 @@
   // =================================================================================================================
   // IN-ENGINE 1-8: the food court payphone (Wai), straight into CUTSCENE 1-2
   // =================================================================================================================
+  // the handset to his left ear, elbow out and down (the default carry pose pushes the elbow forward at a wall phone)
+  const C1_EAR = { w: [0.07, 0.13, 0.02], pole: [1, -1, -0.3], fing: [0, 1, 0], palm: [-1, 0, 0.1], curl: 0.6, thumb: 0.45 };
   function C1_payHandset(G, lifted) {
     const pay = G.world && G.world.build && G.world.build.interactables.find((i) => i.id === 'c1_foodcourt:payphone');
     const o = pay && pay.obj; if (!o) return;
@@ -1941,19 +2071,22 @@
     C1.onPhone = true;
     G.set('c1_wai', true);                              // (the ringing stops as he lifts it)
     C1_ringStop();
+    G.cam({ pos: [1.4, 1.56, 10.7], target: [0.5, 1.42, 13.2], fov: 36, to: { pos: [1.3, 1.55, 11.0], fov: 34 }, dur: 14 });
     await A.walkTo(0.78, FC.phone[1], { speed: 1.2 });
     await A.turn(-90, 0.35);
     G.sfx('click', { vol: 0.7, pos: [0.3, 1.4, FC.phone[1]] });
     C1_payHandset(G, true);
-    A.hold('L', 'handset');
+    A.hold('L', 'handset', { pose: C1_EAR });
     if (A.raw) A.raw.idleLife = false;
     G.sfx('static', { dur: 0.5, vol: 0.4, phone: true });
     await G.wait(0.8);
     await G.say('WAI (phone)', 'You\'re the new one. [beat] Don\'t hang up. Listen.');
     await G.say('AIDAN', 'Who is this?');
+    G.cam({ pos: [1.55, 1.62, 15.5], target: [0.55, 1.44, 13.2], fov: 34, to: { pos: [1.45, 1.6, 15.2], fov: 32 }, dur: 16 });
     await G.say('WAI (phone)', 'Name\'s Wai. I\'m at the old exchange, top of Exchange Road. [beat] Your phone. When the bars go up, it\'s not the network, mate. Nothing gets signal here. Something\'s found you.');
     A.eyes('down');
     await G.say('AIDAN', 'What do you mean, something—');
+    G.cam({ pos: [1.3, 1.5, 10.9], target: [0.5, 1.45, 13.2], fov: 30, to: { pos: [1.2, 1.5, 11.3], fov: 28 }, dur: 12 });
     await G.say('WAI (phone)', 'You\'ll hear the tone soon. When you do, keep moving. Find a door that locks if you have to. [beat] Come see me when you\'re done with whatever brought you.');
     // the line clicks dead
     G.sfx('click', { vol: 0.6, phone: true });
@@ -1967,21 +2100,31 @@
   // =================================================================================================================
   // CUTSCENE 1-2 "The Tone"
   // =================================================================================================================
-  function C1_phoneCam(fov, dist = 0.3) {
+  // a camera close on the top of the phone's screen (the status row with the bars), from the held phone's screen mesh
+  function C1_phoneCam(fov, dist = 0.12) {
     const ph = Player.actor && Player.actor.held && Player.actor.held.R;
     if (!ph) return null;
-    ph.updateWorldMatrix(true, false);
-    const p = new THREE.Vector3(), q = new THREE.Quaternion();
-    ph.getWorldPosition(p); ph.getWorldQuaternion(q);
-    const n = new THREE.Vector3(0, 0, 1).applyQuaternion(q), up = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
-    const c = p.clone().addScaledVector(n, dist).addScaledVector(up, 0.03);
-    return { pos: [c.x, c.y, c.z], target: [p.x + up.x * 0.015, p.y + up.y * 0.015, p.z + up.z * 0.015], fov };
+    const scr = (ph.userData && ph.userData.screen) || ph;
+    scr.updateWorldMatrix(true, false);
+    const p = new THREE.Vector3(), qt = new THREE.Quaternion();
+    scr.getWorldPosition(p); scr.getWorldQuaternion(qt);
+    const gp = scr.geometry && scr.geometry.parameters, hh = gp && gp.height ? gp.height : 0.13;
+    const n = new THREE.Vector3(0, 0, 1).applyQuaternion(qt), up = new THREE.Vector3(0, 1, 0).applyQuaternion(qt);
+    const top = p.clone().addScaledVector(up, hh * 0.45);
+    const c = top.clone().addScaledVector(n, dist).addScaledVector(up, 0.006);
+    // roll the lens so the screen's own up reads as up (it's held tilted)
+    const fwd = top.clone().sub(c).normalize();
+    const wr = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+    const wu = new THREE.Vector3().crossVectors(wr, fwd);
+    const su = up.clone().addScaledVector(fwd, -up.dot(fwd)).normalize();
+    const roll = Math.atan2(su.dot(wr), su.dot(wu)) / D2R;
+    return { pos: [c.x, c.y, c.z], target: [top.x, top.y, top.z], fov, roll: -roll };
   }
   defineCutscene('1-2', async (G) => {
     const A = G.aidan;
     const post = Render.post;
     // 1. the food court, wide and high: he hangs up. A faint dial-up handshake rises from everywhere at once.
-    G.cam({ pos: [26.8, 4.25, 18.6], target: [2.2, 0.6, 12.6], fov: 34, to: { pos: [26.4, 4.2, 18.2], fov: 32 }, dur: 5 });
+    G.cam({ pos: [14.2, 4.3, 18.3], target: [1.1, 0.85, 13.0], fov: 40, to: { pos: [13.8, 4.25, 18.0], fov: 38 }, dur: 5 });
     await G.wait(0.6);
     A.hold('L', null);
     C1_payHandset(G, false);
@@ -1991,22 +2134,22 @@
     const ramp = (k) => { post.grain = U.lerp(0.08, 0.34, k * k); post.ca = U.lerp(0.55, 2.3, k * k); post.noise = k > 0.75 ? ((k - 0.75) / 0.25) * 0.08 : 0; };
     let t0 = 0;
     const rampTo = (secs, k0, k1) => G.loop((dt) => { t0 = Math.min(secs, t0 + dt); ramp(U.lerp(k0, k1, t0 / secs)); return t0 >= secs; });
-    A.turn(90, 0.8); A.look([10, 3.5, 10]);
+    q(A.turn(90, 0.8)); A.look([10, 3.5, 10]);
     await rampTo(2.0, 0, 0.3);
     // 2. an impossible exterior: the mast on the summit through the fog; its red light blinks on for the first time
     await G.goto('c1_mastshot', 'cam', { fade: false, sound: 'none' });
     A.hide();
-    G.cam({ pos: [4.5, 1.1, 30], target: [0, 30, -40], fov: 40, to: { pos: [4.3, 1.2, 28.5], target: [0, 31, -40], fov: 36 }, dur: 3.4 });
+    G.cam({ pos: [6.0, 1.6, 12.4], target: [0, 43, -40], fov: 40, to: { pos: [5.7, 1.6, 11.2], target: [0, 47, -40], fov: 34 }, dur: 3.4 });
     t0 = 0; await rampTo(1.2, 0.3, 0.5);
     { const m = G.obj('c1ms_mast'); if (m && m.userData.aircraft) m.userData.aircraft.on(true); }
-    t0 = 0; await rampTo(1.9, 0.5, 0.7);
+    t0 = 0; await rampTo(2.4, 0.5, 0.7);
     // 3. low along the concourse floor: the carpet tiles lift and curl back one by one over green circuit board,
     //    receding into the dark; the lights die bank by bank toward the camera
-    await G.goto('c1_concourse', { pos: [7, 0.9], yaw: 0 }, { fade: false, sound: 'none' });
+    await G.goto('c1_concourse', { pos: [41.2, 6.6], yaw: -90 }, { fade: false, sound: 'none' });
     A.hide();
     const tiles = G.obj('c1cn_tiles'), under = G.obj('c1cn_circuit');
     if (tiles) tiles.visible = true; if (under) under.visible = true;
-    G.cam({ pos: [38.6, 0.22, 6.2], target: [16, 0.5, 5.8], fov: 42, to: { pos: [38.9, 0.2, 6.2], target: [16, 0.42, 5.8], fov: 40 }, dur: 3.8 });
+    G.cam({ pos: [40.3, 0.42, 2.45], target: [14, 0.45, 1.5], fov: 38, to: { pos: [40.7, 0.4, 2.45], target: [14, 0.4, 1.5], fov: 36 }, dur: 3.8 });
     try { World.lightsOut({ dur: 2.6 }); } catch (e) { /* world */ }
     const piv = tiles ? tiles.children.slice() : [];
     piv.sort((a, b) => (b.userData.ord ?? b.position.x) - (a.userData.ord ?? a.position.x));   // nearest first, receding west into the dark
@@ -2014,7 +2157,7 @@
     await G.loop((dt) => {
       k = Math.min(1, k + dt / 3.4);
       ramp(0.7 + 0.3 * k);
-      piv.forEach((p, i) => { const s = clamp((k * 1.25 - (i / piv.length)) / 0.22, 0, 1); p.rotation.z = -U.ease.inOut(s) * 2.6; });
+      piv.forEach((p, i) => { const s = clamp((k * 1.25 - (i / piv.length)) / 0.22, 0, 1); p.rotation.x = -U.ease.inOut(s) * 2.7; });
       return k >= 1;
     });
     // the world goes over (in the dark): the concourse's own contracts and tethers from here on
@@ -2025,7 +2168,7 @@
     A.show(); A.pose('idle');
     if (A.raw) { A.raw.armPose('R', 'phone_look'); A.raw.eyes('down'); A.raw.expr('scared'); }
     await G.wait(0.05);
-    const pc = C1_phoneCam(26, 0.32);
+    const pc = C1_phoneCam(18, 0.12);
     if (pc) G.cam(pc); else G.cam({ pos: [1.5, 1.4, FC.phone[1] + 0.4], target: [0.9, 1.25, FC.phone[1]], fov: 28 });
     G.bars({ climb: 3, from: 0, dur: 1.7, tell: 'eftpos' });
     await G.wait(2.0);
@@ -2064,18 +2207,22 @@
     const keep = (m) => { m.userData.shared = true; return m; };
     CGM.card = keep(Tex.mat('cardboard', { outage: false, color: '#c2a47a' }));
     CGM.cardDk = keep(Tex.mat('cardboard', { outage: false, color: '#8e7a58' }));
-    CGM.tape = keep(new THREE.MeshStandardMaterial({ color: '#b99a5a', roughness: 0.35, metalness: 0.0 }));
-    CGM.knit = keep(Tex.mat('fabric_knit', { outage: false, color: '#556a86' }));
-    CGM.knitDk = keep(Tex.mat('fabric_knit', { outage: false, color: '#3f4f64' }));
-    CGM.satchel = keep(Tex.mat('plastic_sheet', { outage: false, color: '#7d8280', roughness: 0.5 }));
+    CGM.cardWet = keep(Tex.mat('cardboard', { outage: false, color: '#6f6048', roughness: 0.6 }));
+    CGM.tape = keep(new THREE.MeshStandardMaterial({ color: '#c9a86a', roughness: 0.3, metalness: 0.0 }));
+    CGM.knit = keep(Tex.mat('fabric_knit', { outage: false, color: '#5d7394', repeat: [3, 3] }));
+    CGM.knitDk = keep(Tex.mat('fabric_knit', { outage: false, color: '#43546c', repeat: [4, 2] }));
+    CGM.satchel = keep(Tex.mat('plastic_sheet', { outage: false, color: '#8a8f8c', roughness: 0.45 }));
     CGM.phone = keep(new THREE.MeshStandardMaterial({ color: '#15181a', roughness: 0.25, metalness: 0.3 }));
-    CGM.screen = keep(new THREE.MeshStandardMaterial({ color: '#9fb0b0', roughness: 0.08, metalness: 0.2, emissive: '#223333', emissiveIntensity: 0.4 }));
+    CGM.screen = keep(new THREE.MeshStandardMaterial({ color: '#9fb0b0', roughness: 0.06, metalness: 0.2, emissive: '#1d3a3a', emissiveIntensity: 0.5 }));
     CGM.tether = keep(new THREE.MeshStandardMaterial({ color: '#161718', roughness: 0.45 }));
+    CGM.cavity = keep(new THREE.MeshStandardMaterial({ color: '#0c0f0e', roughness: 1 }));
     CGM.modem = keep(new THREE.MeshStandardMaterial({ color: '#e8e6e0', roughness: 0.4, emissive: '#9ff2e4', emissiveIntensity: 0.6 }));
     CGM.glow = keep(new THREE.MeshBasicMaterial({ color: '#bff8ee' }));
     CGM.led = keep(new THREE.MeshBasicMaterial({ color: '#ff2a1c' }));
     CGM.note = keep(new THREE.MeshStandardMaterial({ map: slipTex('You said it would work here.', { size: 28 }), roughness: 0.8, side: THREE.DoubleSide }));
+    CGM.label = keep(new THREE.MeshStandardMaterial({ map: Tex.label ? Tex.label('RETURNS\nREPLY PAID 4471', { style: 'label' }) : null, roughness: 0.7 }));
     CGM.button = keep(new THREE.MeshStandardMaterial({ color: '#d8c8a8', roughness: 0.3 }));
+    CGM.pin = keep(new THREE.MeshStandardMaterial({ color: '#b3261e', roughness: 0.3 }));
     return CGM;
   }
   // merge a list of [geometry, matrix, material] into one mesh per material under `parent`
@@ -2089,92 +2236,133 @@
       for (const it of items) it.geo.dispose();
     }
   }
-  const M4 = (x, y, z, rx = 0, ry = 0, rz = 0, s = 1) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(s, s, s));
+  // a loose part (its own mesh, so it can fall away on its own when the thing comes apart)
+  function C1_part(parent, geo, mat, x, y, z, rx = 0, ry = 0, rz = 0, s = null) {
+    const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz);
+    if (s) m.scale.set(s[0], s[1], s[2]);
+    m.castShadow = true; m.receiveShadow = true; m.userData.ownedGeo = true;
+    parent.add(m); return m;
+  }
+  const M4 = (x, y, z, rx = 0, ry = 0, rz = 0, s = 1) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), Array.isArray(s) ? new THREE.Vector3(s[0], s[1], s[2]) : new THREE.Vector3(s, s, s));
   const BX = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+  const SPH = (r, ws = 14, hs = 10) => new THREE.SphereGeometry(r, ws, hs);
   function helix(len, r, turns, tube = 0.02) {
     const pts = []; for (let i = 0; i <= 40; i++) { const t = i / 40, a = t * turns * Math.PI * 2; pts.push(new THREE.Vector3(Math.cos(a) * r, -t * len, Math.sin(a) * r)); }
     return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 80, tube, 5, false);
   }
-  // one arm: shoulder pivot → upper (boxes + tape + a tether coil) → elbow pivot → forearm → a hand of phones
+  // a band of packing tape round an ellipse (rx × rz) at height y
+  const tapeBand = (rx, rz, y, w = 0.05) => { const g = new THREE.CylinderGeometry(1, 1, w, 24, 1, true); g.scale(rx, 1, rz); g.translate(0, y, 0); return g; };
+  // one arm (hangs along −Y from the shoulder pivot): a knitted cardigan sleeve over boxes, a forearm of taped
+  // boxes and a tether, a hand of phones with their screen protectors still on
   function C1_cgArm(side, M) {
     const sh = new THREE.Group(); sh.name = 'shoulder' + side;
-    const up = [], fo = [], hd = [];
-    for (let i = 0; i < 3; i++) up.push([BX(0.36 - i * 0.03, 0.4, 0.32), M4(0, -0.2 - i * 0.38, 0, 0, i * 0.4, (i % 2 ? 0.08 : -0.06)), i % 2 ? M.cardDk : M.card]);
-    for (let i = 0; i < 3; i++) up.push([BX(0.38, 0.05, 0.34), M4(0, -0.22 - i * 0.38, 0, 0, i * 0.4, 0), M.tape]);
-    up.push([helix(1.1, 0.2, 5, 0.018), M4(0, -0.05, 0), M.tether]);
+    const up = [];
+    up.push([new THREE.CylinderGeometry(0.22, 0.2, 1.2, 12, 3), M4(0, -0.58, 0), M.knit]);                   // the sleeve
+    up.push([SPH(0.25, 12, 8), M4(0, -0.02, 0, 0, 0, 0, [1, 0.9, 1]), M.knit]);
+    up.push([tapeBand(0.225, 0.215, -0.42, 0.06), new THREE.Matrix4(), M.tape]);
+    up.push([helix(1.0, 0.24, 4, 0.016), M4(0, -0.1, 0), M.tether]);
     C1_merge(sh, up);
-    const el = new THREE.Group(); el.name = 'elbow' + side; el.position.y = -1.18; sh.add(el);
-    for (let i = 0; i < 3; i++) fo.push([BX(0.3, 0.38, 0.28), M4(0, -0.2 - i * 0.36, 0, 0, -i * 0.5, (i % 2 ? -0.1 : 0.05)), i === 1 ? M.satchel : M.card]);
-    for (let i = 0; i < 2; i++) fo.push([BX(0.32, 0.05, 0.3), M4(0, -0.38 - i * 0.36, 0), M.tape]);
-    fo.push([helix(1.0, 0.17, 4, 0.016), M4(0, -0.02, 0), M.tether]);
+    C1_part(sh, BX(0.2, 0.26, 0.16), M.cardDk, 0.13 * (side === 'L' ? 1 : -1), -0.7, -0.14, 0.2, 0.4, 0.3);   // a box through the sleeve
+    const el = new THREE.Group(); el.name = 'elbow' + side; el.position.y = -1.2; sh.add(el);
+    const fo = [];
+    fo.push([tapeBand(0.17, 0.16, -0.3, 0.05), new THREE.Matrix4(), M.tape]);
+    fo.push([tapeBand(0.16, 0.15, -0.72, 0.05), new THREE.Matrix4(), M.tape]);
+    fo.push([helix(0.95, 0.19, 5, 0.015), M4(0, -0.03, 0), M.tether]);
     C1_merge(el, fo);
-    const hand = new THREE.Group(); hand.name = 'hand' + side; hand.position.y = -1.12; el.add(hand);
+    C1_part(el, BX(0.3, 0.4, 0.27), M.card, 0, -0.2, 0, 0, 0.2, 0.06);
+    C1_part(el, BX(0.27, 0.36, 0.25), M.satchel, 0.02, -0.56, 0.01, 0, -0.4, -0.08);
+    C1_part(el, BX(0.25, 0.3, 0.24), M.cardDk, 0, -0.88, 0, 0, 0.6, 0.05);
+    const hand = new THREE.Group(); hand.name = 'hand' + side; hand.position.y = -1.08; el.add(hand);
+    const hd = [];
+    hd.push([BX(0.28, 0.14, 0.2), M4(0, -0.02, 0), M.card]);
     for (let i = 0; i < 5; i++) {
-      const a = (i - 2) * 0.35;
-      hd.push([BX(0.075, 0.16, 0.012), M4(Math.sin(a) * 0.12, -0.12 - Math.abs(i - 2) * 0.02, Math.cos(a) * 0.04, 0.2, a, 0), M.phone]);
-      hd.push([new THREE.PlaneGeometry(0.066, 0.14), M4(Math.sin(a) * 0.12, -0.12 - Math.abs(i - 2) * 0.02, Math.cos(a) * 0.04 + 0.007, 0.2, a, 0), M.screen]);
+      const a = (i - 2) * 0.32, x = Math.sin(a) * 0.13, z = Math.cos(a) * 0.05 + (i === 0 || i === 4 ? -0.04 : 0);
+      const len = i === 2 ? 0.24 : 0.2;
+      hd.push([BX(0.085, len, 0.014), M4(x, -0.08 - len / 2, z, 0.25, a, 0), M.phone]);
+      hd.push([new THREE.PlaneGeometry(0.074, len - 0.02), M4(x + Math.sin(a) * 0.008, -0.08 - len / 2, z + Math.cos(a) * 0.008, 0.25, a, 0), M.screen]);
     }
-    hd.push([BX(0.26, 0.12, 0.2), M4(0, -0.02, 0), M.card]);
     C1_merge(hand, hd);
     return { sh, el, hand };
   }
   function C1_cgBuild(e) {
     const M = C1_cgMats(), root = new THREE.Group(); root.name = 'enemy:' + e.id;
-    const body = new THREE.Group(); body.name = 'cg_body'; root.add(body);
-    // the heap: a long skirt of returns, widening to the floor
+    const body = new THREE.Group(); body.name = 'cg_body'; body.scale.setScalar(1.15); root.add(body);
+    const rr = U.rng(71);
+    // ---- the heap: a long skirt of returns spilling out from under the cardigan's hem ------------------------------
     const base = new THREE.Group(); base.name = 'cg_base'; body.add(base);
-    const heap = [], rr = U.rng(71);
-    for (let ring = 0; ring < 4; ring++) {
-      const n = 9 - ring, y = ring * 0.36, rad = 1.12 - ring * 0.2;
+    const hem = [];
+    { const g = new THREE.CylinderGeometry(0.82, 1.18, 1.25, 16, 3, true); const pa = g.attributes.position;
+      for (let i = 0; i < pa.count; i++) { const y = pa.getY(i), k = (0.625 - y) / 1.25; const a = Math.atan2(pa.getZ(i), pa.getX(i)); const w = 1 + Math.sin(a * 5 + 1.3) * 0.06 * k + Math.sin(a * 11) * 0.03 * k; pa.setX(i, pa.getX(i) * w); pa.setZ(i, pa.getZ(i) * w); if (y < -0.5) pa.setY(i, y + Math.sin(a * 7) * 0.08); }
+      g.computeVertexNormals(); hem.push([g, M4(0, 0.78, -0.05), M.knitDk]); }
+    hem.push([tapeBand(0.95, 0.9, 1.05, 0.06), new THREE.Matrix4(), M.tape]);
+    hem.push([helix(0.9, 1.05, 2, 0.02), M4(0, 1.2, 0), M.tether]);
+    C1_merge(base, hem);
+    for (let ring = 0; ring < 3; ring++) {
+      const n = 10 - ring * 2, y = ring * 0.3, rad = 1.12 - ring * 0.18;
       for (let i = 0; i < n; i++) {
-        const a = (i / n) * Math.PI * 2 + ring * 0.4, w = 0.4 + rr() * 0.25, h = 0.34 + rr() * 0.12, dd = 0.3 + rr() * 0.2;
-        heap.push([BX(w, h, dd), M4(Math.cos(a) * rad, y + h / 2, Math.sin(a) * rad, (rr() - 0.5) * 0.4, -a + rr(), (rr() - 0.5) * 0.4), rr() < 0.25 ? M.satchel : rr() < 0.5 ? M.cardDk : M.card]);
-        if (rr() < 0.4) heap.push([BX(w + 0.02, 0.045, dd + 0.02), M4(Math.cos(a) * rad, y + h * 0.55, Math.sin(a) * rad, 0, -a + 0.3, 0), M.tape]);
+        const a = (i / n) * Math.PI * 2 + ring * 0.5 + rr() * 0.3, w = 0.34 + rr() * 0.22, h = 0.26 + rr() * 0.14, dd = 0.26 + rr() * 0.16;
+        const mat = rr() < 0.22 ? M.satchel : rr() < 0.4 ? M.cardDk : rr() < 0.55 ? M.cardWet : M.card;
+        C1_part(base, BX(w, h, dd), mat, Math.cos(a) * rad, y + h / 2, Math.sin(a) * rad, (rr() - 0.5) * 0.5, -a + rr(), (rr() - 0.5) * 0.5);
       }
     }
-    for (let i = 0; i < 6; i++) { const a = rr() * Math.PI * 2; heap.push([BX(0.075, 0.012, 0.15), M4(Math.cos(a) * (0.6 + rr() * 0.6), 0.5 + rr() * 0.9, Math.sin(a) * (0.6 + rr() * 0.6), rr() * 3, rr() * 3, rr() * 3), M.phone]); }
-    heap.push([new THREE.CylinderGeometry(0.95, 1.25, 1.3, 14, 1, true), M4(0, 0.7, 0), M.knitDk]);              // the cardigan's hem
-    C1_merge(base, heap);
-    // hips → torso (hunches forward)
+    for (let i = 0; i < 5; i++) { const a = rr() * Math.PI * 2; C1_part(base, BX(0.085, 0.014, 0.17), M.phone, Math.cos(a) * (1.0 + rr() * 0.3), 0.05 + rr() * 0.5, Math.sin(a) * (1.0 + rr() * 0.3), rr() * 3, rr() * 3, rr() * 3); }
+    // ---- hips → torso: a humped knitted back over a body of boxes; the cardigan hangs open at the front -----------
     const hips = new THREE.Group(); hips.name = 'cg_hips'; hips.position.y = 1.4; body.add(hips);
     const tor = [];
-    for (let i = 0; i < 4; i++) tor.push([BX(0.95 - i * 0.05, 0.42, 0.72), M4((i % 2 ? 0.05 : -0.04), 0.22 + i * 0.4, 0, 0, (i % 2 ? 0.12 : -0.1), 0), i % 3 === 1 ? M.satchel : M.card]);
-    for (let i = 0; i < 4; i++) tor.push([BX(1.0 - i * 0.05, 0.06, 0.76), M4(0, 0.4 + i * 0.4, 0, 0, i * 0.2, 0), M.tape]);
-    // the cardigan: a knit back and shoulders, open fronts (the modem glowing between them), buttons
-    tor.push([BX(1.25, 1.5, 0.08), M4(0, 0.95, -0.4, 0.06, 0, 0), M.knit]);
-    for (const s of [-1, 1]) {
-      tor.push([BX(0.36, 1.35, 0.08), M4(s * 0.45, 0.9, 0.4, -0.08, s * 0.25, 0), M.knit]);
-      tor.push([BX(0.1, 1.5, 0.82), M4(s * 0.62, 0.95, 0, 0, 0, s * 0.05), M.knit]);
-      for (let b = 0; b < 4; b++) tor.push([new THREE.SphereGeometry(0.035, 8, 6), M4(s * 0.32, 0.5 + b * 0.3, 0.45, 0, 0, 0), M.button]);
+    tor.push([SPH(0.62, 16, 12), M4(0, 0.34, -0.02, 0, 0, 0, [1.25, 0.85, 1.0]), M.knit]);                   // lower back
+    tor.push([SPH(0.66, 16, 12), M4(0, 0.98, -0.1, 0, 0, 0, [1.18, 1.0, 0.92]), M.knit]);                   // middle
+    tor.push([SPH(0.6, 16, 12), M4(0, 1.5, -0.3, -0.25, 0, 0, [1.22, 0.85, 1.02]), M.knit]);                // the hump
+    for (const sx of [-1, 1]) tor.push([SPH(0.32, 12, 10), M4(sx * 0.6, 1.54, -0.02, 0, 0, sx * 0.35, [1, 0.8, 1]), M.knit]);   // shoulders, sloping
+    tor.push([new THREE.TorusGeometry(0.3, 0.1, 8, 18), M4(0, 1.86, 0.02, Math.PI / 2 - 0.35, 0, 0), M.knitDk]);  // the collar
+    // the open front: two knitted flaps hanging from the shoulders, buttons down one side
+    for (const sx of [-1, 1]) {
+      tor.push([BX(0.42, 1.42, 0.08), M4(sx * 0.36, 0.95, 0.6, -0.06, sx * 0.42, sx * 0.05), M.knit]);
+      tor.push([BX(0.1, 1.44, 0.1), M4(sx * 0.18, 0.95, 0.66, -0.06, sx * 0.42, sx * 0.05), M.knitDk]);   // the ribbed edge
     }
-    tor.push([BX(1.4, 0.3, 0.95), M4(0, 1.65, -0.02, 0.1, 0, 0), M.knit]);                                    // shoulders
-    tor.push([helix(1.4, 0.55, 3, 0.02), M4(0, 1.6, 0), M.tether]);
+    for (let b = 0; b < 5; b++) tor.push([SPH(0.035, 8, 6), M4(0.2, 0.38 + b * 0.27, 0.72, 0, 0, 0), M.button]);
+    tor.push([BX(0.56, 1.1, 0.12), M4(0, 0.95, 0.5), M.cavity]);                                                   // the dark in her chest
+    for (const [y, rx, rz] of [[0.3, 0.8, 0.66], [0.75, 0.8, 0.64], [1.25, 0.76, 0.66]]) tor.push([tapeBand(rx, rz, y, 0.06), M4(0, 0, -0.06), M.tape]);
+    tor.push([helix(1.3, 0.7, 3, 0.022), M4(0, 1.6, -0.08), M.tether]);
     C1_merge(hips, tor);
+    // boxes, satchels and phones pushing out through the knit
+    for (let i = 0; i < 14; i++) {
+      const a = rr() * Math.PI * 1.6 + Math.PI * 0.7, y = 0.2 + rr() * 1.45, rad = 0.62 + rr() * 0.12;   // round the back and sides
+      const x = Math.sin(a) * rad * 1.15, z = Math.cos(a) * rad - (y > 1.2 ? 0.25 : 0.05);
+      const w = 0.22 + rr() * 0.2, h = 0.18 + rr() * 0.18, dd = 0.2 + rr() * 0.14;
+      C1_part(hips, BX(w, h, dd), rr() < 0.3 ? M.satchel : rr() < 0.5 ? M.cardDk : M.card, x, y, z, (rr() - 0.5) * 0.8, a + rr(), (rr() - 0.5) * 0.8);
+    }
+    for (let i = 0; i < 6; i++) { const a = rr() * Math.PI * 2, y = 0.3 + rr() * 1.3; C1_part(hips, BX(0.08, 0.16, 0.014), M.phone, Math.sin(a) * 0.72, y, Math.cos(a) * 0.62 - 0.08, rr() * 2, a, rr() * 2); }
+    // boxes packed in the dark between the flaps, round the modem
+    for (const [x, y, z, w, h, d, ry] of [[-0.14, 0.52, 0.5, 0.26, 0.24, 0.2, 0.3], [0.15, 0.6, 0.5, 0.22, 0.3, 0.2, -0.2], [0.12, 1.38, 0.5, 0.24, 0.22, 0.2, 0.25], [-0.13, 1.33, 0.5, 0.22, 0.26, 0.2, -0.3]]) C1_part(hips, BX(w, h, d), M.cardWet, x, y, z, 0, ry, 0);
     // the modem box in its chest (a glow, a blinking LED; a real light while it lives)
-    const chest = new THREE.Group(); chest.name = 'cg_chest'; chest.position.set(0, 1.05, 0.3); hips.add(chest);
+    const chest = new THREE.Group(); chest.name = 'cg_chest'; chest.position.set(0, 0.98, 0.56); hips.add(chest);
     const modem = new THREE.Group(); modem.name = 'cg_modem'; chest.add(modem);
-    modem.add(new THREE.Mesh(BX(0.34, 0.26, 0.12), M.modem));
+    modem.add(new THREE.Mesh(BX(0.32, 0.24, 0.12), M.modem));
     const gl = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.05), M.glow); gl.position.set(0, 0.04, 0.062); modem.add(gl);
-    const led = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), M.led); led.position.set(0.12, -0.07, 0.065); modem.add(led);
-    // neck → head: a returns satchel, the note pinned to it
-    const neck = new THREE.Group(); neck.name = 'cg_neck'; neck.position.set(0, 1.85, 0.12); hips.add(neck);
+    const led = new THREE.Mesh(SPH(0.018, 8, 6), M.led); led.position.set(0.12, -0.07, 0.065); modem.add(led);
+    // ---- neck → head: a grey returns satchel, drooping forward, the handwritten note pinned to it ------------------
+    const neck = new THREE.Group(); neck.name = 'cg_neck'; neck.position.set(0, 1.64, 0.36); neck.scale.setScalar(1.22); hips.add(neck);
     const hd = [];
-    hd.push([BX(0.22, 0.34, 0.22), M4(0, 0.15, 0, 0.2, 0, 0), M.tape]);
-    hd.push([new THREE.SphereGeometry(0.34, 14, 10), M4(0, 0.48, 0.08, 0, 0, 0).multiply(new THREE.Matrix4().makeScale(1.15, 0.8, 0.95)), M.satchel]);
-    hd.push([BX(0.5, 0.05, 0.4), M4(0, 0.32, 0.1, 0.1, 0, 0), M.satchel]);
-    hd.push([new THREE.PlaneGeometry(0.24, 0.14), M4(0.02, 0.48, 0.405, -0.1, 0, 0), new THREE.MeshStandardMaterial({ map: Tex.label ? Tex.label('RETURNS\nREPLY PAID 4471', { style: 'label' }) : null, roughness: 0.7 })]);
+    hd.push([new THREE.CylinderGeometry(0.13, 0.17, 0.34, 10), M4(0, 0.12, 0.02, 0.35, 0, 0), M.tape]);
+    { const g = SPH(0.36, 18, 12); const pa = g.attributes.position;                                            // a crumpled mailer
+      for (let i = 0; i < pa.count; i++) { const x = pa.getX(i), y = pa.getY(i), z = pa.getZ(i); const k = 1 + Math.sin(x * 23 + z * 17) * 0.04 + Math.sin(y * 29 + x * 11) * 0.03; pa.setXYZ(i, x * k, y * k * (y > 0 ? 0.85 : 1), z * k); }
+      g.computeVertexNormals(); hd.push([g, M4(0, 0.42, 0.2, 0.3, 0, 0.08, [1.15, 0.62, 0.95]), M.satchel]); }
+    hd.push([BX(0.66, 0.05, 0.22), M4(0, 0.58, -0.05, 0.55, 0, 0.08), M.satchel]);                            // the flap, torn open
+    hd.push([BX(0.72, 0.045, 0.06), M4(0, 0.36, 0.43, 0.3, 0, 0.08), M.tape]);
+    hd.push([new THREE.PlaneGeometry(0.24, 0.14), M4(-0.14, 0.46, 0.52, -0.25, -0.35, 0.1), M.label]);
     C1_merge(neck, hd);
-    const note = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), M.note); note.name = 'cg_note';
-    note.position.set(-0.05, 0.62, 0.36); note.rotation.set(-0.3, 0.1, 0.12); neck.add(note);
-    // arms
+    const note = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.22), M.note); note.name = 'cg_note';
+    note.position.set(0.1, 0.48, 0.55); note.rotation.set(-0.3, 0.12, 0.12); neck.add(note);
+    const pin = new THREE.Mesh(SPH(0.022, 8, 6), M.pin); pin.position.set(0.1, 0.57, 0.57); neck.add(pin);
+    // ---- arms --------------------------------------------------------------------------------------------------------
     const L = C1_cgArm('L', M), R = C1_cgArm('R', M);
-    L.sh.position.set(0.72, 1.62, 0.02); R.sh.position.set(-0.72, 1.62, 0.02);
+    L.sh.position.set(0.7, 1.52, 0.04); R.sh.position.set(-0.7, 1.52, 0.04);
     hips.add(L.sh); hips.add(R.sh);
     // the device it throws (in the right hand)
     const dev = new THREE.Group(); dev.name = 'cg_dev';
     const dv = new THREE.Mesh(BX(0.22, 0.16, 0.3), M.card); dev.add(dv);
     const dp = new THREE.Mesh(BX(0.08, 0.16, 0.012), M.phone); dp.position.set(0, 0.1, 0.1); dev.add(dp);
-    dev.position.set(0, -0.35, 0.1); R.hand.add(dev);
+    dev.position.set(0, -0.3, 0.12); R.hand.add(dev);
     root.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
     return { root, body, base, hips, chest, modem, neck, note, L, R, dev };
   }
@@ -2254,18 +2442,23 @@
     try { Snd.play('tape', { pos: [e.pos.x, 2, e.pos.z], vol: 0.8 }); } catch (err) { /* audio */ }
   }
   // the pose targets per state, eased toward each frame
+  // the pose targets per state, eased toward each frame. Arm angles are about the shoulder's X axis inside the hunched
+  // hips (hips.x + shoulder.x = 0 hangs straight down; negative swings the arm forward, ~2.3 raises it up behind).
   function C1_cgPose(e, dt) {
     const d = e.data, P = d.P, t = d.t, st = d.state;
-    let hunch = 0.5, shL = 0.25, shR = 0.25, elL = -0.35, elR = -0.35, head = 0.3, sway = Math.sin(d.clock * 1.3) * 0.04, lean = 0, baseY = 1, spread = 0;
-    if (st === 'windThrow') { const k = Math.min(1, t / 1.1); shR = U.lerp(0.25, -2.5, U.ease.inOut(k)); elR = U.lerp(-0.35, -1.3, k); hunch = 0.35; lean = -0.25 * k; head = 0.1; }
-    else if (st === 'throw') { const k = Math.min(1, t / 0.22); shR = U.lerp(-2.5, 0.9, U.ease.out(k)); elR = U.lerp(-1.3, -0.1, k); hunch = 0.6; lean = 0.35; }
-    else if (st === 'windSlam') { const k = Math.min(1, t / 1.6); shL = shR = U.lerp(0.25, -2.9, U.ease.inOut(k)); elL = elR = U.lerp(-0.35, -0.6, k); hunch = U.lerp(0.5, 0.05, k); head = -0.1; spread = 0.25 * k; }
-    else if (st === 'slam') { const k = Math.min(1, t / 0.28); shL = shR = U.lerp(-2.9, 0.75, U.ease.in(k)); elL = elR = -0.2; hunch = U.lerp(0.05, 1.0, U.ease.in(k)); head = 0.6; }
-    else if (st === 'recover') { const k = Math.min(1, t / (d.recDur || 1)); shL = shR = U.lerp(d.recFrom === 'slam' ? 0.75 : 0.5, 0.25, k); hunch = U.lerp(d.recFrom === 'slam' ? 1.0 : 0.6, 0.5, k); }
-    else if (st === 'kneel' || st === 'tear') { hunch = 1.05; shL = shR = 0.55; elL = elR = -0.25; head = 0.85; baseY = 0.62; sway *= 0.3; }
+    let hunch = 0.62, shL = -0.84, shR = -0.84, elL = -0.4, elR = -0.4, head = 0.55, sway = Math.sin(d.clock * 1.3) * 0.04, lean = 0, baseY = 1, spread = 0;
+    if (st === 'windThrow') { const k = Math.min(1, t / 1.1); shR = U.lerp(-0.84, 1.9, U.ease.inOut(k)); elR = U.lerp(-0.4, -1.25, k); hunch = 0.42; lean = -0.25 * k; head = 0.15; }
+    else if (st === 'throw') { const k = Math.min(1, t / 0.22); shR = U.lerp(1.9, -1.75, U.ease.out(k)); elR = U.lerp(-1.25, -0.1, k); hunch = 0.6; lean = 0.35; }
+    else if (st === 'windSlam') { const k = Math.min(1, t / 1.6); shL = shR = U.lerp(-0.84, 2.75, U.ease.inOut(k)); elL = elR = U.lerp(-0.4, -0.55, k); hunch = U.lerp(0.62, 0.05, k); head = -0.05; spread = 0.25 * k; }
+    else if (st === 'slam') { const k = Math.min(1, t / 0.28); shL = shR = U.lerp(2.75, -1.55, U.ease.in(k)); elL = elR = -0.2; hunch = U.lerp(0.05, 1.0, U.ease.in(k)); head = 0.6; }
+    else if (st === 'recover') {
+      const k = U.ease.inOut(Math.min(1, t / (d.recDur || 1))), slam = d.recFrom === 'slam';
+      shL = U.lerp(slam ? -1.55 : -0.84, -0.84, k); shR = U.lerp(slam ? -1.55 : -1.75, -0.84, k);
+      hunch = U.lerp(slam ? 1.0 : 0.6, 0.62, k); head = U.lerp(slam ? 0.6 : 0.55, 0.55, k);
+    } else if (st === 'kneel' || st === 'tear') { hunch = 0.72; shL = shR = -0.92; elL = elR = -0.3; head = 1.05; baseY = 0.62; sway *= 0.3; }
     const rise = d.rise;
     // the pile: folded into the heap while dormant; unfolding as it rises
-    hunch = U.lerp(1.45, hunch, rise); shL = U.lerp(0.9, shL, rise); shR = U.lerp(0.9, shR, rise); head = U.lerp(1.1, head, rise);
+    hunch = U.lerp(1.45, hunch, rise); shL = U.lerp(-1.25, shL, rise); shR = U.lerp(-1.25, shR, rise); head = U.lerp(1.1, head, rise);
     baseY = U.lerp(0.55, baseY, rise);
     const ease = Math.min(1, dt * 7);
     const p = d.pose;
@@ -2276,14 +2469,15 @@
     P.hips.position.y = U.lerp(0.55, 1.4, rise) * ap('baseY', baseY) / Math.max(0.3, baseY) * baseY;
     P.base.scale.set(1 + (1 - rise) * 0.25, ap('bs', baseY), 1 + (1 - rise) * 0.25);
     P.L.sh.rotation.x = ap('shL', shL); P.R.sh.rotation.x = ap('shR', shR);
-    P.L.sh.rotation.z = ap('spL', 0.15 + spread); P.R.sh.rotation.z = -ap('spR', 0.15 + spread);
+    P.L.sh.rotation.z = ap('spL', 0.12 + spread); P.R.sh.rotation.z = -ap('spR', 0.12 + spread);
     P.L.el.rotation.x = ap('elL', elL); P.R.el.rotation.x = ap('elR', elR);
     P.neck.rotation.x = ap('head', head);
+    P.neck.rotation.y = (1 - rise) * 0.7;
     P.note.rotation.x = -0.3 + Math.sin(d.clock * 7.3) * 0.18 * (st === 'dormant' ? 0.2 : 1);
     P.note.rotation.z = 0.12 + Math.sin(d.clock * 5.1) * 0.1;
     // the modem's glow (brighter and pulsing on its knees)
     const pulse = st === 'kneel' ? 0.8 + Math.sin(d.clock * 6) * 0.5 : 0.6 + Math.sin(d.clock * 2) * 0.1;
-    if (C1_cgMats().modem) C1_cgMats().modem.emissiveIntensity = d.dead ? 0 : pulse * Math.min(1, rise + 0.2);
+    C1_cgMats().modem.emissiveIntensity = d.dead ? 0 : pulse * Math.min(1, rise + 0.2);
     P.dev.visible = st !== 'throw' && st !== 'recover' ? true : d.recFrom !== 'throw';
   }
   function C1_cgUpdate(e, dt, ai) {
@@ -2417,11 +2611,16 @@
   // the stockroom's tear-it-out interaction (active while it kneels; follows its chest)
   async function C1_tear(G) {
     const e = C1.boss; if (!e || e.data.state !== 'kneel') return;
-    const d = e.data, A = G.aidan, cp = d.chestPos || e.pos;
+    const d = e.data, A = G.aidan;
     d.state = 'tear';
-    const fx = e.pos.x + Math.sin(e.yaw) * 1.25, fz = e.pos.z + Math.cos(e.yaw) * 1.25;
+    const fw = [Math.sin(e.yaw), Math.cos(e.yaw)], rt = [Math.cos(e.yaw), -Math.sin(e.yaw)];
+    const fx = e.pos.x + fw[0] * 1.55, fz = e.pos.z + fw[1] * 1.55;
+    // a three-quarter shot from beside him, into the glow in its chest (whichever side has room)
+    const sd = [[3.5, 2.5], [3.5, -2.5], [3.0, 1.8], [3.0, -1.8]].map(([f, k]) => [e.pos.x + fw[0] * f + rt[0] * k, e.pos.z + fw[1] * f + rt[1] * k]).find(([x, z]) => x > 0.4 && x < 11.6 && z > 0.4 && z < 9.6) || [e.pos.x + fw[0] * 3.2, e.pos.z + fw[1] * 3.2];
+    G.cam({ pos: [sd[0], 2.2, sd[1]], target: [e.pos.x + fw[0] * 0.9, 1.2, e.pos.z + fw[1] * 0.9], fov: 44, to: { pos: [sd[0], 2.15, sd[1]], fov: 40 }, dur: 5 });
     await A.walkTo(fx, fz, { speed: 1.3 });
     await A.turn([e.pos.x, e.pos.z], 0.3);
+    const cp = d.chestPos || new THREE.Vector3(e.pos.x, 1.3, e.pos.z);
     await A.gesture('reach', { hand: 'L', target: [cp.x, cp.y, cp.z] });
     G.sfx('tape', { vol: 1, pos: [cp.x, cp.y, cp.z] });
     G.sfx('static', { dur: 0.6, vol: 0.5 });
@@ -2430,9 +2629,11 @@
     A.hold('L', C1_modemProp());
     d.dead = true;
     if (d.light) { try { d.light.free(); } catch (err) { /* pool */ } d.light = null; }
+    G.shake(0.3, 0.6);
     await G.wait(0.4);
     A.pose('kneel');
-    await G.wait(1.8);
+    await G.wait(1.7);
+    await G.fade(1, 0.8);
     S.spawns[e.id] = 'dead';
     S.done['c1:collapsed'] = true;
   }
@@ -2459,27 +2660,30 @@
   // =================================================================================================================
   defineCutscene('1-3', async (G) => {
     const A = G.aidan, e = C1.boss || G.enemy('c1_stockroom:cage');
-    // 1. high corner: he walks toward the cage. Boxes shift inside it.
-    G.cam({ pos: [0.45, 4.6, 0.5], target: [8.4, 1.1, 5.2], fov: 44, to: { pos: [0.55, 4.55, 0.6], target: [8.2, 1.15, 5.1], fov: 40 }, dur: 6 });
+    // 1. the stockroom from a high corner: he walks toward the chain-link returns cage. Boxes shift inside it.
+    G.cam({ pos: [0.55, 4.5, 0.55], target: [8.2, 0.9, 5.4], fov: 46, to: { pos: [0.65, 4.45, 0.65], target: [8.3, 1.05, 5.3], fov: 42 }, dur: 7 });
     if (A.raw) A.raw.idleLife = false;
-    const walk = A.walkTo(5.4, 5.5, { speed: 0.9 });
+    const walk = q(A.walkTo(5.2, 5.4, { speed: 0.85 }));
     await G.wait(1.6);
     G.sfx('cardboard', { pos: [9.5, 1.2, 5], vol: 0.9 });
     if (e) e.data.riseTo = 0.12;
-    await G.wait(1.3);
+    await G.wait(1.2);
     G.sfx('cardboard', { pos: [9.8, 1.6, 4.2], vol: 1 });
+    if (e) e.data.riseTo = 0.04;
     await walk;
     A.look([8.2, 1.2, 5]);
-    await G.wait(0.6);
+    await G.wait(0.9);
     // 2. low, looking up: the pile rises into a hunched giant with a cardigan's silhouette; the satchel head turns
-    G.cam({ pos: [5.0, 0.42, 6.7], target: [8.3, 2.9, 4.9], fov: 46, to: { pos: [4.8, 0.4, 6.9], target: [8.3, 3.2, 4.9], fov: 50 }, dur: 5 });
+    //    toward him and the handwritten note flutters. Cardboard grinding, packing tape peeling.
+    G.cam({ pos: [4.5, 0.36, 6.5], target: [8.2, 2.5, 5.0], fov: 54, to: { pos: [4.3, 0.34, 6.7], target: [8.2, 3.0, 5.0], fov: 58 }, dur: 5 });
     G.sfx('cardboard', { pos: [8.2, 1, 5], vol: 1 });
     G.sfx('tape', { pos: [8.2, 2.4, 5], vol: 1 });
     if (e) { e.data.riseTo = 1; e.data.state = 'rise'; }
-    A.gesture('flinch').catch(() => {});
+    q(A.gesture('flinch'));
+    A.look([8.2, 2.6, 5]);
     await G.wait(1.4);
     G.sfx('tape', { pos: [8.2, 3.2, 5], vol: 0.9 });
-    await G.wait(1.5);
+    await G.wait(1.4);
     if (A.raw) A.raw.expr('scared');
     await G.say('AIDAN', 'No. No, no—');
     if (e) { e.data.rise = 1; e.data.riseTo = 1; }
@@ -2496,72 +2700,82 @@
   // =================================================================================================================
   defineCutscene('1-4', async (G) => {
     const A = G.aidan;
-    // the returns he couldn't read: 1–4 go into Memos; the boss is done
+    // state first (plain statements: a skip lands here the same way): the notes go into Memos; the boss is done
     for (const n of [1, 2, 3, 4]) { try { await G.doc('returns' + n, { open: false, id: 'c1:ret' + n + 'doc' }); } catch (e) { /* doc */ } }
     G.set('c1_bossDone', true);
     S.done['c1:collapsed'] = true;
-    C1.bossLock = false;
-    // 1. on his knees among collapsed boxes, holding the modem; returns notes face-up around him
-    const kx = A.pos.x, kz = A.pos.z;
+    C1.bossLock = false; C1.bossOn = false;
+    { const e = C1.boss || G.enemy('c1_stockroom:cage'); if (e) { try { e.remove(); } catch (err) { /* gone */ } } C1.boss = null; }
+    const [kx, kz] = SK_KNEEL;
     const notes = G.obj('c1sk_notes');
-    const yawR = A.yaw * D2R;
-    if (notes) { notes.position.set(kx, 0, kz); notes.rotation.y = yawR; notes.visible = true; notes.updateMatrixWorld(true); }
-    const at = (i, y = 0, dz = 0) => { const v = new THREE.Vector3(0.66 - i * 0.44, y, 0.72 + dz); if (notes) notes.localToWorld(v); else v.set(kx + Math.sin(yawR) * 0.7, y, kz + Math.cos(yawR) * 0.7); return v; };
-    A.pose('kneel');
+    // 1. on his knees among collapsed boxes, holding the modem; returns notes face-up around him
+    await G.fade(1, 0.01);
+    A.place(kx, kz, 90); A.pose('kneel');
+    if (!(A.raw && A.raw.held && A.raw.held.L)) A.hold('L', C1_modemProp());
+    if (notes) { notes.visible = true; notes.children.forEach((n) => { n.visible = true; }); }
     if (A.raw) { A.raw.idleLife = false; A.raw.eyes('down'); A.raw.expr('sad'); }
-    const side = (d, h) => [kx + Math.sin(yawR) * d.f + Math.cos(yawR) * d.s, h, kz + Math.cos(yawR) * d.f - Math.sin(yawR) * d.s];
-    G.cam({ pos: side({ f: 2.3, s: -1.9 }, 1.35), target: [kx + Math.sin(yawR) * 0.35, 0.5, kz + Math.cos(yawR) * 0.35], fov: 42, to: { pos: side({ f: 2.0, s: -1.7 }, 1.28), fov: 40 }, dur: 6 });
-    await G.wait(3.2);
-    // 2. a slow insert across the four notes (read left to right from where he kneels)
-    {
-      const a = at(0, 0.42, -0.16), b = at(3, 0.42, -0.16), ta = at(0, 0, 0.03), tb = at(3, 0, 0.03);
-      G.cam({ pos: [a.x, a.y, a.z], target: [ta.x, ta.y, ta.z], fov: 36, to: { pos: [b.x, b.y, b.z], target: [tb.x, tb.y, tb.z], fov: 36 }, dur: 5.6, ease: 'linear' });
-      await G.wait(5.8);
-    }
-    // 3. he stuffs the notes into the box without reading any more
-    G.cam({ pos: side({ f: 1.5, s: 1.4 }, 1.05), target: [kx + Math.sin(yawR) * 0.4, 0.55, kz + Math.cos(yawR) * 0.4], fov: 36 });
-    for (let i = 0; i < 4; i++) {
-      const v = at(i, 0.02);
-      await A.gesture('reach', { hand: i < 2 ? 'L' : 'R', target: [v.x, v.y, v.z] });
-      const n = notes && notes.getObjectByName('c1_note' + i); if (n) n.visible = false;
-      G.sfx('paper', { vol: 0.6 });
-    }
-    await G.wait(0.6);
-    await G.say('AIDAN', 'I\'m going to fix it.');
-    await G.wait(0.8);
-    // 4. the Outage lifts; in the Fog-world store, Chloe is back at the counter as if nothing happened
-    G.cam({ pos: [1.2, 3.8, 1.2], target: [kx, 0.4, kz], fov: 40 });
-    await G.outage(false);
-    await G.fade(1, 0.8);
-    if (notes) notes.visible = false;
+    A.look([kx + 0.8, 0.05, kz]);
+    if (!C1.keyLight) C1.keyLight = Render.allocLight('point', { color: '#a8e0d6', intensity: 2.4, distance: 5.5, pin: true });
+    try { C1.keyLight.set({ pos: [kx - 0.6, 2.4, kz + 1.1] }); } catch (e) { /* pool */ }
+    G.cam({ pos: [5.05, 1.85, 8.75], target: [6.9, 0.52, 4.95], fov: 40, to: { pos: [5.2, 1.78, 8.5], fov: 38 }, dur: 8 });
+    await G.fade(0, 1.4);
+    await G.wait(2.8);
+    // 2. a slow insert across four notes, left to right from where he kneels
+    G.cam({ pos: [6.8, 0.47, SK_NOTES[0][1] - 0.12], target: [7.02, 0.0, SK_NOTES[0][1] - 0.02], fov: 34, to: { pos: [6.8, 0.47, SK_NOTES[3][1] + 0.1], target: [7.02, 0.0, SK_NOTES[3][1] + 0.08] }, dur: 7, ease: 'linear' });
+    await G.wait(7.2);
+    // 3. he puts the modem down and stuffs the notes into the box without reading any more
+    G.cam({ pos: [8.1, 1.6, 3.05], target: [6.5, 0.72, 4.75], fov: 44, to: { pos: [8.0, 1.58, 3.15], fov: 42 }, dur: 9 });
     A.hold('L', null);
-    await G.goto('c1_store', { pos: [10, 5.2], yaw: 180 }, { fade: false, sound: 'none' });
-    A.pose('idle');
-    if (A.raw) { A.raw.expr('tired'); A.raw.eyes('ahead'); A.raw.posture = Math.max(A.raw.posture || 0, 0.15); }
-    const C = C1_prepChloe(G);
-    C.eyes('down'); C.look(null); C.expr('smile');
-    if (C.raw) { try { C.raw.armPose('L', 'tablet_read'); } catch (e) { /* pose */ } }
-    G.cam({ pos: [15.4, 1.45, 4.4], target: [10, 1.35, 3.7], fov: 38, to: { pos: [15.2, 1.45, 4.2], fov: 36 }, dur: 12 });
-    await G.fade(0, 1.2);
+    { const m = C1_modemProp(); m.position.set(kx + 0.25, 0.11, kz + 0.42); m.rotation.set(-Math.PI / 2 + 0.1, 0, 0.4); if (notes) notes.add(m); }
+    await G.wait(0.6);
+    const box = [kx + 0.25, 0.3, kz - 1.05];
+    for (let i = 0; i < 4; i++) {
+      const n = notes && notes.getObjectByName('c1_note' + i), v = n ? n.position : new THREE.Vector3(kx + 0.6, 0, kz);
+      await A.gesture('reach', { hand: 'L', target: [v.x, 0.05, v.z] });
+      if (n) n.visible = false;
+      G.sfx('paper', { vol: 0.6 });
+      await A.gesture('reach', { hand: 'L', target: box });
+    }
+    await G.wait(0.8);
+    G.cam({ pos: [7.05, 1.12, 5.78], target: [6.4, 1.1, 5.0], fov: 34, to: { pos: [7.0, 1.12, 5.7], fov: 32 }, dur: 5 });
+    A.look(null); if (A.raw) { A.raw.eyes('ahead'); A.raw.expr('tired'); }
+    await G.wait(0.9);
+    await G.say('AIDAN', 'I\'m going to fix it.');
+    await G.wait(0.9);
+    // 4. the Outage lifts. In the Fog-world store, Chloe is back at the counter as if nothing happened.
+    G.cam({ pos: [0.8, 4.3, 0.9], target: [6.4, 0.4, 5.0], fov: 44 });
+    await G.outage(false);
     await G.wait(1.0);
+    await G.fade(1, 0.9);
+    if (notes) notes.visible = false;
+    if (C1.keyLight) { try { C1.keyLight.free(); } catch (e) { /* pool */ } C1.keyLight = null; }
+    await G.goto('c1_store', { pos: [10, 4.3], yaw: 180 }, { fade: false, sound: 'none' });
+    A.pose('idle');
+    if (A.raw) { A.raw.expr('tired'); A.raw.eyes('ahead'); A.raw.posture = Math.max(A.raw.posture || 0, 0.12); }
+    const C = C1_prepChloe(G);
+    C.hold('L', null); C.hold('L', 'tablet', { pose: 'tablet_read' });
+    C.eyes('down'); C.look(null); C.expr('smile');
+    G.cam({ pos: [6.0, 1.42, 5.0], target: [10.0, 1.33, 3.3], fov: 37, to: { pos: [6.15, 1.42, 4.85], fov: 35 }, dur: 14 });
+    await G.fade(0, 1.4);
+    await G.wait(1.2);
     await G.say('CHLOE', 'Did you get what you needed?');
     A.look(C);
     await G.say('AIDAN', 'Chloe, did you see— did you hear—');
-    await G.wait(0.3);
+    await G.wait(0.4);
     await G.say('CHLOE', 'Still eleven.');
     await G.beat();
-    C.expr('smile');
+    C.look(G.aidan); C.expr('smile');
     await G.say('CHLOE', 'Go on. I\'ve got it.');
     C.look(null); C.eyes('down');
-    await G.wait(0.8);
+    await G.wait(0.9);
+    // state (plain statements)
+    C.hold('L', null); C.hold('L', 'tablet', { pose: 'shield' });
     A.look(null);
-    if (A.raw) { A.raw.idleLife = true; A.raw.expr('neutral'); }
+    if (A.raw) { A.raw.idleLife = true; A.raw.expr('neutral'); A.raw.posture = Math.max(A.raw.posture || 0, 0.12); }
     note(G, 'The stockroom. Behind the back office.', 'c1_obj', { done: true });
     note(G, 'Unit 9, Hilltop Village. Hilltop Road — off the top of Relay Street.', 'c1_addr');
     G.camRelease();
   }, { letterbox: true, skippable: true });
-
-  // @@CONTINUE@@
 
   // =================================================================================================================
   // Chapter 1

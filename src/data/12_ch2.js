@@ -92,7 +92,7 @@
   const gateSignTex = () => ctex('gatesign', 512, 256, (x, w, h, r) => {
     x.fillStyle = '#1f3a2e'; x.fillRect(0, 0, w, h);
     x.strokeStyle = '#e7e0c8'; x.lineWidth = 5; x.strokeRect(10, 10, w - 20, h - 20);
-    tx(x, 'HILLTOP VILLAGE', w / 2, 82, 50, '#efe8d0', { font: FN.serif, weight: 'bold', align: 'center', spacing: 4 });
+    tx(x, 'HILLTOP VILLAGE', w / 2, 82, 44, '#efe8d0', { font: FN.serif, weight: 'bold', align: 'center', spacing: 2 });
     x.fillStyle = '#c9a84a'; x.fillRect(w / 2 - 150, 104, 300, 3);
     tx(x, 'Independent Living', w / 2, 150, 32, '#efe8d0', { font: FN.serif, align: 'center' });
     tx(x, 'Visitors please sign in.', w / 2, 206, 26, '#d8d0b4', { font: FN.serif, align: 'center' });
@@ -274,6 +274,14 @@
     f.density += (want - f.density) * Math.min(1, dt * 1.6);
   }
   const say = (G, who, line) => G.say(who, line);
+  // outdoor Outage rooms here get a faint sick-teal sky light once the swap has happened (the preset is near-black):
+  // enough to read the road and Aidan's shape; the torch still does the work. null clears it (room leave).
+  function outageAmbient(k) {
+    const want = k !== null && !!S.outage ? k : 0;
+    if (want === (C2.amb || 0)) return;
+    C2.amb = want;
+    try { if (want) Render.setAmbient('#1f6f6a', want); else Render.setAmbient(null); } catch (e) { /* render */ }
+  }
   const heart = (p) => Math.max(Math.exp(-(((p - 0.05) / 0.075) ** 2)), 0.78 * Math.exp(-(((p - 0.34) / 0.075) ** 2)));
   // the Reach tell on the phone at a fixed number of bars (2-2's insert: "the bars jump to 4 and pulse")
   function pulseBars(n) {
@@ -508,20 +516,23 @@
     bounds: [-3, -38, 52, 8.5],
     entries: { bottom: [-1.2, 3.2, 90], top: [48, -34.2, 0], start: [-1.2, 3.2, 90] },
     cameras: [
-      // coming up from Relay Street: the empty bend first, the blinking amber down behind him
-      { id: 'c2_hilltoprd:bottom', vol: [-3, 0, 13.2, 8.3], type: 'static', pos: [17.5, HR.yA(17.5) + 3.3, 10.2], target: [2.5, 0.7, 3.4], fov: 'fit' },
-      // high over segment A from the bank above: the Tethered at the letterbox in the background
-      { id: 'c2_hilltoprd:a', vol: [12.9, -0.3, 40.3, 8.3], type: 'rail', pos: [14, topAB(14) + 3.2, -1.0], fov: 50, rail: { a: [11.4, topAB(12.9) + 3.2, -1.0], b: [38.8, 3.5 + 3.6, -1.0], look: [0, 0.9, 0], lag: 0.35 } },
+      // coming up from Relay Street: the empty bend first, the blinking amber down behind him (from out over the drop)
+      { id: 'c2_hilltoprd:bottom', vol: [-3, 0, 10.6, 8.3], type: 'static', pos: [17.5, HR.yA(17.5) + 3.3, 10.2], target: [2.5, 0.7, 3.4], fov: 'fit' },
+      // segment A from out over the drop, through the guardrail and the letterboxes: the retaining wall (and its writing)
+      // behind him, the Tethered at its letterbox between him and the lens as he passes
+      { id: 'c2_hilltoprd:a', vol: [10.3, -0.3, 40.3, 8.3], type: 'rail', pos: [20, HR.yA(20) + 2.3, 13.6], fov: 48, rail: { a: [10.3, HR.yA(10.3) + 2.3, 13.6], b: [40.3, 3.5 + 2.3, 13.6], look: [0, 0.9, 0], lag: 0.35 } },
       // the first hairpin from out over the drop, beyond the lookout bench
-      { id: 'c2_hilltoprd:h1', vol: [40, -14.3, 50.6, 8.3], type: 'static', pos: [55.5, 3.5 + 4.6, 13.5], target: [44.2, 3.4, -3.6], fov: 'fit' },
+      { id: 'c2_hilltoprd:h1', vol: [40, -14.3, 50.6, 8.3], type: 'pan', pos: [52.6, 8.8, 4.2], target: [45, 3.5, -4], fov: 50, pan: { lag: 0.3, yaw: 78, pitch: 58 } },
       // low along the bank beside segment B, the retaining wall up to C behind him
       { id: 'c2_hilltoprd:b', vol: [7.7, -14.3, 40.3, -5.7], type: 'rail', pos: [24, topAB(24) + 1.3, -2.4], fov: 48, rail: { a: [7.7, 7.0 + 1.3, -2.4], b: [40.3, 3.5 + 1.3, -2.4], look: [0, 1.0, 0], lag: 0.35 } },
       // high over the second hairpin (the convex mirror, the drop)
       { id: 'c2_hilltoprd:h2', vol: [0, -28.3, 8.3, -5.7], type: 'static', pos: [13.2, 12.6, -2.4], target: [3.2, 7.1, -17.2], fov: 'fit' },
       // along segment C from the bank below it
-      { id: 'c2_hilltoprd:c', vol: [7.7, -28.3, 52.3, -19.7], type: 'rail', pos: [24, topBC(24) + 1.4, -16.2], fov: 48, rail: { a: [7.7, 7.0 + 1.4, -16.2], b: [50.3, 10.5 + 1.4, -16.2], look: [0, 1.0, 0], lag: 0.35 } },
+      { id: 'c2_hilltoprd:c', vol: [7.7, -28.3, 52.3, -19.7], type: 'rail', pos: [24, topBC(24) + 1.4, -16.2], fov: 48, rail: { a: [7.7, 7.0 + 1.4, -16.2], b: [47.2, 10.5 + 1.4, -16.2], look: [0, 1.0, 0], lag: 0.35 } },
       // the top: low, looking up at the village gate and its sign
-      { id: 'c2_hilltoprd:gate', vol: [43.7, -38.3, 52.3, -27.4], pri: 1, type: 'static', pos: [50.8, 12.5, -19.6], target: [47.6, 11.4, -35.2], fov: 'fit' },
+      { id: 'c2_hilltoprd:gate', vol: [43.7, -38.3, 52.3, -27.4], pri: 1, type: 'static', pos: [50.9, 11.5, -22.6], target: [47.2, 11.7, -35.4], fov: 'fit' },
+      // the last steps to the gate: low beside the gatepost, looking up past him at the sign
+      { id: 'c2_hilltoprd:sign', vol: [47.4, -37.4, 50.7, -33.6], pri: 2, type: 'static', pos: [50.7, 10.95, -30.2], target: [46.0, 12.25, -35.2], fov: 'fit' },
     ],
     spawns: [
       // a Tethered standing at a letterbox, facing it (away from the road)
@@ -558,14 +569,20 @@
         quad(vg, [x, topBC(x), -14], [x1, topBC(x1), -14], [x1, topBC(x1), -20.05], [x, topBC(x), -20.05], 0.5, [0, 1, 0]);
         quad(cp, [x, topBC(x) + 0.12, -13.92], [x1, topBC(x1) + 0.12, -13.92], [x1, topBC(x1) + 0.12, -14.25], [x, topBC(x) + 0.12, -14.25], 1, [0, 1, 0]);
       }
-      // the wall's end at the hairpin H1 (x 48) and the cutting above C and H2 (north side)
-      quad(wa, [48, 3.4, -14], [48, 3.4, -20], [48, 10.5, -20], [48, 10.5, -14], 0.5, [1, 0, 0]);
+      // the wall's end at the hairpin H1 (x 48), the bank top running on to the top's edge, the scrub falling away east
+      // (the wall runs on east past the hairpin into the fog, its foot following the drop; the bank top above it)
+      quad(wa, [48, 3.4, -13.98], [54, -2.1, -13.98], [54, 10.5, -13.98], [48, 10.5, -13.98], 0.5, [0, 0, 1]);
+      quad(wa, [54, -2.1, -13.98], [62, -2.1, -13.98], [62, 10.5, -13.98], [54, 10.5, -13.98], 0.5, [0, 0, 1]);
+      quad(cp, [48, 10.62, -13.92], [62, 10.62, -13.92], [62, 10.62, -14.25], [48, 10.62, -14.25], 1, [0, 1, 0]);
+      quad(vg, [48, 10.5, -14], [62, 10.5, -14], [62, 10.5, -20.05], [48, 10.5, -20.05], 0.5, [0, 1, 0]);
       for (let x = -2; x < 52; x += 2) {
         const x1 = x + 2, y0 = (xx) => (xx <= 8 ? 7.0 : xx >= 44 ? 10.5 : HR.yC(xx)) + (xx > 8 && xx < 44 ? 0.15 : 0);
         if (x >= 44) continue;
         quad(dirt, [x, y0(x) - 0.05, -28.0], [x1, y0(x1) - 0.05, -28.0], [x1, y0(x1) + 2.6, -30.5], [x, y0(x) + 2.6, -30.5], 0.5, [0, 0.5, 1]);
         quad(vg, [x, y0(x) + 2.6, -30.5], [x1, y0(x1) + 2.6, -30.5], [x1, y0(x1) + 4.0, -40], [x, y0(x) + 4.0, -40], 0.4, [0, 1, 0]);
       }
+      // the cutting's east end, where the gate's brick fence meets it (closes the slope's open wedge)
+      quad(dirt, [44.02, 10.4, -28], [44.02, 10.4, -40], [44.02, 14.5, -40], [44.02, 13.1, -30.5], 0.5, [1, 0, 0]);
       // the drop below A (south): scrub falling away, the roofs of the houses below
       for (let x = -3; x < 50; x += 2) {
         const x1 = x + 2, y0 = (xx) => HR.yA(clamp(xx, 0, 40)) + (xx > 0 && xx < 40 ? 0.15 : 0);
@@ -625,7 +642,7 @@
         K.prop('letterbox', x, z, rot, { ...o, y: yAf(x) });
         K.examine(x, yAf(x) + 1.0, z - 0.2, lines, { id: 'c2hr:lb' + x, r: 1.2 });
       }
-      for (const [x, lab] of [[16, '38'], [28, '44'], [38.5, '52']]) {
+      for (const [x, lab] of [[16, '38'], [28, '44'], [35.5, '52']]) {
         const y = HR.yC(x) + 0.15;
         K.prop('letterbox', x - 1.9, -27.75, 180, { y, variant: 'brick', label: lab });
         const dq = MB(); quad(dq, [x - 1.2, y - 0.02, -28], [x + 1.2, y - 0.02, -28], [x + 1.3, y + 3.4, -36], [x - 1.1, y + 3.4, -36], 0.5, [0, 1, 0]);
@@ -636,7 +653,7 @@
       K.examine(16 - 1.9, HR.yC(16) + 1.1, -27.5, 'Number 38. A Neighbourhood Watch sticker, faded to white.', { id: 'c2hr:lb38', r: 1.3 });
       // the houses below the road (only their roofs clear the edge) and up the driveways above C
       for (const [x, z, y, rot] of [[9, 17.5, -8.2, 186], [21.5, 18.5, -7.4, 176], [33.5, 17.8, -6.4, 183], [45, 16.5, -5.8, 172]]) K.prop('house', x, z, rot, { y, w: 9, d: 7.5, collide: false, roof: x > 30 ? '#4f5a55' : '#6f3b30' });
-      for (const [x, z, y, rot] of [[16, -40.5, HR.yC(16) + 3.4, 4], [28, -41.5, HR.yC(28) + 3.4, -3], [38.5, -40.2, HR.yC(38.5) + 3.4, 2]]) K.prop('house', x, z, rot, { y, w: 9, d: 7, collide: false, variant: x === 28 ? 'brick' : 'weatherboard' });
+      for (const [x, z, y, rot] of [[16, -40.5, HR.yC(16) + 3.4, 4], [28, -41.5, HR.yC(28) + 3.4, -3], [34.5, -42.5, HR.yC(35.5) + 3.6, 2]]) K.prop('house', x, z, rot, { y, w: 9, d: 7, collide: false, variant: x === 28 ? 'brick' : 'weatherboard' });
       K.examine(28, HR.yA(28) + 0.8, 7.7, ['Roofs down there in the fog. [beat] Not one light on in any of them.'], { id: 'c2hr:roofs', r: 1.5 });
 
       // ---- the lookout bench over the fog (H1), the power poles, the retaining-wall writing ---------------------------
@@ -677,7 +694,7 @@
       K.prop('sign_post', 1.2, 7.0, 180, { text: 'HILLTOP RD', text2: 'RELAY ST', y: 0.15 });
       K.examine(1.2, 1.9, 6.8, ['Hilltop Road. [beat] Unit 9, Hilltop Village. It\'s up there.'], { id: 'c2hr:roadsign', r: 1.3 });
       // gum trees on the banks, shrubs along the cuttings
-      for (const [x, z, y] of [[20, -5.2, topAB(20)], [35, -5.3, topAB(35)], [30, -19.3, topBC(30)], [4.2, -32, 9.8], [20, -33, HR.yC(20) + 3.2], [36, -33.5, HR.yC(36) + 3.2]]) K.prop('gum_tree', x, z, (x * 37) % 360, { y });
+      for (const [x, z, y] of [[20, -5.2, topAB(20)], [35, -5.3, topAB(35)], [30, -19.3, topBC(30)], [4.2, -32, 9.8], [20, -33, HR.yC(20) + 3.2], [40.5, -33.2, HR.yC(40.5) + 3.2], [5, -3.4, 7.0]]) K.prop('gum_tree', x, z, (x * 37) % 360, { y });
       for (const [x, z, y] of [[18, -4.4, topAB(18)], [33, -1.8, topAB(33)], [14, -18.2, topBC(14)], [35, -18.4, topBC(35)]]) K.prop('shrub', x, z, 0, { y, w: 1.3, h: 1.0, collide: false, dead: x % 2 === 0 });
       K.dress('leaves', [1, 0.4, 39, 5.8], 26, { seed: 202 });
       K.dress('leaves', [9, -13.6, 39, -8.2], 22, { seed: 203 });
@@ -698,6 +715,9 @@
       K.box(46.25, GY + 1.5, -34.95, 2.3, 1.2, 0.06, { tex: 'metal', color: '#1f3a2e' });
       for (const px of [44.3, 51.7]) { K.box(px, GY + 1.55, -35.6, 0.16, 0.26, 0.16, { color: '#2a2c2a' }); K.light('lamp', px, GY + 1.68, -35.5, { color: '#ffcf8a', intensity: 2.6, distance: 5, bank: 6 }); }
       K.plane(46.25, GY + 2.1, -34.91, 2.2, 1.1, gateSignTex(), { rotY: 0 });
+      // a little hooded lamp over the sign (the village keeps its welcome lit)
+      K.box(46.25, GY + 2.72, -34.72, 0.5, 0.06, 0.34, { tex: 'metal', color: '#2a2c2a' }); K.box(46.25, GY + 2.66, -34.9, 0.04, 0.08, 0.04, { color: '#2a2c2a' });
+      K.light('lamp', 46.25, GY + 2.64, -34.62, { color: '#ffd9a0', intensity: 2.4, distance: 3.2, bank: 6 });
       K.collider(45.1, -35.05, 47.4, -34.75, { h: 2.6, y: GY });
       K.examine(46.25, GY + 1.8, -34.3, ['"Hilltop Village. Independent Living. Visitors please sign in."', 'I\'m a visitor. [beat] I suppose that\'s what I am.'], { id: 'c2hr:gatesign', r: 1.8 });
       K.prop('shrub', 42.5, -34, 0, { y: GY, w: 1.6, h: 1.2 }); K.prop('shrub', 49.9, -37.4, 0, { y: GY, w: 1.1, h: 0.9, collide: false });
@@ -707,7 +727,8 @@
       // Luka's call 2 rings at the village gate
       K.trigger([43.8, -34, 52.2, -24], (G) => G.call('luka2'), { id: 'c2_hilltoprd:call2' });
     },
-    onUpdate(dt) { fogStep(dt, null); },
+    // at the lookout the fog thins a little while that shot holds (the view over the edge; the Prologue's trick)
+    onUpdate(dt) { const c = Cam.current; C2.fogTo = c && c.id === 'c2_hilltoprd:h1' ? 0.032 : 0.05; fogStep(dt, null); },
     onLeave() { C2.fogTo = null; },
   });
 
@@ -750,6 +771,7 @@
     11: ['The flaps are open. Somebody tried. [beat] The instructions are still folded in the bottom.'],
   };
   const LOCKMSG = { 2: "It's locked. [beat] Nobody's opening it.", 5: "It's locked.", 11: "It's locked." };
+  const PORCH_LIT = new Set([1, 3, 5, 7, 8, 10, 12]);
   // the unit doors: locked (a message), Unit 9 (key → her hall), and in the Outage every door that reads 9 opens into her hall
   async function unitDoor(G, n) {
     const f = unitFrame(n), [dx, dz] = f.p(-1.6, 0);
@@ -786,10 +808,11 @@
   // Unit 9's key lockbox (spec §2A riddle levels: the code is her birth year, 1947)
   async function lockbox(G) {
     if (S.done['c2:lockbox']) { await G.think('Empty. The key\'s in my pocket.'); return; }
-    const hint = riddle() === 'easy' ? 'Luke\'s note: 1947.' : S.docs && (S.docs.lockbox_note || S.docs.lockbox_note_hard || S.docs.lockbox_note_easy) ? 'Her birth year.' : undefined;
+    const noteRead = !!(S.docs && (S.docs.lockbox_note || S.docs.lockbox_note_hard || S.docs.lockbox_note_easy));
+    const hint = !noteRead ? undefined : riddle() === 'easy' ? 'Luke\'s note: 1947.' : 'Her birth year.';
     G.sfx('handle', { vol: 0.4 });
     const code = await G.keypad({ style: 'lockbox', code: '1947', digits: 4, tag: 'UNIT 9', hint });
-    if (code !== '1947') { await G.think(S.docs && S.docs.lockbox_note ? 'Her birth year. [beat] I don\'t know it. Not yet.' : 'Four numbers. [beat] I don\'t know them.'); return; }
+    if (code !== '1947') { await G.think(noteRead ? 'Her birth year. [beat] I don\'t know it. Not yet.' : 'Four numbers. [beat] I don\'t know them.'); return; }
     S.done['c2:lockbox'] = true;
     G.sfx('clunk', { vol: 0.6 });
     await Script.builtins.pickup(G, { id: 'c2_crescent:unit9key', item: 'unit9_key' });
@@ -818,6 +841,8 @@
       K.ceiling(lb[0], lb[1], lb[2], lb[3], 2.75, { tex: 'plaster', color: '#6a6660' });
       const [cx, cz] = R(2.2, -4.2); K.prop('couch', cx, cz, rot, { y: 0.15, color: '#5a4a3e', collide: false });
       const [tvx, tvz] = R(0.5, -3.5); K.prop('tv', tvx, tvz, rot + 90, { y: 0.15, collide: false, variant: 'crt', lit: false });
+      // in the Outage the telly comes on by itself: snow, lighting the watcher from behind
+      { const [lx, lz] = R(0.9, -3.4); K.light('screen', lx, 0.75, lz, { color: '#8fd8d0', intensity: 2.2, distance: 5, flicker: true, world: 'outage' }); }
       const [px, pz] = R(3.9, -0.6); K.prop('plant_pot', px, pz, 0, { y: 0.15, variant: 'dead', collide: false });
       const [fx, fz] = R(2.2, -4.6); K.prop('framed_photo', fx, fz, rot, { mount: 1.7, subject: 'family', collide: false });
       for (const s of [-1, 1]) { const [qx, qz] = R(1.8 + s * 1.62, -0.16); K.plane(qx, 1.45, qz, 0.28, 1.5, curtainTex('#6c5a4a'), { rotY: rot }); }
@@ -834,7 +859,14 @@
     const [dx, dz] = R(-1.6, 0);
     const door = K.door({ id: 'c2_crescent:u' + n, x: dx, z: dz, rot, w: 0.95, h: 2.1, y: 0.3, style: 'wood', color: ['#5a3a2a', '#3a4a5a', '#6a2a22', '#2f4a3a'][n % 4], when: () => false, mapMark: false });
     K.interact(...(() => { const [ix, iz] = R(-1.6, 0.5); return [ix, 1.2, iz]; })(), (G) => unitDoor(G, n), { id: 'c2_crescent:door' + n, r: 1.3 });
-    { const [lx, lz] = R(-2.55, 0.14); K.sphere(lx, 2.25, lz, 0.07, n === 9 ? { color: '#e8dcc0', roughness: 0.4 } : { color: '#d8d2c0', roughness: 0.4 }); }
+    // the porch light: left on at most of them (hers is dark — nobody's home to switch it on)
+    { const [lx, lz] = R(-2.55, 0.14);
+      K.box(lx, 2.17, lz, 0.12, 0.05, 0.1, { color: '#6a6a60' }, { rot });
+      if (PORCH_LIT.has(n)) {
+        K.fogOnly(() => { K.sphere(lx, 2.25, lz, 0.07, { color: '#f4e2b8', emissive: '#ffcf8a', emissiveIntensity: 1.5 });
+          const [px, pz] = R(-2.4, 0.45); K.light('lamp', px, 2.05, pz, { color: '#ffcf8a', intensity: 2.3, distance: 5.2, bank: 1 + (n % 5) }); });
+        K.outageOnly(() => K.sphere(lx, 2.25, lz, 0.07, { color: '#2a2622', roughness: 0.5 }));
+      } else K.sphere(lx, 2.25, lz, 0.07, { color: '#d8d2c0', roughness: 0.4 }); }
     { const [qx, qz] = R(-0.8, 0.125); K.plane(qx, 1.72, qz, 0.2, 0.25, plateTex(n), { rotY: rot, world: 'fog' }); K.plane(qx, 1.72, qz, 0.2, 0.25, plateFor(n), { rotY: rot, world: 'outage', name: 'c2_plateO' + n }); }
     if (!win4) { const [qx, qz] = R(1.9, -0.13); K.plane(qx, 1.55, qz, 2.0, 1.2, curtainTex(['#8a7a62', '#6c5a4a', '#8c8a7c', '#5e6a64', '#8a6a5a'][n % 5]), { rotY: rot }); }
     // garden: pansies under the window, a shrub at the corner, the path to the footpath
@@ -843,6 +875,8 @@
     { const [qx, qz] = R(-1.6, 2.3); K.box(qx, 0.15, qz, 1.0, 0.018, 1.95, { tex: 'footpath', color: '#b0aa9c' }, { rot, shadow: false }); }
     // the modem box on the doorstep, blinking red (docs in four of them)
     { const [mx, mz] = R(-0.75, 0.55); K.prop('modem_box', mx, mz, rot + 18 - (n % 3) * 14, { y: 0.3, lights: 'blink', open: n % 3 === 2 });
+      // its red light carries through the fog: a row of them round the loop, blinking out of step
+      K.light('led', mx, n % 3 === 2 ? 0.58 : 0.44, mz, { color: '#ff2a1c', size: 0.007, halo: 0.6, haloOpacity: 0.6, blink: 1.05 + (n % 4) * 0.11, duty: 0.45 });
       if (BOXDOC[n]) K.doc(BOXDOC[n], mx, 0.45, mz, { id: 'c2_crescent:box' + n, model: 'none', r: 1.0 });
       else if (BOXLINES[n]) K.examine(mx, 0.45, mz, BOXLINES[n], { id: 'c2cr:box' + n, r: 1.0 }); }
     // letterbox by the footpath
@@ -907,7 +941,7 @@
 
   defineRoom({
     id: 'c2_crescent', name: 'THE CRESCENT', area: 'HILLTOP VILLAGE', chapter: 2, outdoor: true, surface: 'bitumen', ambient: 'wind',
-    fog: { density: 0.042 },
+    fog: { density: 0.042 }, outageFog: { density: 0.05, color: '#14302d' },
     surfaces: [
       { box: [-2.2, -5.2, 62.2, 0], s: 'concrete' }, { box: [8, 40, 65.2, 45.2], s: 'concrete' }, { box: [60, -2, 65.2, 45], s: 'concrete' }, { box: [-5.2, -2, 0, 52], s: 'concrete' },
       { box: [22, 25.8, 38, 32], s: 'concrete' }, { box: [54.8, -15.5, 61.2, -5], s: 'gravel' }, { box: [0, -33, 8, -5], s: 'gravel' },
@@ -1104,12 +1138,20 @@
       }, { id: 'c2cr:backgate', r: 1.4 });
       K.prop('sign_post', 7.9, -11.3, 0, { text: 'EXCHANGE RD', y: 0.2 });
       // Exchange Road beyond: a gravel lane climbing between old fences into the fog
-      for (let z = -32; z < -12; z += 4) { const y = lerp(2.6, 0.15, (z + 33.3) / 21.3); K.prop('fence', -0.15, z + 2, 90, { variant: 'paling', len: 4, y, collide: false }); K.prop('fence', 8.15, z + 2, -90, { variant: 'paling', len: 4, y, collide: false }); }
+      // old paling fences either side, following the climb (each run tilted to the slope)
+      { const exY = (z) => lerp(2.6, 0.15, clamp((z + 33.3) / 21.3, 0, 1)), tilt = Math.atan2(2.45, 21.3);
+        for (let z = -33.3; z < -11.2; z += 3.7) {
+          const zc = z + 1.85, y = exY(zc) - 0.06;
+          for (const [fx, rot, sgn] of [[-0.15, 90, 1], [8.15, -90, -1]]) {
+            const f = K.prop('fence', fx, zc, rot, { variant: 'paling', len: 3.72, y, collide: false });
+            if (f) { f.rotation.order = 'YXZ'; f.rotation.set(0, rot * D2R, sgn * tilt); }
+          }
+        } }
       K.collider(-0.4, -33.3, 0, -10.8, { h: 2.5 }); K.collider(8, -33.3, 8.4, -10.8, { h: 2.5 });
       K.prop('power_pole', 8.9, -22, 0, { y: 1.3, span: 0 });
       K.prop('streetlight', 0.35, -8.2, 90, { y: 0.15, bank: 4 });
       K.examine(4, 2.2, -28, ['Exchange Road. [beat] Wai said the old exchange was at the top.'], { id: 'c2cr:exrd', r: 2.5 });
-      K.exit({ id: 'c2_crescent:backgate', box: [-0.2, -33.4, 8.2, -32.6], to: 'c3_exchangerd', entry: 'gate', when: (s) => s.chapter >= 3, blockedMsg: null, world: 'fog' });
+      K.exit({ id: 'c2_crescent:backgate', box: [-0.2, -33.4, 8.2, -32.6], to: 'c3_exchangerd', entry: 'gate', when: (s) => s.chapter >= 3 && !!ROOMS.c3_exchangerd, blockedMsg: null, world: 'fog', mapMark: false });
       // the Outage loop: out through the open back gate … and back at the front gate
       K.trigger([0.8, -16.5, 7.2, -12.2], (G) => loopBack(G), { id: 'c2_crescent:loop', once: false, world: 'outage', when: () => inLoop() && S.chapter === 2 });
       // the loop broken: the Outage lifts on the way up, then the chapter card
@@ -1138,6 +1180,10 @@
           K.prop('receipt_strip', x + Math.sin(rot * D2R) * 1.4, z + Math.cos(rot * D2R) * 1.4, rot, { ceil: 6.9, len: 3.8 });
         }
         K.light('point', U9DOOR[0] - 0.95, 2.2, U9DOOR[1] + 0.3, { color: '#ff3322', intensity: 3.2, distance: 6, name: 'c2cr:u9red' });
+        // every porch light burns red now, the doorsteps a ring of red rooms in the dark
+        for (let n = 1; n <= 12; n++) { if (n === 9) continue; const [x, z] = unitFrame(n).p(-2.2, 1.0); K.light('point', x, 2.1, z, { color: '#ff2a1c', intensity: 2.6, distance: 7, flicker: n % 4 === 1 }); }
+        // the island: a sick teal glow from the grass, like a screen left on
+        for (const [x, z] of [[14, 20], [46, 20], [30, 11], [30, 30]]) K.light('point', x, 1.0, z, { color: '#1f6f6a', intensity: 3.0, distance: 11 });
         K.light('point', 30, 3.2, 28.4, { color: '#ff2a1c', intensity: 1.8, distance: 6, flicker: true });
         K.light('point', 4, 2.8, -10.2, { color: '#e8c21a', intensity: 2.2, distance: 7, flicker: true });
         for (let n = 1; n <= 12; n++) { const [x, z] = unitFrame(n).p(-2.55, 0.14); K.light('led', x, 2.25, z, { color: '#ff2a1c', size: 0.05, halo: 0.6, blink: n === 9 ? false : 2.2, intensity: n === 9 ? 5 : 2.5 }); }
@@ -1148,7 +1194,9 @@
         K.writing('FOLLOW UP TOMORROW', U9DOOR[0] + 2.8, 2.2, U9DOOR[1] + 0.13, 2.4, { world: 'outage' });
         K.writing('DID YOU CHECK', unitFrame(3).x(1.9, 0.14), 2.35, unitFrame(3).z(1.9, 0.14), 1.6, { rotY: 180, world: 'outage' });
         K.writing('ASK THEM', unitFrame(11).x(1.9, 0.14), 2.35, unitFrame(11).z(1.9, 0.14), 1.3, { rotY: 90, world: 'outage' });
-        for (const n of [2, 5, 7, 8, 10, 12]) { const [x, z] = unitFrame(n).p(2.4 + (n % 3) * 0.7, 0.42); K.prop('tether_hanging', x, z, unitFrame(n).rot, { ceil: 2.86, len: 1.6 + (n % 2) * 0.5 }); }
+        // receipt paper curling down off the gutters; security tether coiled through the pansies like a creeper
+        for (const n of [2, 5, 7, 8, 10, 12]) { const [x, z] = unitFrame(n).p(2.4 + (n % 3) * 0.7, 0.42); K.prop('receipt_strip', x, z, unitFrame(n).rot + 20, { ceil: 2.86, len: 1.1 + (n % 2) * 0.5 }); }
+        for (const n of [3, 4, 6, 9, 11]) { const b = unitFrame(n).box(0.6, 0.3, 3.2, 0.8); K.dress('cables', b, 4, { seed: 300 + n }); }
       });
       K.writing("IT'LL BE FINE", unitFrame(7).x(3.4, 0.13), 2.3, unitFrame(7).z(3.4, 0.13), 1.5, { rotY: 0, world: 'fog' });
       K.examine(unitFrame(7).x(3.4, 0.6), 1.6, unitFrame(7).z(3.4, 0.6), 'Somebody\'s written on the bricks. "It\'ll be fine." [beat] It keeps turning up.', { id: 'c2cr:writing7', r: 1.3 });
@@ -1188,8 +1236,8 @@
         }
       }
     },
-    onUpdate(dt) { fogStep(dt, null); },
-    onLeave() { C2.fogTo = null; C2.chaseWalls = []; },
+    onUpdate(dt) { fogStep(dt, null); outageAmbient(0.7); },
+    onLeave() { C2.fogTo = null; C2.chaseWalls = []; outageAmbient(null); },
   });
 
   // the loop (GAMEPLAY 2-5): out through the back gate … and back in at the front gate, with more nines
@@ -1212,7 +1260,12 @@
     if (World.outageBusy) await G.until(() => !World.outageBusy, { timeout: 8 });
     if (S.outage) G.setOutage(false);
     try { Phone.done && Phone.done('c2_goal'); } catch (e) { /* notes */ }
-    await G.startChapter(3);
+    const ok = await G.startChapter(3);
+    if (ok === false) {
+      // (no Chapter 3 in this build: show its card and hand the road back)
+      await G.card('SIGNAL HILL TRUNK EXCHANGE');
+      await G.fade(0, 1.0);
+    }
   }
 
   // =================================================================================================================
@@ -1232,7 +1285,6 @@
       hand(x, n, bx + 62, yy, { size: 22, color: i === 3 ? '#141414' : '#1f2c6e' });
       hand(x, v, bx + 162, yy, { size: i === 3 ? 18 : 20, color: i === 3 ? '#141414' : '#1f2c6e' });
     });
-    hand(x, '— visiting', w / 2 + 110, 216, { size: 16, color: '#141414' });
     age(x, w, h, r, 0.5);
   });
   const keyCabTex = () => ctex('keycab', 256, 200, (x, w, h, r) => {
@@ -1262,7 +1314,7 @@
     S.done['c2:book'] = true;
     if (first) {
       await G.run(async (G2) => {
-        G2.cam({ pos: [5.35, 1.62, 1.75], target: [4.82, 1.02, 1.75], fov: 34 });
+        G2.cam({ pos: [5.3, 1.72, 1.74], target: [4.82, 1.15, 1.75], fov: 40, to: { pos: [5.24, 1.66, 1.74], fov: 36 }, dur: 6 });
         await G2.wait(2.4);
         await G2.think('Luke.');
         await G2.wait(0.8);                                             // [beat]
@@ -1295,8 +1347,8 @@
       { id: 'c2_office:window', vol: [0, 0, 4.6, 3.9], type: 'static', pos: [2.45, 2.4, 10.4], target: [2.2, 0.7, 1.4], fov: 'fit' },
       // over the counter at the break table and the kitchenette
       { id: 'c2_office:staff', vol: [0, 3.85, 4.6, 6], type: 'static', pos: [7.6, 2.55, 0.5], target: [2.0, 0.6, 4.8], fov: 'fit' },
-      // the foyer from out on the drive, through the glass door: the payphone, the pamphlets
-      { id: 'c2_office:foyer', vol: [7.9, 0, 10.6, 6], pri: 1, type: 'static', pos: [15.0, 2.4, 3.2], target: [9.1, 0.9, 2.6], fov: 'fit' },
+      // the foyer from its north end (past the cutaway wall): the payphone off the hook at the far end, the glass door
+      { id: 'c2_office:foyer', vol: [7.9, 0, 10.6, 6], pri: 1, type: 'static', pos: [9.55, 2.3, -4.6], target: [9.2, 0.85, 3.6], fov: 'fit' },
     ],
     build(K) {
       const H = 2.7;
@@ -1304,7 +1356,8 @@
       K.floor(8, 0, 10.6, 6, { tex: 'lino', color: '#7a7466' });
       K.ceiling(0, 0, 10.6, 6, H, 'ceiling_tile');
       const PW = { tex: 'plaster', color: '#b8b09a' };
-      K.wall(-0.075, 0, 10.675, 0, H, PW, { skirting: true });                                             // north
+      K.wall(-0.075, 0, 8, 0, H, PW, { skirting: true });                                                  // north (office)
+      K.wall(8, 0, 10.675, 0, H, PW, { skirting: true, both: false });                                     // north (foyer: cutaway)
       K.wall(0, 6.075, 0, -0.075, H, PW, { skirting: true });                                              // west
       K.wall(0, 6, 10.6, 6, H, PW, { skirting: true, openings: [{ at: 2.5, w: 2.6, h: 1.3, sill: 0.9, glass: true, frame: true }] });   // south (the window onto the gate)
       K.wall(10.6, 0, 10.6, 6, H, PW, { skirting: true, both: false, openings: [{ at: 3.8, w: 1.1, h: 2.25 }, { at: 1.3, w: 1.2, h: 1.1, sill: 1.0, glass: true, frame: true }] });   // east (cutaway)
@@ -1312,11 +1365,13 @@
       K.door({ id: 'c2_office:door', x: 10.6, z: 3.8, rot: 90, w: 1.0, h: 2.2, style: 'glass', to: 'c2_crescent', entry: 'office' });
       // the counter (staff behind to the west), the visitor book with its pen on a chain, the bell
       K.prop('counter', 4.6, 2.55, 90, { len: 4.0, variant: 'reception', clutter: false });
-      K.box(4.82, 1.0, 1.75, 0.34, 0.012, 0.48, { color: '#2a3a5a', roughness: 0.6 }, { rot: 90 });
-      K.plane(4.82, 1.014, 1.75, 0.44, 0.3, bookTex(), { rot: [-90, 0, -90] });
-      K.cyl(4.95, 1.0, 2.1, 0.035, 0.03, { tex: 'metal', color: '#c9a84a', metalness: 0.8, roughness: 0.3 }); K.sphere(4.95, 1.05, 2.1, 0.04, { tex: 'metal', color: '#c9a84a', metalness: 0.8, roughness: 0.3 });
-      K.interact(4.95, 1.1, 1.75, (G) => visitorBook(G), { id: 'c2_office:book', r: 1.25 });
-      K.examine(4.95, 1.1, 2.2, ['A bell on the counter. [beat] I don\'t ring it.', 'Who would come?'], { id: 'c2of:bell', r: 0.8 });
+      // (on the raised visitors' ledge: top at 1.14 m, x 4.68…4.94)
+      K.box(4.82, 1.14, 1.75, 0.3, 0.014, 0.44, { color: '#2a3a5a', roughness: 0.6 });
+      K.plane(4.82, 1.1555, 1.75, 0.42, 0.28, bookTex(), { rot: [-90, 0, 90] });
+      K.box(4.9, 1.157, 1.98, 0.012, 0.006, 0.12, { color: '#1b1c1c' });                       // the pen on its chain
+      K.cyl(4.8, 1.14, 2.3, 0.035, 0.03, { tex: 'metal', color: '#c9a84a', metalness: 0.8, roughness: 0.3 }); K.sphere(4.8, 1.19, 2.3, 0.04, { tex: 'metal', color: '#c9a84a', metalness: 0.8, roughness: 0.3 });
+      K.interact(4.95, 1.15, 1.75, (G) => visitorBook(G), { id: 'c2_office:book', r: 1.25 });
+      K.examine(4.95, 1.15, 2.35, ['A bell on the counter. [beat] I don\'t ring it.', 'Who would come?'], { id: 'c2of:bell', r: 0.8 });
       // the visitors' side: the noticeboard and the birthday card, the Site Plan, pamphlets, two chairs
       K.prop('notice_board', 6.4, 5.93, 180, { title: 'RESIDENTS\' NOTICES', w: 1.3, h: 0.9, mount: 1.55 });
       K.doc('noticeboard', 6.2, 1.45, 5.82, { id: 'c2_office:notices', model: 'none', r: 1.2 });
@@ -1367,12 +1422,12 @@
       K.prop('water_stain', 2.6, 3.0, 0, { surface: 'ceiling', ceil: H, w: 1.3, h: 1.0 });
       K.dress('papers', [0.6, 1.8, 4.2, 3.6], 6, { seed: 241 });
       // the foyer: the wall payphone (save), the umbrella stand, "please sign in"
-      K.payphone(9.3, 0.08, 0, { wall: true, id: 'c2_office:payphone' });
-      K.cyl(10.2, 0, 5.5, 0.14, 0.55, { tex: 'metal', color: '#3a3a36' }); K.cyl(10.24, 0.2, 5.52, 0.012, 0.8, '#1b1c1c', { rz: 8 });
+      K.payphone(9.3, 5.92, 180, { wall: true, id: 'c2_office:payphone' });
+      K.cyl(10.2, 0, 0.5, 0.14, 0.55, { tex: 'metal', color: '#3a3a36' }); K.cyl(10.24, 0.2, 0.52, 0.012, 0.8, '#1b1c1c', { rz: 8 });
       K.box(9.9, 0, 3.8, 0.9, 0.012, 0.6, { tex: 'carpet', color: '#4a3a2a' }, { shadow: false });
       K.plane(8.08, 1.55, 1.6, 0.4, 0.3, boardTex('signin2', ['PLEASE SIGN', 'IN AT THE', 'COUNTER →'], { w: 256, h: 192, bg: '#f2efe6', fg: '#1f3a2e', border: '#1f3a2e' }), { rotY: 90 });
-      K.examine(10.1, 0.8, 5.4, ['An umbrella stand. One umbrella, still wet. [beat] It hasn\'t rained.'], { id: 'c2of:umbrella', r: 1.0 });
-      K.examine(9.3, 1.5, 0.45, ['A payphone in the foyer, the handset hanging on its cord.'], { id: 'c2of:payphonex', r: 0.7 });
+      K.examine(10.1, 0.8, 0.6, ['An umbrella stand. One umbrella, still wet. [beat] It hasn\'t rained.'], { id: 'c2of:umbrella', r: 1.0 });
+      K.plane(8.08, 1.35, 5.1, 0.34, 0.46, boardTex('residentsphone', ['RESIDENTS\'', 'PHONE', '', 'Local calls', 'free'], { w: 192, h: 256, bg: '#efe9d6', fg: '#1f3a2e', size: [30, 30, 10, 20, 20], border: '#1f3a2e' }), { rotY: 90 });
       K.prop('exit_sign', 10.52, 3.8, -90, { mount: 2.45 });
       // lights: the desk lamp (above); the foyer tube flickers; the Outage's own
       K.fogOnly(() => { K.prop('fluoro_tube', 9.3, 3.0, 90, { h: H - 0.02, flicker: true, bank: 2 }); K.prop('fluoro_tube', 4.0, 3.0, 0, { h: H - 0.02, lit: false, light: false }); });
@@ -1380,7 +1435,7 @@
         K.prop('fluoro_tube', 4.0, 3.0, 0, { h: H - 0.02, flicker: true });
         K.light('led', 4.35, 1.08, 1.2, { color: '#ff2a1c', blink: 0.9, size: 0.02, halo: 0.3 });
         K.prop('receipt_strip', 6.2, 2.4, 20, { ceil: H, len: 1.6 }); K.prop('receipt_strip', 2.2, 2.8, 70, { ceil: H, len: 1.2 });
-        K.prop('tether_hanging', 9.2, 2.2, 0, { ceil: H, len: 1.4 });
+        K.prop('receipt_strip', 9.2, 2.2, 30, { ceil: H, len: 1.1 });
         K.dress('receipts', [4.8, 0.4, 7.8, 5.6], 16, { seed: 242 });
         K.writing('ASK THEM', 7.99, 1.9, 1.4, 1.3, { rotY: -90, world: 'outage' });
         K.writing('VISITORS PLEASE SIGN IN', 2.5, 1.9, 0.08, 2.4, { style: 'receipt', world: 'outage' });
@@ -1559,16 +1614,18 @@
     bounds: [0, 0, 10, 8],
     entries: { door: [4.0, 7.35, 180], kitchen: [3.98, 3.0, 90], start: [4.0, 7.35, 180] },
     cameras: [
-      // from the far end of the hall (through the linen press): the front door, the fog outside it
-      { id: 'c2_unit9:hall', vol: [3.2, 1.2, 4.8, 8], type: 'static', pos: [4.0, 2.05, -2.6], target: [4.0, 0.8, 6.8], fov: 'fit' },
-      // the lounge, from out past the window
-      { id: 'c2_unit9:lounge', vol: [4.8, 3.6, 10, 8], type: 'static', pos: [7.2, 2.15, 12.3], target: [7.0, 0.55, 5.0], fov: 'fit' },
+      // from the far end of the hall, high under the ceiling: the front door, the bathroom door, the lounge doorway
+      { id: 'c2_unit9:hall', vol: [3.2, 5.0, 4.8, 8], type: 'static', pos: [4.0, 2.36, 1.32], target: [4.0, 0.75, 7.4], fov: 'fit' },
+      // the reverse, from over the front door: the long hall to the linen press, her doorways either side
+      { id: 'c2_unit9:hallN', vol: [3.2, 1.2, 4.8, 5.0], type: 'static', pos: [4.0, 2.36, 7.86], target: [4.0, 0.7, 1.9], fov: 'fit' },
+      // the lounge, from out past its east wall (cutaway): the couch, the socket at the far end, the window's orange glow
+      { id: 'c2_unit9:lounge', vol: [4.8, 3.6, 10, 8], type: 'static', pos: [14.3, 2.22, 6.4], target: [6.7, 0.62, 5.5], fov: 'fit' },
       // the bedroom, from out past the east wall
       { id: 'c2_unit9:bedroom', vol: [4.8, 0, 10, 3.65], type: 'static', pos: [14.4, 2.1, 1.8], target: [6.8, 0.55, 1.8], fov: 'fit' },
       // the kitchen, high, like CCTV
       { id: 'c2_unit9:kitchen', vol: [0, 0, 3.35, 5], type: 'static', pos: [2.5, 2.45, -3.9], target: [1.55, 0.35, 3.1], fov: 'fit', world: 'fog' },
       // low, past the fallen chair he never looks at, toward the doorway
-      { id: 'c2_unit9:chair', vol: [1.9, 2.2, 3.35, 4.2], pri: 1, type: 'static', pos: [0.45, 0.38, 0.55], target: [3.1, 1.0, 3.2], fov: 'fit', world: 'fog' },
+      { id: 'c2_unit9:chair', vol: [1.9, 2.2, 3.35, 4.2], pri: 1, type: 'static', pos: [0.62, 0.36, 1.3], target: [3.25, 1.05, 3.05], fov: 'fit', world: 'fog' },
     ],
     build(K) {
       const H = 2.5;
@@ -1585,8 +1642,9 @@
       K.wall(-0.075, 0, 3.3, 0, H, WK, { skirting: true, both: false });
       K.wall(3.3, 0, 4.7, 0, H, WP, { both: false });
       K.wall(4.7, 0, 10.075, 0, H, WP, { skirting: true, openings: [{ at: 3.2, w: 1.4, h: 1.1, sill: 1.0, glass: true, frame: true }] });
+      K.box(12.2, -0.3, 4, 4.3, 0.28, 8.3, { color: '#161a19', roughness: 1 }, { shadow: false });   // (outside: dark ground under the east cutaways)
       K.wall(0, 8.075, 0, -0.075, H, WK, { skirting: true, openings: [{ at: 5.9, w: 1.2, h: 0.9, sill: 1.15, glass: true, frame: true }] });
-      K.wall(10, 3.6, 10, 8.075, H, WP, { skirting: true });
+      K.wall(10, 3.6, 10, 8.075, H, WP, { skirting: true, both: false });
       K.wall(10, -0.075, 10, 3.6, H, WP, { skirting: true, both: false });
       // interior walls
       K.wall(3.3, 1.2, 3.3, 8, H, WP, { skirting: true, openings: [{ at: 1.8, w: 0.95, h: 2.1 }, { at: 5.2, w: 0.8, h: 2.05 }] });
@@ -1601,7 +1659,8 @@
       K.door({ id: 'c2_unit9:bath', x: 3.3, z: 6.4, rot: 90, w: 0.8, h: 2.0, style: 'wood', color: '#e6dfcb', when: () => false, mapMark: false });
       K.examine(3.45, 1.1, 6.4, "It's just the bathroom.", { id: 'c2u9:bath', r: 0.9 });
       K.door({ id: 'c2_unit9:bed', x: 4.7, z: 2.4, rot: 90, w: 0.85, h: 2.0, style: 'wood', color: '#e6dfcb', open: 0.85, swing: 1 });
-      K.box(4.0, 0.05, 1.2, 0.9, 2.0, 0.04, { tex: 'wood', color: '#e6dfcb' });
+      K.wall(3.55, 1.215, 4.45, 1.215, 2.02, { tex: 'wood', color: '#e6dfcb' }, { both: false, thick: 0.02 });
+      K.box(4.3, 1.0, 1.24, 0.03, 0.12, 0.03, { tex: 'metal', color: '#b8b09a' });
       K.examine(4.0, 1.2, 1.45, ['The linen press. Towels, folded in thirds.', 'Lavender bags between the sheets. [beat] It smells like her.'], { id: 'c2u9:linen', r: 0.8 });
       // ---- the hall: the phone table (rotary phone, the answering machine blinking "1"), photos, coats -----------------
       K.prop('phone_table', 3.55, 4.7, 90, { name: 'c2_phonetable', machine: true, count: S.done['c2:machine'] ? 0 : 1 });
@@ -1648,10 +1707,10 @@
       K.examine(9.3, 1.0, 7.1, ['The telly. The TV guide on top, this week circled. [beat] Last week.'], { id: 'c2u9:tv', r: 1.1 });
       K.prop('cardigan_chair', 5.5, 7.3, 150, { chair: 'timber', color: '#4f6a8f' });
       K.examine(5.6, 0.9, 7.1, ['Her cardigan. Blue, hand-knitted. [beat] I shouldn\'t touch it.'], { id: 'c2u9:cardigan', r: 1.0 });
-      K.prop('framed_photo', 9.93, 5.6, -90, { mount: 1.6, subject: 'family', w: 0.5, h: 0.4 });
-      K.box(9.75, 0, 4.4, 0.4, 1.4, 0.8, { tex: 'wood', color: '#5a3e2a' }, { collide: true });
-      for (let i = 0; i < 4; i++) K.box(9.6, 0.5 + (i % 2) * 0.45, 4.15 + i * 0.16, 0.04, 0.3, 0.2, { color: ['#7a2a22', '#2f4a6a', '#6a5a2a', '#3a5a3a'][i] });
-      K.examine(9.5, 1.2, 4.4, ['Photo albums. Years of them, labelled on the spines. [beat] The last one stops at 2019.'], { id: 'c2u9:albums', r: 1.0 });
+      K.prop('framed_photo', 7.6, 3.675, 0, { mount: 1.65, subject: 'family', w: 0.5, h: 0.4 });
+      K.box(9.45, 0, 3.87, 0.9, 1.1, 0.5, { tex: 'wood', color: '#5a3e2a' }, { collide: true });
+      for (let i = 0; i < 5; i++) K.box(9.12 + i * 0.16, 0.62 + (i % 2) * 0.02, 4.06, 0.12, 0.3 - (i % 3) * 0.03, 0.04, { color: ['#7a2a22', '#2f4a6a', '#6a5a2a', '#3a5a3a', '#5a3a5a'][i] });
+      K.examine(9.45, 1.0, 4.3, ['Photo albums. Years of them, labelled on the spines. [beat] The last one stops at 2019.'], { id: 'c2u9:albums', r: 1.0 });
       K.examine(7.5, 1.6, 7.8, ['The streetlight comes in orange through the net curtains.'], { id: 'c2u9:window', r: 1.1 });
       K.plane(7.5, 1.45, 7.93, 2.0, 1.3, curtainTex('#d8d0bc'), { transparent: true, opacity: 0.55, rotY: 180 });
       // ---- the kitchen (Fog world): the chair on its side, the tea towel, the base station, the fridge, the crossword -----
@@ -1693,12 +1752,13 @@
       K.box(8.6, 0, 3.3, 1.6, 2.1, 0.55, { tex: 'wood', color: '#6a4a30' }, { collide: true });
       K.examine(8.6, 1.2, 2.9, ['The wardrobe door\'s open a crack. Cardigans. All of them blue.'], { id: 'c2u9:wardrobe', r: 1.0 });
       K.examine(8.0, 1.5, 0.3, ['The bedroom window. Just fog, pressed up against the glass.'], { id: 'c2u9:bedwin', r: 1.2 });
+      K.light('point', 7.9, 1.7, -0.7, { color: '#8fa2aa', intensity: 2.6, distance: 5.2, world: 'fog', name: 'c2u9:bwin' });
       // ---- outside the front door: the porch slab and the lit fog (only ever seen through the open door in 2-1) --------------
       K.floor(3.3, 8.0, 4.7, 9.3, { tex: 'concrete', color: '#8f8a80' }, { y: 0.0, skirt: false });
       K.plane(4.0, 1.3, 9.35, 2.6, 2.8, { color: '#7c8783', emissive: '#7c8783', emissiveIntensity: 0.85 }, { rotY: 180, world: 'fog' });
       buildSpill(K);
       // 2-1's torchlight on his face (off until the scene)
-      K.light('point', 3.62, 1.55, 3.95, { color: '#fff1dc', intensity: 1.5, distance: 1.6, on: false, name: 'c2u9:face', world: 'fog' });
+      K.light('point', 3.42, 1.63, 3.66, { color: '#fff1dc', intensity: 2.2, distance: 1.35, on: false, name: 'c2u9:face', world: 'fog' });
       // 2-1's grey fog-light through the open front door (off until the scene)
       K.light('point', 4.0, 2.0, 7.55, { color: '#a7b6b3', intensity: 4.5, distance: 7.5, on: false, name: 'c2u9:door', world: 'fog' });
       // ---- light: the streetlight through the lounge window; the Outage's own ----------------------------------------------
@@ -1709,7 +1769,7 @@
         K.light('point', 3.4, 1.6, 3.0, { color: '#ff2a1c', intensity: 1.6, distance: 3.5 });
         K.light('led', 3.3, 1.1, 2.55, { color: '#ff2a1c', blink: 0.8, size: 0.02, halo: 0.4 });
         K.prop('receipt_strip', 4.0, 5.6, 0, { ceil: H, len: 1.3 }); K.prop('receipt_strip', 7.5, 5.8, 50, { ceil: H, len: 1.6 });
-        K.prop('tether_hanging', 6.4, 2.0, 0, { ceil: H, len: 1.5 }); K.prop('tether_hanging', 8.8, 6.5, 0, { ceil: H, len: 1.1 });
+        K.prop('receipt_strip', 8.6, 2.2, 40, { ceil: H, len: 0.9 }); K.prop('receipt_strip', 8.8, 6.5, 10, { ceil: H, len: 1.0 });
         K.dress('receipts', [3.4, 1.4, 4.6, 7.8], 12, { seed: 251 }); K.dress('receipts', [4.9, 4.8, 9.6, 7.6], 16, { seed: 252 });
         K.writing('FOLLOW UP TOMORROW', 3.39, 1.7, 5.9, 1.6, { rotY: 90, world: 'outage' });
         K.writing('DID YOU CHECK', 7.4, 1.85, 3.69, 1.6, { rotY: 0, world: 'outage' });
@@ -1747,10 +1807,20 @@
       await G2.wait(1.2);
       await Script.builtins.pickup(G2, { id: 'c2_kitchen_out:pendant', item: 'alarm_pendant', obj: G2.obj('c2_pendant') });
       const hl = G2.light('c2ko:pendant'); if (hl) hl.on(false);
-      A.hold('L', 'pendant');
-      G2.cam({ pos: [KO.pendant[0] + 1.35, 1.25, KO.pendant[1] + 0.9], target: [KO.pendant[0] + 0.5, 0.75, KO.pendant[1] + 0.3], fov: 32 });
+      A.pose('idle');
+      A.hold('L', 'pendant', { pose: 'card' });
+      if (A.raw) A.raw.eyes('down');
+      await G2.wait(0.35);
+      {
+        // over his left shoulder, down at the pendant in his hand: the worn button, the lettering on the back
+        const hp = anchorPos(Player.actor, 'gripL'), hd = aidanHead(), yw = Player.actor ? Player.actor.root.rotation.y : 0;
+        const fx = Math.sin(yw), fz = Math.cos(yw), lx = Math.cos(yw), lz = -Math.sin(yw);
+        if (!hp.lengthSq()) hp.set(KO.pendant[0] + 0.4, 1.0, KO.pendant[1] + 0.2);
+        G2.cam({ pos: [hd.x - fx * 0.32 + lx * 0.26, hd.y + 0.16, hd.z - fz * 0.32 + lz * 0.26], target: [hp.x, hp.y, hp.z], fov: 34, to: { fov: 28 }, dur: 5 });
+      }
       await G2.wait(0.6);
       await G2.think('Press and hold for three seconds.');
+      if (A.raw) A.raw.eyes('ahead');
       A.pose('idle');
       A.hold('L', null);
       G2.camRelease();
@@ -1762,13 +1832,13 @@
   async function pendantScene(G) {
     const A = G.aidan;
     const inKitchen = World.room === 'c2_kitchen_out';
-    A.hold('L', 'pendant');
+    A.hold('L', 'pendant', { pose: 'card' });
+    try { UI.prompt(null, { id: 'c2_usependant' }); } catch (e) { /* ui */ }
     if (inKitchen) G.cam({ pos: [Player.pos.x + 1.6, 1.5, Player.pos.z + 1.2], target: [Player.pos.x, 1.2, Player.pos.z], fov: 34 });
     const ok = await G.hold('Hold {interact}: press the button', 3);
     if (!ok) { A.hold('L', null); G.camRelease(); await G.think('Press and hold for three seconds.'); return false; }
-    try { UI.prompt(null, { id: 'c2_usependant' }); } catch (e) { /* ui */ }
     const tone = G.sfx('alarm_tone', { dur: 4.2, vol: 0.8 });
-    if (inKitchen) G.cam({ pos: [KO.chair[0], 11, KO.chair[1] + 3.5], target: [KO.chair[0], 0, KO.chair[1] - 0.4], fov: 44, to: { pos: [KO.chair[0], 13, KO.chair[1] + 4.2], fov: 50 }, dur: 9 });
+    if (inKitchen) G.cam({ pos: [KO.chair[0] + 0.4, 6.4, KO.chair[1] + 2.4], target: [KO.chair[0] + 0.3, 0, KO.chair[1] + 0.1], fov: 42, to: { pos: [KO.chair[0] + 0.5, 8.8, KO.chair[1] + 3.2], fov: 46 }, dur: 9 });
     await G.wait(4.2);
     if (tone && tone.stop) tone.stop(0.1);
     G.sfx('static', { dur: 0.4, vol: 0.4, phone: true });
@@ -1783,7 +1853,7 @@
     refreshPlates();
     if (inKitchen) {
       stopRoomSounds();
-      const b = G.light('c2ko:bulb'); if (b) b.flicker(false);
+      const b = G.light('c2ko:pool'); if (b) b.set({ color: '#ffe6c4' });
       G.sfx('exhale_static', { vol: 0.5 });
       await G.wait(1.6);
     }
@@ -1800,71 +1870,77 @@
   }
   defineRoom({
     id: 'c2_kitchen_out', name: 'THE KITCHEN', area: 'HILLTOP VILLAGE', chapter: 2, outdoor: false, surface: 'lino', ambient: 'interior',
-    fog: { density: 0.034, color: '#2a302f' },
+    fog: { density: 0.028, color: '#161b1a' },
     bounds: [0, 0, 20, 20],
     entries: { hall: [10, 18.7, 180], start: [10, 18.7, 180] },
     cameras: [
-      // from out past the door wall: the long way in to the chair
-      { id: 'c2_kitchen_out:door', vol: [0, 13.2, 20, 20], type: 'static', pos: [10, 3.2, 24.6], target: [10, 0.6, 14], fov: 'fit' },
-      // high, across the whole floor toward the fridge
-      { id: 'c2_kitchen_out:far', vol: [0, 0, 20, 13.4], type: 'pan', pos: [10, 4.6, 19.2], target: [10, 0.4, 6.5], fov: 50, pan: { lag: 0.3, yaw: 65, pitch: 35 } },
+      // the whole room from its far end, low: the chair in its pool of light in the middle ground, the door tiny beyond
+      { id: 'c2_kitchen_out:door', vol: [4.5, 13.2, 15.5, 20], pri: 1, type: 'static', pos: [10.9, 0.95, 1.4], target: [10.05, 1.05, 19], fov: 'fit' },
+      // high over the door, panning across the floor (the rest of the room)
+      { id: 'c2_kitchen_out:far', vol: [0, 0, 20, 20], type: 'pan', pos: [10, 4.3, 19.3], target: [10, 0.4, 7.5], fov: 50, pan: { lag: 0.3, yaw: 100, pitch: 55 } },
       // straight down from the dark over the chair
-      { id: 'c2_kitchen_out:chair', vol: [6.8, 6.8, 13.2, 13.2], pri: 1, type: 'static', pos: [10.2, 12.5, 12.6], target: [10, 0, 9.6], fov: 'fit' },
-      // low past the chair toward the door (he never looks at it)
-      { id: 'c2_kitchen_out:low', vol: [8.5, 13.2, 11.5, 17.6], pri: 1, type: 'static', pos: [9.4, 0.35, 8.8], target: [10.2, 1.3, 18], fov: 'fit' },
+      { id: 'c2_kitchen_out:chair', vol: [7.4, 7.4, 12.6, 12.6], pri: 2, type: 'static', pos: [10.25, 12.6, 12.7], target: [10, 0, 9.85], fov: 'fit' },
+      // the fridge end: from across the floor, the list still on the door, the chair's light behind him
+      { id: 'c2_kitchen_out:fridge', vol: [10.5, 0, 20, 6.2], pri: 1, type: 'static', pos: [8.2, 3.3, 12.4], target: [15.6, 0.6, 2.2], fov: 'fit' },
     ],
     build(K) {
       const H = 4.6;
+      K.ambient('#1f6f6a', 0.26);                                     // the Outage's sick teal, just enough to read the room
       K.floor(0, 0, 20, 20, { tex: 'lino', color: '#9a8e6a' });
       const WK = { tex: 'plaster', color: '#c3c0a6' };
-      K.wall(-0.075, 0, 20.075, 0, H, WK, { skirting: true, openings: [{ at: 6.5, w: 1.6, h: 1.0, sill: 1.3, glass: true, frame: true }] });
+      K.wall(-0.075, 0, 20.075, 0, H, WK, { skirting: true });
       K.wall(0, 20.075, 0, -0.075, H, WK, { skirting: true });
       K.wall(20, -0.075, 20, 20.075, H, WK, { skirting: true });
-      K.wall(20.075, 20, -0.075, 20, H, WK, { skirting: true, both: false, openings: [{ at: 10.075, w: 0.95, h: 2.1 }] });
+      K.wall(20.075, 20, -0.075, 20, H, WK, { skirting: true, openings: [{ at: 10.075, w: 0.95, h: 2.1 }] });
       K.door({ id: 'c2_kitchen_out:door', x: 10, z: 20, rot: 0, w: 0.9, h: 2.05, style: 'wood', color: '#6a2a22', to: 'c2_unit9', entry: 'kitchen', mapMark: false });
-      // the benches stretched along the west wall, the window over the sink showing only red
-      for (let z = 2; z < 19; z += 2.4) K.prop('sink_bench', 0.32, z + 1.2, 90, { len: 2.4, variant: 'home', stove: Math.abs(z - 9.2) < 1, upper: true });
-      K.plane(0.1, 2.0, 10, 1.6, 1.0, { color: '#300808', emissive: '#6a0a0a', emissiveIntensity: 1.0 }, { rotY: 90 });
-      K.examine(0.9, 1.3, 10, ['The window over the sink. [beat] Just red on the other side.'], { id: 'c2ko:window', r: 1.2 });
+      // her benches, stretched the length of the west wall; the window over the sink showing only red
+      for (let z = 1.4; z < 18.6; z += 2.4) K.prop('sink_bench', 0.32, z + 1.2, 90, { len: 2.4, variant: 'home', stove: Math.abs(z + 1.2 - 12.2) < 1, upper: true });
+      K.plane(0.1, 2.05, 7.4, 1.6, 1.0, { color: '#300808', emissive: '#6a0a0a', emissiveIntensity: 1.0 }, { rotY: 90 });
+      K.examine(0.9, 1.3, 7.4, ['The window over the sink. [beat] Just red on the other side.'], { id: 'c2ko:window', r: 1.2 });
       K.prop('base_station', 0.34, 5.2, 90, { y: 0.9, text: 'NO LINE' });
       K.light('led', 0.36, 0.97, 5.26, { color: '#ff2a1c', blink: 1.6, duty: 0.16, size: 0.012, halo: 0.3 });
-      K.examine(0.6, 1.0, 5.2, '"NO LINE."', { id: 'c2ko:base', r: 0.9 });
+      K.examine(0.6, 1.0, 5.2, ['"NO LINE." [beat] Still.'], { id: 'c2ko:base', r: 0.9 });
+      // the stove light she always left on, a long way down the bench
+      K.light('lamp', 0.6, 1.45, 12.2, { color: '#ffd29a', intensity: 2.2, distance: 4, flicker: true });
+      K.examine(0.7, 1.3, 12.2, ['The light over the stove. [beat] Still on. It\'s always on.'], { id: 'c2ko:stove', r: 1.0 });
+      // the fridge, far across the lino, the list still on it
       K.prop('fridge', 14, 0.42, 0, { variant: 'home' });
       K.plane(14.1, 1.3, 0.78, 0.2, 0.26, { tex: 'paper', color: '#efece2' }, { rotY: 0 });
       K.examine(14, 1.2, 1.1, ['The list\'s still on the fridge. [beat] I\'ve read it.', 'Will my alarm still work. [beat] Important.'], { id: 'c2ko:fridge', r: 1.0 });
-      K.light('point', 14, 0.9, 1.4, { color: '#dfe8e8', intensity: 1.2, distance: 3.5 });
-      K.prop('table', 5.5, 13.5, 90, { variant: 'timber', w: 1.0, d: 0.8 });
-      K.prop('chair', 6.1, 13.4, -90, { variant: 'timber' });
-      K.prop('crossword', 5.55, 13.45, 80, { y: 0.745 });
-      K.examine(5.6, 0.9, 13.5, 'The crossword. [beat] Seven across is still empty.', { id: 'c2ko:crossword', r: 0.9 });
+      K.light('point', 14, 1.0, 1.5, { color: '#dfe8e8', intensity: 1.6, distance: 4 });
+      // the table and its crossword, the calendar, the clock over the door (so loud in here)
+      K.prop('table', 5.5, 14.5, 90, { variant: 'timber', w: 1.0, d: 0.8 });
+      K.prop('chair', 6.1, 14.4, -90, { variant: 'timber' });
+      K.prop('crossword', 5.55, 14.45, 80, { y: 0.745 });
+      K.examine(5.6, 0.9, 14.5, 'The crossword. [beat] Seven across is still empty.', { id: 'c2ko:crossword', r: 0.9 });
       K.prop('clock', 10, 19.92, 180, { time: [9, 41], running: true, mount: 3.4 });
       K.examine(10, 1.8, 19.3, ['The clock\'s so loud in here.'], { id: 'c2ko:clock', r: 1.0 });
       K.plane(3.0, 1.55, 0.085, 0.36, 0.45, calendarTex(), { rotY: 0 });
-      // the chair at the centre; the tea towel; the pendant glowing red on the lino
+      K.examine(3.0, 1.4, 0.5, ['The calendar. May. [beat] "CITY," circled in red.'], { id: 'c2ko:calendar', r: 0.9 });
+      // the chair at the centre in a pool of light from nowhere; the tea towel; the pendant glowing red on the lino
       K.prop('fallen_chair', KO.chair[0], KO.chair[1], 35, { variant: 'timber' });
       K.interact(KO.chair[0], 0.4, KO.chair[1], async (G) => { await G.msg('Leave it.'); }, { id: 'c2_kitchen_out:chair', r: 1.0, look: false });
       K.prop('tea_towel', 9.2, 10.9, 30, { variant: 'floor' });
+      K.light('spot', 10, 6.4, 10.3, { target: [10, 0, 10.2], angle: 24, penumbra: 0.55, intensity: 150, distance: 11, color: '#d6e2de', name: 'c2ko:pool' });
       const taken = !!(S.taken && S.taken['c2_kitchen_out:pendant']);
       if (!taken) K.prop('pendant', KO.pendant[0], KO.pendant[1], 20, { glow: true, name: 'c2_pendant' });
       K.light('point', KO.pendant[0], 0.35, KO.pendant[1], { color: '#ff2a1c', intensity: taken ? 0 : 2.6, distance: 3.2, name: 'c2ko:pendant', on: !taken });
       K.interact(KO.pendant[0], 0.3, KO.pendant[1], (G) => takePendant(G), { id: 'c2_kitchen_out:pendantpick', r: 1.2, when: () => !(S.taken && S.taken['c2_kitchen_out:pendant']) });
-      // one bare bulb over the chair
-      K.cyl(KO.chair[0], 3.2, KO.chair[1], 0.006, 1.4, '#1b1c1c');
-      K.sphere(KO.chair[0], 3.12, KO.chair[1], 0.06, { color: '#f0dcb0', emissive: '#ffcf8a', emissiveIntensity: 1.4 });
-      K.light('point', KO.chair[0], 3.0, KO.chair[1], { color: '#ffcf8a', intensity: 5, distance: 9, flicker: true, name: 'c2ko:bulb' });
-      // the Outage dressing: receipts from the dark, tethers, contracts along the walls, the writing
-      for (const [x, z, len] of [[4, 6, 3.2], [15, 7, 2.6], [6, 15, 2.8], [16, 15, 3.4], [12, 4, 2.2], [3, 12, 3.0]]) K.prop('receipt_strip', x, z, (x * 31) % 180, { ceil: H, len });
-      for (const [x, z, len] of [[7.5, 7, 2.2], [13, 12.5, 2.6], [11.5, 16, 1.8], [17, 4, 2.4]]) K.prop('tether_hanging', x, z, 0, { ceil: H, len });
+      // the Outage dressing, kept to the edges: receipt paper curling down out of the dark, contracts stacked along the
+      // walls, receipts drifted across the floor, the writing
+      for (const [x, z, len] of [[3.5, 3.5, 3.0], [16.5, 3.5, 2.6], [3.2, 17, 2.8], [17, 16.5, 3.4], [16.8, 9.8, 2.2], [9.5, 2.6, 2.8]]) K.prop('receipt_strip', x, z, (x * 31) % 180, { ceil: H, len });
       for (let i = 0; i < 9; i++) K.prop('contract_stack', 19.4 - (i % 2) * 0.35, 2 + i * 1.9, i * 23, { h: 0.9 + (i % 3) * 0.4 });
-      for (let i = 0; i < 6; i++) K.prop('contract_stack', 3 + i * 2.6, 19.4, i * 41, { h: 0.7 + (i % 2) * 0.5 });
+      for (let i = 0; i < 6; i++) K.prop('contract_stack', 2.6 + i * 2.7 + (i > 2 ? 1.6 : 0), 19.4, i * 41, { h: 0.7 + (i % 2) * 0.5 });
       K.dress('receipts', [2, 2, 18, 18], 40, { seed: 261 });
       K.writing('FOLLOW UP TOMORROW', 19.92, 2.6, 10, 4.2, { rotY: -90, world: 'outage' });
       K.writing('WHO ARE YOU TRYING TO REACH', 9, 3.1, 0.09, 5.0, { style: 'receipt', world: 'outage' });
       K.writing("IT'LL BE FINE", 4, 2.2, 19.91, 2.4, { rotY: 180, world: 'outage' });
       K.examine(10, 1.0, 17.6, ['It\'s her kitchen. [beat] It\'s just her kitchen.', 'The walls keep going. The floor keeps going.'], { id: 'c2ko:size', r: 1.6 });
-      K.examine(16.5, 1.0, 15, ['Receipts. Mine. [beat] Every one of them has her account number.'], { id: 'c2ko:receipts', r: 1.6 });
-      K.light('point', 19, 2.4, 10, { color: '#e8c21a', intensity: 1.8, distance: 6, flicker: true });
-      K.light('point', 1.2, 2.2, 10, { color: '#ff3b2a', intensity: 2.0, distance: 5 });
+      K.examine(16.5, 1.0, 14.5, ['Receipts. Mine. [beat] Every one of them has her account number.'], { id: 'c2ko:receipts', r: 1.6 });
+      K.examine(19.2, 1.2, 6.5, ['Contracts, stacked to my chest. [beat] My signature on the bottom of every one.'], { id: 'c2ko:contracts', r: 1.4 });
+      K.light('point', 19, 2.4, 13, { color: '#e8c21a', intensity: 1.8, distance: 6, flicker: true });
+      K.light('point', 1.3, 2.2, 7.4, { color: '#ff3b2a', intensity: 2.0, distance: 5 });
+      K.light('point', 10, 2.3, 19.2, { color: '#e8c21a', intensity: 1.2, distance: 4, flicker: true });
     },
     async onEnter(G) {
       stopRoomSounds();
@@ -1891,9 +1967,11 @@
     entries: { door: [9, 10.9, 180], start: [9, 10.9, 180] },
     cameras: [
       // high from the stage, down the length of the hall to the doors
-      { id: 'c2_hall:stage', vol: [0, 5.6, 18, 12], type: 'static', pos: [9, 3.9, 0.8], target: [9, 0.4, 9.2], fov: 'fit' },
+      { id: 'c2_hall:stage', vol: [0, 5.3, 18, 12], type: 'pan', pos: [9, 3.7, 0.9], target: [9, 0.4, 9.4], fov: 52, pan: { lag: 0.3, yaw: 72, pitch: 45 } },
       // low among the chairs, up toward the stage and the banner
-      { id: 'c2_hall:chairs', vol: [0, 0, 18, 5.9], type: 'static', pos: [5.2, 0.85, 11.6], target: [9.4, 1.3, 2.4], fov: 'fit' },
+      { id: 'c2_hall:chairs', vol: [0, 0, 18, 5.3], type: 'static', pos: [7.4, 0.95, 11.7], target: [9.0, 1.3, 1.6], fov: 'fit' },
+      // across the room from the stacked chairs: the urn, the servery hatch, lost property (the west wall)
+      { id: 'c2_hall:west', vol: [0, 2.0, 3.6, 12], pri: 1, type: 'static', pos: [15.2, 3.1, 11.3], target: [1.4, 0.8, 7.6], fov: 'fit' },
       // on the stage: from the side, across the boards
       { id: 'c2_hall:onstage', vol: [4.4, 0, 13.6, 3.25], y: [0.5, 1.6], pri: 1, type: 'static', pos: [17.4, 2.6, 5.4], target: [8.6, 1.0, 1.6], fov: 'fit' },
     ],
@@ -1954,13 +2032,19 @@
       K.prop('exit_sign', 9, 11.93, 180, { mount: 2.65 });
       K.examine(9, 2.2, 11.4, 'The only light in here is the exit sign.', { id: 'c2ha:exit', r: 1.2, world: 'fog' });
       for (const [x, z] of [[5, 6], [13, 6]]) { K.cyl(x, H - 0.3, z, 0.02, 0.3, '#1b1c1c'); K.cyl(x, H - 0.4, z, 0.12, 0.1, '#6a6a60'); for (let b = 0; b < 3; b++) K.box(x, H - 0.36, z, 1.3, 0.02, 0.16, { tex: 'wood', color: '#5a4a38' }, { rot: b * 60 }); }
-      K.fogOnly(() => { for (const [x, z] of [[4, 4], [14, 4], [4, 9], [14, 9]]) K.prop('fluoro_tube', x, z, 90, { h: H - 0.02, lit: false, light: false }); });
+      K.fogOnly(() => {
+        for (const [x, z] of [[4, 4], [14, 4], [4, 9], [14, 9]]) K.prop('fluoro_tube', x, z, 90, { h: H - 0.02, lit: false, light: false });
+        // the grey of the fog coming in through the high windows, both sides
+        for (const [x, z] of [[0.9, 3.55], [0.9, 8.55], [17.1, 3.45], [17.1, 8.45]]) K.light('point', x, 2.45, z, { color: '#8fa2aa', intensity: 2.0, distance: 6.5 });
+        // the bingo machine's flashboard is still lit
+        K.light('point', 6.2, 1.6, 4.9, { color: '#e8c070', intensity: 1.2, distance: 3.5 });
+      });
       K.outageOnly(() => {
         for (const [x, z] of [[4, 9], [14, 9]]) K.prop('fluoro_tube', x, z, 90, { h: H - 0.02, flicker: true });
         K.pickup('energy_drink', 10.2, 0.8, 1.6, { id: 'c2_hall:energy', world: 'outage' });
         K.light('led', 6.2, 1.2, 4.2, { color: '#ff2a1c', blink: 0.7, size: 0.02, halo: 0.3 });
         K.prop('receipt_strip', 9, 8, 0, { ceil: H, len: 2.4 }); K.prop('receipt_strip', 12, 5, 40, { ceil: H, len: 2.0 });
-        K.prop('tether_hanging', 3, 3, 0, { ceil: H, len: 2.6 });
+        K.prop('receipt_strip', 3, 3, 0, { ceil: H, len: 2.2 });
         K.dress('receipts', [2, 5, 16, 11], 30, { seed: 271 });
         K.writing('WHO ARE YOU TRYING TO REACH', 0.09, 2.6, 4.5, 3.6, { rotY: 90, world: 'outage' });
         K.examine(10.2, 1.0, 2.0, ['An energy drink on the stage, where the caller would stand.'], { id: 'c2ha:energyx', r: 1.0, world: 'outage' });
@@ -1990,18 +2074,19 @@
       await G2.fade(1, 0.25);
     }, { control: false, letterbox: false, skippable: false, name: 'c2:slide' });
     await G.goto('c2_bay4', 'door', { sound: 'none', fade: false });
+    if (S.done['cs:2-3'] || (S.flags.c2_chase | 0) !== 2) await G.fade(0, 0.6);
   }
   function endPursuitSoon() { for (const id of ['c2:luke', 'c2:flankL', 'c2:flankR']) { const e = Enemies.get(id); if (e && !e.removed) { e.ai = false; } } }
   defineRoom({
     id: 'c2_garages', name: 'THE GARAGES', area: 'HILLTOP VILLAGE', chapter: 2, outdoor: true, surface: 'concrete', ambient: 'wind',
-    fog: { density: 0.05 },
+    fog: { density: 0.05 }, outageFog: { density: 0.055, color: '#14302d' },
     bounds: [0, 0, 32, 6],
     entries: { crescent: [30.4, 3.2, -90], bay4: [BAYX(4), 1.25, 0], start: [30.4, 3.2, -90] },
     cameras: [
-      // from the east end, high: the row of doors going away into the fog
-      { id: 'c2_garages:east', vol: [20.5, 0, 32, 6], type: 'static', pos: [33.6, 3.6, 5.6], target: [22, 0.5, 2.2], fov: 'fit' },
-      // along the fences, looking at the doors
-      { id: 'c2_garages:mid', vol: [7.5, 0, 20.8, 6], type: 'rail', pos: [14, 1.6, 8.6], fov: 48, rail: { a: [6, 1.6, 8.6], b: [22, 1.6, 8.6], look: [0, 0.8, 0], lag: 0.35 } },
+      // from the east end where the lane bends in, high: the row of doors going away into the fog
+      { id: 'c2_garages:east', vol: [20.5, 0, 32, 6], type: 'static', pos: [36.6, 3.5, 3.9], target: [22.5, 0.6, 1.9], fov: 'fit' },
+      // from over the back fences, looking down at the doors
+      { id: 'c2_garages:mid', vol: [7.5, 0, 20.8, 6], type: 'rail', pos: [14, 3.35, 7.45], fov: 50, rail: { a: [7.5, 3.35, 7.45], b: [20.8, 3.35, 7.45], look: [0, 0.8, 0], lag: 0.35 } },
       // floor level at Bay 4's door
       { id: 'c2_garages:bay4', vol: [BAYX(4) - 1.9, 0, BAYX(4) + 1.9, 2.4], pri: 1, type: 'static', pos: [BAYX(4) + 3.6, 0.32, 4.4], target: [BAYX(4) - 0.2, 0.55, 0.2], fov: 'fit' },
       // the dead end (west), from the lane
@@ -2009,7 +2094,10 @@
     ],
     build(K) {
       K.floor(0, 0, 32, 6, { tex: 'concrete', color: '#8a867a' });
-      K.floor(24.4, -3.5, 32, 0, { tex: 'concrete', color: '#8a867a' });
+      // the lane runs on east round the bend toward the Crescent (seen, not walked: the exit is at x 31.3)
+      K.box(37, -0.05, 3, 10, 0.05, 6, { tex: 'concrete', color: '#8a867a' }, { shadow: false });
+      K.prop('fence', 28.3, -0.1, 0, { variant: 'colorbond', len: 7.4, color: '#5f6b64', collide: false }); K.collider(24.6, -0.2, 32, 0.02, { h: 2.0 });
+      K.prop('gum_tree', 29, -4.5, 40, {}); K.prop('power_pole', 33.5, -0.8, 0, { span: 0 });
       // the bays: a block of six under one skillion roof, brick piers between the doors
       const BR = { tex: 'brick', color: '#b8a494' };
       K.box(14.2, 0, -3.1, 20.8, 2.6, 6.2, BR, { collide: true });
@@ -2054,16 +2142,22 @@
       K.trigger([21.5, 0, 31.2, 6], (G) => outageBegins(G), { id: 'c2_garages:outage', when: () => flag('c2_metChase') && !flag('c2_loop') && S.chapter === 2 });
       K.outageOnly(() => {
         K.pickup('rmap_village', 27.0, 0, 3.4, { id: 'c2_garages:rmap', glint: true });
-        K.light('point', BAYX(4), 1.4, 1.2, { color: '#ff2a1c', intensity: 1.4, distance: 4, flicker: true });
-        K.light('point', 29, 2.4, 3, { color: '#e8c21a', intensity: 1.6, distance: 6, flicker: true });
+        K.light('point', BAYX(4), 1.4, 1.2, { color: '#ff2a1c', intensity: 2.2, distance: 5, flicker: true });
+        K.light('point', 29, 2.4, 3, { color: '#e8c21a', intensity: 2.6, distance: 7, flicker: true });
+        // tubes over the bays, most of them failing
+        for (const k of [1, 3, 5, 6]) K.light('fluoro', BAYX(k), 2.45, 0.35, { flicker: k !== 5, intensity: 5, distance: 7, len: 1.2 });
+        K.light('point', 6, 1.8, 4.2, { color: '#1f6f6a', intensity: 2.4, distance: 7 });
+        K.light('point', 17, 1.8, 4.2, { color: '#1f6f6a', intensity: 2.0, distance: 7 });
         for (let k = 1; k <= 6; k++) K.light('led', BAYX(k) - 1.2, 2.2, 0.2, { color: '#ff2a1c', size: 0.03, halo: 0.4, blink: 1 + k * 0.3 });
-        K.prop('tether_hanging', 16, 1.2, 0, { ceil: 2.6, len: 1.4 }); K.prop('tether_hanging', 6, 1.0, 0, { ceil: 2.6, len: 1.8 });
+        K.dress('cables', [4, 0.2, 9, 1.4], 8, { seed: 283 }); K.dress('cables', [15, 0.2, 20, 1.2], 7, { seed: 284 });
         K.dress('receipts', [2, 1, 30, 5], 26, { seed: 281 });
         K.writing('FOLLOW UP TOMORROW', BAYX(2), 1.4, 0.08, 2.4, { world: 'outage' });
       });
       K.pickup('energy_drink', 2.2, 0, 5.2, { id: 'c2_garages:energyEasy', extraOnEasy: true });
       K.dress('leaves', [1, 1, 31, 5.6], 22, { seed: 282 });
     },
+    onUpdate() { outageAmbient(0.6); },
+    onLeave() { outageAmbient(null); },
     async onEnter(G, from) {
       if (from === 'c2_crescent' && chasing()) {
         // he comes round the corner a moment after
@@ -2099,6 +2193,7 @@
       await G2.fade(1, 0.25);
     }, { control: false, letterbox: false, skippable: false, name: 'c2:rollout' });
     await G.goto('c2_garages', 'bay4', { sound: 'none', fade: false });
+    await G.fade(0, 0.6);
   }
   defineRoom({
     id: 'c2_bay4', name: 'BAY 4', area: 'HILLTOP VILLAGE', chapter: 2, outdoor: false, surface: 'concrete', ambient: 'garage',
@@ -2107,9 +2202,13 @@
     entries: { door: [1.5, 5.15, 180], start: [1.5, 5.15, 180] },
     cameras: [
       // a dark static from the back of the bay (out past the back wall): the half-open door, grey light under it
-      { id: 'c2_bay4:back', vol: [0, 2.6, 3, 6], type: 'static', pos: [1.6, 1.7, -3.2], target: [1.5, 0.5, 4.8], fov: 'fit' },
+      { id: 'c2_bay4:back', vol: [0, 4.2, 3, 6], type: 'static', pos: [1.6, 1.7, -3.2], target: [1.5, 0.5, 4.8], fov: 'fit' },
       // floor level from the door end (out past the door): the back of the bay, the esky, the scooter
       { id: 'c2_bay4:door', vol: [0, 0, 3, 2.65], type: 'static', pos: [1.2, 0.55, 8.4], target: [1.5, 0.6, 0.8], fov: 'fit' },
+      // across the middle of the bay from past the west wall (cutaway), over the boxes: the esky, the bench, his corner
+      { id: 'c2_bay4:side', vol: [0, 2.3, 3, 4.3], pri: 1, type: 'static', pos: [-4.4, 2.2, 3.1], target: [1.9, 0.55, 3.2], fov: 'fit' },
+      // high from the door end (past the west wall), down into the back corner: the pegboard, the shape under the sheet
+      { id: 'c2_bay4:corner', vol: [0, 0, 3, 1.25], pri: 2, type: 'static', pos: [-3.3, 2.45, 5.3], target: [2.3, 0.75, 0.9], fov: 'fit' },
     ],
     build(K) {
       const H = 2.5;
@@ -2117,12 +2216,15 @@
       K.ceiling(0, 0, 3, 6, H, { tex: 'metal', color: '#6a6e6a' });
       const BR = { tex: 'brick', color: '#9a8a7a' };
       K.wall(-0.075, 0, 3.075, 0, H, BR, { both: false });
-      K.wall(0, 6.075, 0, -0.075, H, BR, {});
+      K.wall(0, 6.075, 0, -0.075, H, BR, { both: false });
       K.wall(3, -0.075, 3, 6.075, H, BR, {});
       // the roller door (half up) — seen from inside; grey light under it
       K.prop('roller_door', 1.5, 6.05, 180, { w: 3.0, h: 2.3, open: 0.52, color: '#9aa0a8', collide: false });
       K.collider(0, 5.95, 3, 6.3, { h: 2.4 });
       K.light('point', 1.5, 0.35, 6.6, { color: '#9aa6a8', intensity: 2.4, distance: 4 });
+      // a fibreglass skylight panel, grey with fog: the only light in here besides the gap under the door
+      K.plane(1.5, H - 0.012, 2.4, 0.62, 1.2, { color: '#8e9a9c', emissive: '#56605f', emissiveIntensity: 0.7 }, { rot: [90, 0, 0] });
+      K.light('point', 1.5, 2.2, 2.4, { color: '#7f8f92', intensity: 2.2, distance: 4.6, name: 'c2b4:sky' });
       // 2-3's fill: the grey light under the door, lifted (off until the scene)
       K.light('point', 0.9, 1.9, 5.2, { color: '#8c9a9c', intensity: 2.2, distance: 4.5, on: false, name: 'c2b4:fill', world: 'fog' });
       K.interact(1.5, 0.6, 5.55, (G) => rollOut(G), { id: 'c2_bay4:out', r: 1.1, when: () => (S.flags.c2_chase | 0) !== 2 || !!S.done['cs:2-3'] });
@@ -2142,10 +2244,17 @@
       K.prop('esky', 1.5, 2.7, 90, {});
       for (const [x, z] of [[1.9, 3.3], [2.05, 3.15], [1.1, 3.4]]) K.prop('energy_can', x, z, x * 60, {});
       K.examine(1.5, 0.5, 2.4, ['An old esky. Chase\'s energy drink cans lined up beside it. [beat] All empty.'], { id: 'c2b4:esky', r: 0.9 });
+      // his corner: flattened boxes laid out like a bed, a hoodie for a pillow, a phone charger going nowhere
+      K.box(0.68, 0, 4.95, 0.9, 0.02, 1.5, { tex: 'cardboard', color: '#9a8466' }, { rot: 6, shadow: false });
+      K.box(0.62, 0.02, 5.45, 0.5, 0.1, 0.34, { tex: 'fabric_knit', color: '#2a3034' }, { rot: 12 });
+      K.cyl(0.95, 0.02, 4.6, 0.004, 0.9, '#e8e6e0', { rz: 90, rot: 30 });
+      K.examine(0.7, 0.3, 4.9, ['Flattened boxes on the floor, laid out like a bed. A hoodie for a pillow.', 'Couple of hours, he said. [beat] He\'s been in here longer than that.'], { id: 'c2b4:bed', r: 0.9 });
+      K.examine(1.5, 2.3, 2.4, ['A fibreglass panel in the roof. Grey. [beat] The fog pressed flat against it.'], { id: 'c2b4:sky', r: 1.2 });
+      K.examine(2.7, 1.0, 4.6, ['From in here you\'d see anyone\'s feet go past under the door. [beat] Before they saw you.'], { id: 'c2b4:watch', r: 0.8 });
       K.outageOnly(() => {
         K.pickup('first_aid', 1.55, 0.4, 2.7, { id: 'c2_bay4:firstaid', world: 'outage' });
         K.light('point', 1.5, 2.1, 3, { color: '#ff2a1c', intensity: 1.3, distance: 4, flicker: true });
-        K.prop('tether_hanging', 1.2, 4.2, 0, { ceil: H, len: 1.2 });
+        K.prop('receipt_strip', 1.2, 4.2, 0, { ceil: H, len: 0.9 });
         K.dress('receipts', [0.3, 0.3, 2.7, 5.6], 10, { seed: 291 });
       });
     },
@@ -2206,7 +2315,7 @@
     if (A.raw) { A.raw.eyes('down'); A.raw.expr('tired'); A.raw.lookAt(null); }
     Player.setTorch(true);
     { const fl = G.light('c2u9:face'); if (fl) fl.on(true); }
-    G.cam({ pos: [4.2, 1.6, 4.5], target: [4.0, 1.57, C21.face[1]], fov: 30, to: { pos: [4.19, 1.6, 4.4], fov: 28 }, dur: 8 });
+    G.cam({ pos: [4.26, 1.62, 4.72], target: [4.0, 1.58, C21.face[1]], fov: 30, to: { pos: [4.24, 1.62, 4.6], fov: 27 }, dur: 8 });
     await G.wait(1.4);
     if (A.raw) A.raw.eyes('ahead');
     await G.say('AIDAN', 'Okay. Okay. The modem. That\'s all it is.');
@@ -2229,7 +2338,7 @@
   // the streetlight, only a silhouette. The lanyard. The figure coming, fast. The bars jumping to four and pulsing like a
   // heartbeat — the Reach tell, although Luke is a person. He runs (→ GAMEPLAY 2-4, the chase).
   // =================================================================================================================
-  const C22 = { step: [U9DOOR[0], U9DOOR[1] - 0.35], stop: [U9DOOR[0] + 0.05, -1.25], luke: [12.45, 4.4], lukeTo: [12.75, 1.9], run: [17.2, -0.95] };
+  const C22 = { step: [U9DOOR[0], U9DOOR[1] - 0.35], stop: [U9DOOR[0] + 0.05, -0.35], luke: [12.45, 4.4], lukeTo: [12.75, 1.9], run: [17.2, -0.95] };
   defineCutscene('2-2', async (G) => {
     const A = G.aidan;
     const door = G.door('c2_crescent:u9');
@@ -2476,14 +2585,14 @@
     // what a player carries into Chapter 2 (chapter select): the Prologue and Chapter 1
     debugState(s) {
       const give = (id, n = 1) => { const e = s.inv.find((i) => i && i.id === id); if (e) e.n = (e.n || 1) + (ITEMS[id] && ITEMS[id].stack === false ? 0 : n); else s.inv.push({ id, n }); };
-      for (const id of ['returned_modem', 'box_cutter', 'steel_bar', 'map_town', 'map_plaza', 'rmap_plaza', 'first_day_badge', 'certificate']) if (!s.inv.some((i) => i && i.id === id)) give(id);
+      for (const id of ['returned_modem', 'box_cutter', 'steel_bar', 'map_town', 'map_plaza', 'rmap_plaza', 'staff_key', 'first_day_badge', 'certificate']) if (!s.inv.some((i) => i && i.id === id)) give(id);
       give('coffee', 1);
       s.equipped = 'steel_bar';
       for (const id of ['map_town', 'map_plaza', 'rmap_plaza']) { const m = ITEMS[id] && ITEMS[id].map; if (m) s.maps[m] = true; }
-      Object.assign(s.flags, { c1_address: true, c1_wai: true, standardName: s.flags.standardName || 'LUKA', p0_carDead: true });
+      Object.assign(s.flags, { c1_address: true, c1_wai: true, c1_pinKnown: true, c1_bossDone: true, standardName: s.flags.standardName || 'LUKA', p0_carDead: true });
       const lvl = (s.difficulty && s.difficulty.riddle) || 'normal';
       const pick = (b) => (DOCUMENTS[`${b}_${lvl}`] ? `${b}_${lvl}` : b);
-      for (const d of ['timetable', pick('pin_note'), pick('cert'), 'acct1', 'acct2', 'returns1', 'returns2']) if (DOCUMENTS[d]) s.docs[d] = { read: true };
+      for (const d of ['timetable', pick('pin_note'), pick('cert'), 'acct1', 'acct2', 'huddle1', 'returns1', 'returns2', 'returns3', 'returns4']) if (DOCUMENTS[d]) s.docs[d] = { read: true };
       s.calls.luka1 = s.calls.luka1 || 'answered';
       s.stats.callsAnswered = Math.max(s.stats.callsAnswered || 0, 1);
       Object.assign(s.done, { 'cs:P-1': true, 'cs:P-4': true, 'cs:1-1': true, 'cs:1-2': true, 'cs:1-7': true, 'cs:1-8': true });

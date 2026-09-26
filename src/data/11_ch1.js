@@ -217,7 +217,8 @@
 
       // ---- WEST: the shops (facades face east; each shopfront adds its own collider) ------------------------------------
       K.collider(-4, -176, RL.west, 6.5, { h: 5 });
-      const shop = (p, w, variant, o = {}) => K.prop('shopfront', RL.west, -p, 90, { w, variant, ...o });
+      const shopsAt = [];
+      const shop = (p, w, variant, o = {}) => { shopsAt.push([p, w]); return K.prop('shopfront', RL.west, -p, 90, { w, variant, ...o }); };
       shop(12, 6, 'vacant');
       shop(20, 6, 'repair');
       shop(30, 7, 'shop', { name: 'SUDS LAUNDROMAT', bg: '#2a4a6a', fg: '#e8eef0' });
@@ -232,6 +233,57 @@
       shop(133, 8, 'shop', { name: 'HOSPITAL AUXILIARY OP SHOP', bg: '#6a2a3a', fg: '#f4ece0' });
       shop(145, 7, 'shop', { name: 'HAIR BY DEBBIE', bg: '#8a4a6a', fg: '#fff4f8', shutter: 1 });
       shop(153.5, 4, 'vacant', { door: 'right' });
+      // ---- the block behind the shops, and what stands between them: party walls, a corner building, narrow lanes
+      // behind chain-link gates — a continuous frontage, never a gap onto the fog. (Behind the shop interiors, so the
+      // newsagent's through-the-window camera keeps its view.)
+      {
+        const XF = RL.west - 0.3, X0 = RL.west - 3.1, XB = -15;
+        const MASS = [{ tex: 'brick', color: '#76665a' }, { tex: 'render_cracked', color: '#948c7e' }, { tex: 'plaster_stained', color: '#877f73' }, { tex: 'brick', color: '#6a5c52' }];
+        const CAP = { tex: 'concrete', color: '#6c6860' };
+        const list = shopsAt.slice().sort((a, b) => a[0] - b[0]);
+        const mass = (pA, pB, h, mat) => {                       // a block of building from p = pA to pB (pA < pB)
+          const w = pB - pA, pc = (pA + pB) / 2;
+          K.box((X0 + XB) / 2, 0, -pc, X0 - XB, h, w + 0.04, mat, { shadow: false });
+          K.box((X0 + XB) / 2, h, -pc, X0 - XB + 0.2, 0.16, w + 0.2, CAP, { shadow: false });
+        };
+        list.forEach(([pp, w], i) => mass(pp - w / 2, pp + w / 2, 4.9 + K.rng() * 1.9, MASS[i % MASS.length]));
+        // the corner building at the south end: a blank side wall to the drop, a faded painted sign on it
+        const pS = list[0][0] - list[0][1] / 2;
+        K.box((RL.west + XB) / 2 - 0.15, 0, -(2.4 + pS) / 2, RL.west - XB - 0.3, 6.2, pS - 2.4, MASS[3], { shadow: false });
+        K.box((RL.west + XB) / 2 - 0.15, 6.2, -(2.4 + pS) / 2, RL.west - XB, 0.16, pS - 2.2, CAP, { shadow: false });
+        K.sign('SIGNAL HILL — WELCOME', (RL.west + XB) / 2, 3.6, -2.35, 6.5, 1.1, { rotY: 0, style: 'handwritten', bg: '#5c4f44', fg: '#c9b99a' });
+        // between each pair of shops
+        for (let i = 0; i < list.length - 1; i++) {
+          const [pa, wa] = list[i], [pb, wb] = list[i + 1];
+          const g0 = pa + wa / 2, g1 = pb - wb / 2, g = g1 - g0, pc = (g0 + g1) / 2;
+          if (g <= 0.05) continue;
+          if (g < 3.2) {
+            // a party wall / narrow infill building flush with the shopfronts: render, a downpipe, a meter box, a barred window
+            const h = 4.6 + K.rng() * 1.6, mat = MASS[(i + 1) % MASS.length];
+            K.box((XF + XB) / 2, 0, -pc, XF - XB, h, g + 0.05, mat, { shadow: false });
+            K.box((XF + XB) / 2, h, -pc, XF - XB + 0.2, 0.16, g + 0.25, CAP, { shadow: false });
+            K.cyl(XF + 0.08, 0, -pc + g * 0.3, 0.05, h, { tex: 'metal', color: '#4a4f4c' }, { seg: 6 });
+            if (g > 1.4) {
+              K.box(XF + 0.03, 1.2, -pc - g * 0.15, 0.08, 0.7, 0.5, { tex: 'metal', color: '#5a605c' });
+              K.box(XF + 0.01, 3.1, -pc - g * 0.1, 0.04, 0.8, Math.min(1, g * 0.45), { color: '#121515', roughness: 0.3 });
+              for (let b = -2; b <= 2; b++) K.box(XF + 0.05, 3.1, -pc - g * 0.1 + b * Math.min(1, g * 0.45) / 5, 0.03, 0.8, 0.03, { tex: 'metal', color: '#3a3e3c' });
+            }
+          } else {
+            // a lane behind a chain-link gate: brick side walls to the block's back, a back wall, wet concrete, bins
+            const XL = -9.5, h = 5.2;
+            for (const zz of [-g0, -g1]) K.box((XF + XB) / 2, 0, zz, XF - XB, h, 0.3, MASS[3], { shadow: false });
+            K.box(XL - 0.15, 0, -pc, 0.3, h, g, MASS[0], { shadow: false });
+            K.box((XF + XL) / 2, 0, -pc, XF - XL, 0.03, g, { tex: 'concrete_wet' }, { shadow: false });
+            K.prop('chainlink', RL.west - 0.15, -pc, 90, { len: g - 0.1, h: 2.1, collide: false });
+            K.prop('bin', XL + 0.9, -pc + g * 0.25, 90, { collide: false });
+            if (g > 4) K.prop('pallet', XL + 1.6, -pc - g * 0.2, 20, { collide: false });
+            K.dress('papers', [XL + 0.3, -g1 + 0.3, XF - 0.3, -g0 - 0.3], 4, { seed: 40 + i });
+          }
+        }
+        // the north end of the block: an end wall to the park
+        const lastN = list[list.length - 1][0] + list[list.length - 1][1] / 2;
+        K.box((X0 + XB) / 2, 0, -lastN - 0.15, X0 - XB, 5.4, 0.3, MASS[0], { shadow: false });
+      }
       // writing on the shutters (faded marker in the fog; thick marker in the Outage)
       K.writing('ASK THEM', 0.05, 1.35, -19.2, 1.3, { rotY: 90, world: 'fog' });
       K.writing('IT\'LL BE FINE', 0.05, 1.1, -145.6, 1.4, { rotY: 90, world: 'fog' });

@@ -98,7 +98,14 @@ for (let attempt = 1; ; attempt++) {
 
 const h = {
   eval: (code) => page.evaluate(`(async () => { ${code} })()`),
-  shot: (p) => page.screenshot({ path: path.resolve(root, p) }),
+  // (SwiftShader at 1920×1080 with other browsers busy on the same cores can take longer than Playwright's default 30 s
+  // to hand over a frame: 90 s and one more try before a screenshot counts as failed)
+  shot: async (p) => {
+    for (let i = 0; ; i++) {
+      try { return await page.screenshot({ path: path.resolve(root, p), timeout: 90000 }); }
+      catch (e) { if (i >= 1 || !/Timeout/i.test(String(e && e.message))) throw e; }
+    }
+  },
   wait: (s) => page.waitForTimeout(s * 1000),
   key: async (k, hold = 0) => { if (hold > 0) { await page.keyboard.down(k); await page.waitForTimeout(hold * 1000); await page.keyboard.up(k); } else await page.keyboard.press(k); },
   log,

@@ -24,7 +24,8 @@ node tools/run.mjs --file .build/t.html --size 640x360 --script tools/tests/ch3.
 * `--quiet` prints only results and errors. The chapter and chain tests print their notes as they go, which is useful
   when a run fails.
 * Runs don't share state, so several can go side by side, each in its own browser. On a 4-core machine, three at a time
-  works well. `run.mjs` restarts a browser that hangs while it boots, at most twice.
+  works well. `run.mjs` restarts a browser that hangs while it boots, at most twice. A screenshot gets 90 s and one
+  retry, because SwiftShader at 1920×1080 on busy cores can take longer than Playwright's default 30 s.
 * Everything a run writes (screenshots, snapshots, chain autosaves, logs) goes under `.build/`, which git ignores.
 * SwiftShader draws at a few frames per second, so the tests move game time with `SH.advance` and don't wait for
   frames. `chain.mjs` and the chapter tests switch drawing off unless `SH_RENDER=1` is set. Judge performance only by
@@ -145,7 +146,7 @@ They don't fail a run.
 | Script | Size | Time | Covers |
 | --- | --- | --- | --- |
 | `title.mjs` | 1280x720 | ~4 min | §2A title steps 1–5 at normal speed on the game's own clock: black and hiss, the vista, SIGNAL HILL, PRESS ANY KEY, the ring stopping mid-burst, the menu, the 60 s attract sequence |
-| `ui.mjs` | 1280x720 | ~16 min | ~55 overlays and screens at 1280×720 and 1920×1080, with every DOM text audited for size (12 px / 15 px floor), clipping, off-screen and overlap |
+| `ui.mjs` | 1280x720 | ~16 min (30 beside other runs) | ~55 overlays and screens at 1280×720 and 1920×1080, with every DOM text audited for size (12 px / 15 px floor), clipping, off-screen and overlap |
 | `options.mjs` | 960x540 | ~2 min | every Options entry changed with real keys and measured live in the game, then saved to localStorage and restored after a reload; the calibration screen |
 | `gamepad.mjs` | 960x540 | ~1 min | a synthesised standard pad plays the title, the menus and a room with no keyboard; prompts name the pad's buttons; rumble |
 | `audiogate.mjs` | 960x540 | ~1 min | with the browser's autoplay lock, PRESS ANY KEY TO BEGIN shows and the title starts with its sound |

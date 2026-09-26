@@ -139,7 +139,9 @@ italic, slanted fallback so it still reads as written (`Tex.handFontPresent(stac
   roller`. The door's front faces `rot` (the side a camera at rot's direction sees). `hinge:'left'|'right'` ('L'|'R',
   default left) is the hinge side as seen standing in FRONT of it (on the side `rot` faces); `swing:1|'front'|'out'`
   (default) opens the leaf toward that front side, `-1|'back'|'in'` away from it (`maxAngle`, default 95°).
-  Without `to`: swings in-room (collider toggles; the Reach can't pass a closed one; the Standard opens them). With
+  Without `to`: swings in-room (collider toggles; the Reach can't pass a closed one; the Standard opens them) — so a
+  door that is only scenery (a roller jammed half up, a shopfront a scene opens) takes `when: () => false, mapMark:
+  false`: E then leaves it alone and `G.door(id)` still opens and closes it. With
   `to`: 1.5 s black transition. `key` → "The key fits." and it stays unlocked (`S.done['unlocked:<id>']`). Script
   control: `G.door(id).open({instant}) / close() / toggle() / lock(msg) / unlock() / isOpen / locked`.
 * **Automatic map marks** (spec §2A): trying a locked door writes a red X to the room's map

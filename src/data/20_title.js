@@ -1,10 +1,9 @@
 // ==== data/20_title.js — the title backdrop and the idle attract sequence (spec §2A "Title screen" steps 1–5) — tag TTL_ ====
-// t_title: the fogged town seen from the Lookout — the gravel shoulder and its guardrail in the foreground, the coin
-//   binoculars, the scenic-lookout sign, a gum tree at the edge of frame; beyond the rail the hill falls away into the
-//   fog, the town's sodium lamps and porch lights glowing through it, the Plaza's sign a faint teal smudge, and far off
-//   up the hill the mast's red light blinking. Slow and static (a 90 s drift of a few centimetres); dead-air specks
-//   drift upward (the outdoor Fog world). Game builds it on its own: no player, no spawns, no triggers, no onEnter; its
-//   K.animate callbacks run; its first camera (a keys camera) plays as is. No walkable floor (Cam.check → []).
+// t_title: the fogged town seen from the Lookout — the gravel shoulder and its guardrail in the foreground, houses
+//   stepping down the hill into the fog, and far off the mast's red light blinking. Slow and static (a 90 s drift of a
+//   few centimetres); dead-air specks drift upward (the outdoor Fog world). Game builds it on its own: no player, no
+//   spawns, no triggers, no onEnter; its K.animate callbacks run; its first camera (a keys camera) plays as is.
+//   cutsceneOnly: skipped by the camera check.
 // title:attract (60 idle seconds on the title): slow, silent shots of empty locations — Relay Street, the Crescent, the
 //   Operators' Hall, the atrium — no text, then back to the title. Each shot starts from that room's own camera (by id,
 //   so the shot follows the room if its author moves it) and drifts slowly forward.
@@ -32,95 +31,58 @@
     parent.add(s);
     return s;
   }
-  // the hill below the rail: falls from the shoulder (z ≈ −1) to the town (y ≈ −26 at z −45) and on into the fog
-  const TTL_hill = (x, z) => (z > -1 ? 0 : -Math.min(17, Math.pow((-1 - z) / 40, 0.85) * 15) + 1.2 * Math.sin(x * 0.07 + z * 0.05));
-  // the town rises again on the far side toward the summit (north-east)
-  const TTL_town = (x, z) => -15 + clamp((-z - 70) / 80) * 14 + clamp((x - 10) / 80) * 6;
 
+  // The title vista: the Lookout's gravel shoulder and guardrail in the foreground, weatherboard houses and cottages
+  // stepping down the hill into the fog, gum trees between them, a few lamps glowing through the murk, and far off to
+  // the north-east the mast with its red aircraft lights blinking. (This is the composition of the original title.)
   defineRoom({
     id: 't_title', name: 'TITLE — THE LOOKOUT', area: 'SIGNAL HILL', outdoor: true, surface: 'gravel', ambient: 'wind',
-    fog: { density: 0.017 }, grade: 'title',
-    bounds: [-2, -2, 2, 2],
+    fog: { density: 0.021 }, cutsceneOnly: true,
+    bounds: [-9, -7, 9, 9],
     entries: { start: [0, 3, 180] },
     cameras: [
       // the one shot: a few centimetres of drift over a minute and a half (Game plays a keys camera as it is)
-      { id: 't_title:vista', type: 'scripted', vol: [-2, -2, 2, 2], keys: [{ t: 0, pos: [0.3, 1.95, 2.0], target: [8, -6.8, -60], fov: 46 }, { t: 90, pos: [-0.4, 2.0, 1.6], target: [6.8, -6.9, -60], fov: 44.5 }] },
+      { id: 't_title:vista', type: 'scripted', vol: [-9, -7, 9, 9], keys: [{ t: 0, pos: [0.6, 2.8, -1.6], target: [9, -6.5, -52], fov: 46 }, { t: 90, pos: [-0.3, 2.85, -2.0], target: [7.5, -6.7, -52], fov: 45 }] },
     ],
     build(K) {
-      // ---- the shoulder: gravel, the kerb, the guardrail over the valley ------------------------------------------
-      K.box(0, -0.06, 4, 40, 0.06, 10, 'gravel', { shadow: false });
-      // (the rail: weathered timber posts and a galvanised W-beam, beaded with fog)
-      for (let x = -15; x <= 15; x += 2) K.box(x, 0, -0.62, 0.14, 0.78, 0.14, { tex: 'wood', color: '#5e564a' });
-      K.box(0, 0.42, -0.52, 32, 0.3, 0.06, { tex: 'metal', color: '#8d9591', roughness: 0.45, metalness: 0.5 });
-      K.box(0, 0.52, -0.49, 32, 0.06, 0.02, { tex: 'metal', color: '#a4aba6', roughness: 0.4, metalness: 0.5 });
-      K.dress('leaves', [-10, 0, 10, 6], 18, { seed: 14 });
-      // the coin binoculars on their post, the scenic-lookout sign, a bin
-      {
-        const bx = -2.6, bz = 0.25;
-        K.cyl(bx, 0, bz, 0.07, 1.05, { tex: 'metal', color: '#4d5a5c' });
-        K.box(bx, 1.05, bz, 0.34, 0.24, 0.22, { tex: 'metal', color: '#5a6b6e' }, { rot: 20 });
-        for (const s of [-1, 1]) K.cyl(bx + s * 0.07, 1.14, bz - 0.14, 0.045, 0.1, { tex: 'metal', color: '#2a3032' }, { rx: 90 });
-        K.box(bx + 0.12, 1.08, bz + 0.1, 0.06, 0.08, 0.02, { tex: 'metal', color: '#b89a52' });
-      }
-      K.sign('SCENIC LOOKOUT', 5.4, 1.9, 0.1, 1.4, 0.36, { style: 'council', rotY: 200 });
-      K.box(5.4, 0, 0.1, 0.07, 1.72, 0.07, { tex: 'metal', color: '#8f9791' });
-      K.prop('bin', -5.2, 1.0, 0, { variant: 'street' });
-      // a gum tree leaning into the frame on the right; shrubs along the edge
-      K.prop('gum_tree', 8.6, 0.8, 200, { collide: false });
-      K.prop('gum_tree_small', -9.5, -1.8, 40, { collide: false, y: -1.2 });
-      for (const [x, z] of [[-6.5, -1.2], [2.2, -1.4], [6.8, -1.6], [-1.2, -1.7]]) K.prop('shrub', x, z, x * 31, { collide: false, y: -0.5 });
-      // the one streetlight on the shoulder (left, just out of the frame's corner): sodium on the gravel
-      K.prop('streetlight', -7.5, 2.4, 90, { lit: true, light: false });
-      K.light('point', -6.2, 5.8, 2.4, { color: '#ffa04a', intensity: 7, distance: 14 });
-      // ---- the hill falling away below the rail ------------------------------------------------------------------
-      {
-        const geo = new THREE.PlaneGeometry(260, 150, 64, 40); geo.rotateX(-Math.PI / 2);
-        const p = geo.attributes.position, uv = geo.attributes.uv;
-        for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i) - 76; p.setZ(i, z); const y = z < -60 ? Math.min(TTL_hill(x, z), TTL_town(x, z)) : TTL_hill(x, z); p.setY(i, y - 0.3); uv.setXY(i, x / 4, z / 4); }
-        geo.computeVertexNormals();
-        const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: Tex.get('grass'), color: new THREE.Color('#5d6655'), roughness: 0.95 }));
-        m.receiveShadow = true; K.mesh(m, { name: 't_title:hill' });
-      }
-      const R = U.rng(1994);
-      for (let i = 0; i < 30; i++) { const x = -60 + R() * 120, z = -6 - R() * 44; if (Math.abs(x - 6) < 16 && z > -26) continue; K.prop(i % 3 ? 'gum_tree' : 'gum_tree_small', x, z, R() * 360, { y: TTL_hill(x, z) - 0.3, collide: false }); }
-      // ---- the town in the fog: roofs, a few lit windows, the lamps along its streets ------------------------------
-      const lights = new THREE.Group(); lights.name = 't_title:lights';
+      K.floor(-9, -7, 9, 9, 'gravel');
+      K.prop('guardrail', 0, -6.2, 0, { len: 16 });
+      K.prop('streetlight', -5.5, -3.5, 90);
+      K.prop('road_sign', 6.2, -5.2, 200);
+      K.prop('gum_tree', -8.2, -5.5, 30); K.prop('gum_tree_small', 8.4, -1.5, 120); K.prop('shrub', -3.6, -6.7, 0); K.prop('shrub', 3.2, -6.8, 70);
+      // the hill falls away past the rail, down to the town
+      K.floor(-60, -80, 60, -7, { tex: 'grass', color: '#3c4540' }, { ramp: { axis: 'z', y0: -30, y1: -0.3 } });
+      for (let i = 0; i < 7; i++) K.prop('shrub', -15 + i * 5 + K.rng() * 2, -9 - K.rng() * 6, K.rng() * 360, { collide: false });
+      // the town: houses and cottages stepping down the hill, a few gum trees between them
       const houses = [];
-      for (let i = 0; i < 26; i++) {
-        const x = -58 + (i % 9) * 14 + R() * 6, z = -72 - Math.floor(i / 9) * 22 - R() * 10, y = TTL_town(x, z);
-        K.prop(R() < 0.45 ? 'cottage' : 'house', x, z, 160 + R() * 50, { y, collide: false, lit: R() < 0.35, seed: i + 7 });
+      const hillY = (z) => -0.3 + ((z + 7) / 73) * 29.7;
+      for (let i = 0; i < 16; i++) {
+        const x = -44 + (i % 8) * 12 + K.rng() * 6, z = -24 - Math.floor(i / 8) * 16 - K.rng() * 10, y = hillY(z);
+        const kind = K.rng() < 0.45 ? 'cottage' : 'house';
+        K.prop(kind, x, z, 150 + K.rng() * 60, { y, collide: false, lit: false, seed: i + 3 });
         houses.push([x, y, z]);
       }
-      // the Plaza: a long low roof, its sign a teal smudge; the exchange's brick block up the slope
-      K.box(-18, TTL_town(-18, -72) - 0.5, -72, 34, 7, 18, { tex: 'render_cracked', color: '#6b6e68' });
-      K.box(22, TTL_town(22, -98) - 0.5, -98, 26, 12, 14, { tex: 'brick', color: '#6a4a3e' });
+      for (let i = 0; i < 7; i++) { const z = -30 - K.rng() * 30; K.prop(i % 2 ? 'gum_tree' : 'gum_tree_small', -42 + K.rng() * 50, z, K.rng() * 360, { y: hillY(z), collide: false }); }
+      // lights through the fog (fog-immune additive sprites: lamps glowing in the murk)
+      const lights = new THREE.Group(); lights.name = 't_title:lights';
       const lamps = [];
-      for (const [x, y, z] of houses) if (R() < 0.55) lamps.push(TTL_glow(K, lights, x + (R() - 0.5) * 4, y + 1.6, z + 4.8, 1.4 + R() * 0.6, '#ffb866', 0.3 + R() * 0.15));
-      // Relay Street's sodium lamps, a line running up the town; Hilltop Road's switchbacks further up
-      for (let k = 0; k < 10; k++) { const x = -34 + k * 1.4, z = -66 - k * 8.5; lamps.push(TTL_glow(K, lights, x, TTL_town(x, z) + 6.4, z, 4.2, '#ff9340', 0.42 - k * 0.02)); }
-      for (let k = 0; k < 7; k++) { const x = 2 + k * 7, z = -124 - (k % 2) * 7; lamps.push(TTL_glow(K, lights, x, TTL_town(x, z) + 6, z, 3.6, '#ff9340', 0.3)); }
-      const plaza = TTL_glow(K, lights, -12, TTL_town(-12, -63) + 5.2, -63, 4.6, '#3ad4c8', 0.3);
-      lamps.push(TTL_glow(K, lights, -9, TTL_town(-9, -63) + 5.2, -63, 2.4, '#ffd23a', 0.26));
-      // the amber traffic light at the junction, blinking
-      const amber = TTL_glow(K, lights, -22, TTL_town(-22, -120) + 3.6, -120, 2.6, '#ffab2e', 0.0);
-      // ---- the mast on the summit, far off: a lattice lost in the fog, its red aircraft lights blinking --------------
-      // (at 160 m the fog swallows the lattice whole — only the fog-immune light reads. It is placed for the frame: the
-      // top light sits in the upper right third, clear of the title and the frame's edge, not up against the top edge.)
-      const mx = 75, mz = -145, my = 17.6 - 34.8;
-      for (let k = 0; k < 3; k++) { const a = (k / 3) * Math.PI * 2 + 0.4; K.cyl(mx + Math.cos(a) * 1.5, my, mz + Math.sin(a) * 1.5, 0.18, 34, '#1b2120', { r2: 0.06, seg: 5 }); }
-      for (let yy = 3; yy < 32; yy += 4) K.box(mx, my + yy, mz, 3.4 - yy * 0.08, 0.12, 0.12, '#1b2120', { rot: yy * 17 });
-      const red = TTL_glow(K, lights, mx, my + 34.8, mz, 6.0, '#ff2a1c', 0);
-      const red2 = TTL_glow(K, lights, mx, my + 21, mz, 3.8, '#ff2a1c', 0);
+      for (let i = 0; i < houses.length; i += 3) { const [x, y, z] = houses[i]; lamps.push(TTL_glow(K, lights, x + 1.5, y + 1.6, z + 4.5, 1.3, '#ffb060', 0.12 + K.rng() * 0.08)); }
+      lamps.push(TTL_glow(K, lights, -18, hillY(-32) + 6, -32, 3.2, '#ff9340', 0.2), TTL_glow(K, lights, 14, hillY(-42) + 6, -42, 3, '#ff9340', 0.16), TTL_glow(K, lights, 2, hillY(-52) + 6, -52, 2.6, '#ff9340', 0.12));
+      // the mast far off to the north-east with its blinking red aircraft lights
+      const mx = 52, mz = -112, my = -30;
+      for (let k = 0; k < 3; k++) {
+        const a = (k / 3) * Math.PI * 2 + 0.4;
+        K.cyl(mx + Math.cos(a) * 1.4, my, mz + Math.sin(a) * 1.4, 0.16, 46, '#1b2120', { r2: 0.06, seg: 5, name: 't_title:mastleg' + k });
+      }
+      for (let yy = 3; yy < 44; yy += 4.5) K.box(mx, my + yy, mz, 3.2 - yy * 0.06, 0.1, 0.1, '#1b2120', { name: 't_title:brace' + yy });
+      const red = TTL_glow(K, lights, mx, my + 46.6, mz, 5.5, '#ff2a1c', 0);
+      const red2 = TTL_glow(K, lights, mx, my + 30, mz, 3.6, '#ff2a1c', 0);
       K.mesh(lights, { name: 't_title:lights' });
       K.animate((dt, t) => {
         red.material.opacity = (t % 2.1) < 0.6 ? 0.95 : 0.04;
         red2.material.opacity = ((t + 1.05) % 2.1) < 0.6 ? 0.55 : 0;
-        amber.material.opacity = (t % 1.1) < 0.55 ? 0.5 : 0.02;
-        plaza.material.opacity = plaza.userData.op * (0.8 + 0.2 * Math.sin(t * 0.4));
         for (let i = 0; i < lamps.length; i++) lamps[i].material.opacity = lamps[i].userData.op * (0.85 + 0.15 * Math.sin(t * 0.7 + i * 1.7));
       });
-      // (a room of its own for the debug build: a line if anyone walks it)
-      K.examine(0, 1.0, -0.4, ['The whole town, down there in the fog.', 'The mast. [beat] Its light, blinking. On and off. On and off.'], { id: 't_title:rail', r: 2 });
     },
   });
 

@@ -3,6 +3,7 @@
 // Predicates are JavaScript expression strings evaluated in the page (window.SH, SH.S, SH.mod.* are in scope), e.g.
 //   await advanceUntil(h, "SH.S.chapter === 1 && SH.mod.World.room === 'c1_relay'", 60)
 // Keep these generic: chapter-specific logic belongs in the chapter's own file.
+import fs from 'node:fs';
 
 // ---- evaluation --------------------------------------------------------------------------------------------------
 // run `code` (the body of an async function) in the page; page exceptions are rethrown with the code for context
@@ -77,10 +78,42 @@ export async function choose(h, i, maxSec = 60) {
   await ev(h, `return SH.choose(${Number(i)})`);
   await advance(h, 0.1);
 }
-// SH.press(action) followed by a few game ticks so the press is consumed
-export async function press(h, action, holdSec = 0, after = 0.2) {
+// SH.press(action) followed by a few game ticks so the press is consumed. An E press (interact, not held) on Easy whose
+// target is one of the Easy-only heal pickups (extraOnEasy — some lie right beside an examine, a door or a sticker, and
+// the nearer pickup wins the press) takes that pickup first and then presses again, as a player would: the press the
+// test meant still lands. o.extra === 'take': the press is meant for that pickup (no second press).
+export async function press(h, action, holdSec = 0, after = 0.2, o = {}) {
+  if (action === 'interact' && !holdSec && o.extra !== 'take') await takeEasyExtraFirst(h);
   await ev(h, `return SH.press(${JSON.stringify(action)}, ${Number(holdSec)})`);
   await advance(h, after);
+}
+// the ids of the extraOnEasy pickups placed in src/data (K.pickup(…, { id: '…', extraOnEasy: true }))
+let EASY_EXTRAS = null;
+export function easyExtraIds() {
+  if (EASY_EXTRAS) return EASY_EXTRAS;
+  EASY_EXTRAS = [];
+  try {
+    const dir = new URL('../../src/data/', import.meta.url);
+    for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.js'))) {
+      for (const line of fs.readFileSync(new URL(f, dir), 'utf8').split('\n')) {
+        if (!/K\.pickup\(/.test(line) || !/extraOnEasy:\s*true/.test(line)) continue;
+        const m = line.match(/id:\s*'([^']+)'/);
+        if (m) EASY_EXTRAS.push(m[1]);
+      }
+    }
+  } catch (e) { /* no sources: no Easy extras known */ }
+  return EASY_EXTRAS;
+}
+async function takeEasyExtraFirst(h) {
+  const ids = easyExtraIds();
+  if (!ids.length) return false;
+  const id = await ev(h, `if (!SH.S.difficulty || SH.S.difficulty.action !== 'easy') return null;
+    const t = SH.mod.Player.interactTarget; return t && t.kind === 'pickup' && ${JSON.stringify(ids)}.includes(t.id) ? t.id : null;`);
+  if (!id) return false;
+  await ev(h, `(window.__easyExtras = window.__easyExtras || []).push(${JSON.stringify(id)}); SH.press('interact', 0); return 1`);
+  await advanceUntil(h, `!!SH.S.taken[${JSON.stringify(id)}] && !SH.mod.Script.busy`, 8, { step: 0.1 });
+  await advance(h, 0.3);                                               // (Player re-picks its E target every 0.1 s)
+  return true;
 }
 // hold a real key (Playwright name, e.g. 'e', 'w', 'Shift') for `sec` of GAME time
 export async function holdKey(h, key, sec) {
@@ -134,10 +167,10 @@ export async function pickupPlan(h, id, o = {}) {
 }
 // the usual check of a heal pickup a chapter test takes: take it with `take()` unless this Action level left it out; a
 // note either way → false when it should have been taken and was not (a BUG note pushed)
-export async function takeHealPickup(h, notes, id, take, what = id) {
-  const plan = await pickupPlan(h, id);
+export async function takeHealPickup(h, notes, id, take, what = id, o = {}) {
+  const plan = await pickupPlan(h, id, o);
   if (plan !== 'placed') {
-    notes.push(plan === 'left out' ? `${what}: none on ${await ev(h, 'return SH.S.difficulty.action')} (30 % fewer pickups)` : `BUG: ${what} is in the room although DIFF.pickup leaves it out`);
+    notes.push(plan === 'left out' ? `${what}: none on ${await ev(h, 'return SH.S.difficulty.action')} (${o.extraOnEasy ? 'Easy only' : '30 % fewer pickups'})` : `BUG: ${what} is in the room although DIFF.pickup leaves it out`);
     return plan === 'left out';
   }
   if (!(await ev(h, `return !!(SH.S.taken && SH.S.taken[${JSON.stringify(id)}])`))) await take();

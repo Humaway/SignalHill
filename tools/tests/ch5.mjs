@@ -365,8 +365,7 @@ async function level4(h, P, notes, opts) {
   await saw(h, "Somebody's kid drew a picture on this desk. Their mum's a sixty-three.", notes, 'the desk photo frames');
   await useAt(h, P, notes, 3.0, 5.8, 180, { play: true });              // the escalations office door
   await saw(h, 'Keycard only.', notes, 'the escalations door');
-  // (Easy only: a coffee on the meeting-room table, nearer to that spot than the projector — the first E takes it)
-  await takeHealPickup(h, notes, 'c5_level4:mr2coffee', () => useAt(h, P, notes, 31.8, 18.1, 55), 'the meeting-room coffee (Easy)');
+  // (Easy: the meeting-room coffee on the table is nearer that spot than the projector — press() takes it first)
   await useAt(h, P, notes, 31.6, 18.3, 140, { play: true });            // meeting room "Summit": the projector
   await saw(h, '"Q3: WHAT DOES WINNING LOOK LIKE?"', notes, 'the projector');
   await saw(h, "Winning looks like everyone's asleep.", notes, 'the projector');

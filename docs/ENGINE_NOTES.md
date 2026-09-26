@@ -620,7 +620,8 @@ SH_PATH=connected SH_RIDDLE=normal node tools/run.mjs --file .build/chain.html -
 ```
 `SH_PATH` connected | coverage | tomorrow | deal; `SH_RIDDLE` / `SH_ACTION` easy | normal | hard (picked on the NEW GAME
 setup screen); `SH_DEATH=1` kills Aidan once in every boss fight (Chapters 1 3 4 5 6 8) and checks that the death
-screen's CONTINUE restores the latest save exactly before the chapter's test plays on; `SH_RESUME=1` continues every
+screen's CONTINUE restores the latest save exactly before the chapter's test plays on (the notes the test wrote before
+the death still count); `SH_RESUME=1` continues every
 chapter from its autosave before playing it; `SH_FROM_AUTO=.build/chainlogs/<path>_<riddle>_chN.auto.json` replays from
 a chapter-start autosave a run wrote. The release matrix: connected (normal, `SH_RIDDLE=hard`, `SH_RIDDLE=easy
 SH_ACTION=easy`, `SH_DEATH=1`), coverage, tomorrow (normal, `SH_ACTION=hard`), deal — each must end `PASS chain …` —
@@ -628,7 +629,8 @@ plus `tools/tests/stickers.mjs` (each Ollie sticker placed once in `src/data` an
 playthrough is not Yes; after its ending, EXTRA → NEW GAME+ starts playthrough 2 with the stickers and the bar, and
 Chapter 8's hut door opens onto E-YES → credits over the hold music → results → title) and `tools/tests/endings.mjs`.
 The Action level changes what is in the rooms: Easy adds the `extraOnEasy` heal pickups (one can be the nearest thing
-to an E press meant for an examine next to it — the chapter test takes it first), Hard leaves out a fixed ~30 % of the
+to an E press meant for an examine, a door or a sticker next to it: `press(h, 'interact')` in `tools/tests/lib.mjs` then
+takes the pickup first and presses again, as a player would), Hard leaves out a fixed ~30 % of the
 heal pickups (`DIFF.pickup`, by id): a test checks a heal pickup through `takeHealPickup` / `pickupPlan` in
 `tools/tests/lib.mjs`, never by id alone.
 The chain turns `renderer.render` into a no-op (`SH_RENDER=1` keeps drawing): headless SwiftShader rendering between the

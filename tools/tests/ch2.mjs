@@ -305,7 +305,7 @@ export async function play(h, opts = {}) {
       await shot(h, opts, 'road');
       await resolveTethered(h, P, notes, 'c2_hilltoprd:teth', P.cut.road, { from: 180, swing: true });
       if (riddle === 'hard' || P.examine) await useAt(h, P, notes, 15.0, 6.55, 0);         // Route 44 stop 2 (the timetable)
-      if (!(await ev(h, "return !!SH.S.taken['c2_hilltoprd:coffee']")) && (await ev(h, "return SH.mod.World.interactables.some((i) => i.id === 'c2_hilltoprd:coffee')"))) await useAt(h, P, notes, 17.3, 6.6, 0);
+      if (!(await ev(h, "return !!SH.S.taken['c2_hilltoprd:coffee']")) && (await ev(h, "return SH.mod.World.interactables.some((i) => i.id === 'c2_hilltoprd:coffee')"))) { await tp(h, 17.3, 6.6, 0); await press(h, 'interact', 0, 0.4, { extra: 'take' }); await settle(h, P, notes); }
       await tp(h, 48, -26, 180);
       await mustReach(h, "SH.mod.Phone.ringing === 'luka2' || !!(SH.S.calls && SH.S.calls.luka2)", 12, 'Luka call 2 ringing at the gate');
       await shot(h, opts, 'gate_call');

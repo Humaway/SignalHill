@@ -389,9 +389,14 @@ async function checkAutosaves(h, notes, handoffs) {
 // the harness handle the chapter tests get in death mode: every eval runs as usual, then throws once the injected death
 // has happened (window.__deathAbort), so the chapter's test unwinds at its next step (its finally blocks still run
 // their code: keys released, holds let go)
-function deathH(h) {
-  return { ...h, eval: (code) => h.eval(`const __r = await (async () => { ${code}
- })(); if (window.__deathAbort) throw new Error('__DEATH_ABORT__ (the chain killed Aidan in a boss fight)'); return __r;`) };
+// (o.onAbort() is called as each such throw leaves: the chain keeps the notes the chapter's test wrote before the death)
+function deathH(h, o = {}) {
+  return { ...h, eval: async (code) => {
+    try {
+      return await h.eval(`const __r = await (async () => { ${code}
+ })(); if (window.__deathAbort) throw new Error('__DEATH_ABORT__ (the chain killed Aidan in a boss fight)'); return __r;`);
+    } catch (e) { if (o.onAbort && /__DEATH_ABORT__/.test(String(e && e.message))) o.onAbort(); throw e; }
+  } };
 }
 // after the injected death: the death screen as a player sees it → CONTINUE (the latest save) → the save exactly as
 // written, and nothing of the death (the drained colour, the static, the NO SIGNAL), the fight or the Outage left
@@ -486,7 +491,10 @@ export default async function (page, h) {
     // (Chapter 8: the death comes in Phase 2, "The Close", when the Closer fights back — on the deal path, which never
     // gets there, during the Pitch)
     if (DEATH.size && path !== 'deal') await ev(h, 'const D = window.__chain.death; D.cond[8] = () => !!(SH.c8 && SH.c8.fight && SH.c8.fight.phase === 2); return 1');
-    const hh = DEATH.size ? deathH(h) : h;
+    // (the notes of a chapter attempt an injected death cut short: kept up to the death — the checks it passed or failed
+    // before it still count; what its test's catch blocks wrote while unwinding does not)
+    const DN = { notes: null, cut: null };
+    const hh = DEATH.size ? deathH(h, { onAbort: () => { if (DN.notes && DN.cut === null) DN.cut = DN.notes.length; } }) : h;
     // ---- 1. the title → NEW GAME → setup → calibration → P-1 ------------------------------------------------------
     if (fromAuto) {
       // debug aid: continue from a chapter-start autosave a chain run wrote (.build/chainlogs/<path>_<riddle>_chN.auto.json)
@@ -539,12 +547,17 @@ export default async function (page, h) {
       if (n === 8) { await ev(h, 'window.__endCanvasSpy = true; return 1'); lineMark8 = await ev(h, 'return (window.__endLines || []).length'); }
       if (DEATH.has(n)) await ev(h, `window.__chain.death.arm[${n}] = ${JSON.stringify(DEATH.get(n))}; return 1`);
       let r = null;
+      const before = [];
       for (let attempt = 0; ; attempt++) {
+        const notes = [];
+        DN.notes = notes; DN.cut = null;
         try {
-          r = await CH[n].play(hh, { path, riddle, saveLoad: attempt === 0 && (n === 2 || n === 5 || n === 7), notes: [], resume: attempt > 0 });
+          r = await CH[n].play(hh, { path, riddle, saveLoad: attempt === 0 && (n === 2 || n === 5 || n === 7), notes, resume: attempt > 0 });
+          if (before.length) r.notes = [...before, ...(r.notes || [])];
           break;
         } catch (e) {
           if (!(await ev(h, 'return !!window.__deathAbort')) || attempt >= 2) throw e;
+          before.push(...notes.slice(0, DN.cut ?? notes.length).map((x) => (/^(BUG|MISSING)/.test(x) ? x : x + ' (before the death)')));
           // the injected death: the death screen → CONTINUE, then the chapter's test carries on from the save
           const dc = await deathContinue(h, n);
           console.log(`  †  chapter ${n}: ${dc.line}`);

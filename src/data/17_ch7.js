@@ -1842,6 +1842,11 @@
       K.door({ id: 'c7_nurses:corridor', x: NU.W, z: 3.5, rot: 90, w: 1.2, h: 2.2, style: 'fire', to: 'c7_corridor', entry: 'nurses' });
       // the Ward 3 doors: open doorways onto the dark ward, the leaves propped back; walking through = Ward 3
       K.collider(0, -0.75, NU.W, -0.7, { h: 2.5 });
+      // (gap sweep) the dark ward behind the doorways: its floor, walls and ceiling — past the dark panels in the doorways
+      // the high cameras used to look into nothing
+      annex(K, -0.3, -3.0, NU.W + 0.3, -0.7, H, ['n', 'w', 'e'], { mat: { tex: 'plaster', color: '#2e3230' }, floor: { tex: 'lino', color: '#343833' }, ceil: { tex: 'ceiling_tile', color: '#3c3f3a' } });
+      K.box(NU.W / 2, H, -0.39, NU.W + 0.6, 0.06, 0.62, { tex: 'ceiling_tile', color: '#3c3f3a' }, { shadow: false });
+      for (const x of [-0.35, NU.W + 0.35]) K.box(x, 0, -0.39, 0.1, H, 0.62, { tex: 'plaster', color: '#2e3230' }, { shadow: false });
       for (const [x, w] of NU.doors) {
         K.box(x, 0, -1.25, w + 0.2, 2.3, 0.1, { color: '#0d1110', roughness: 1 }, { shadow: false });
         K.exit({ id: 'c7_nurses:ward' + x, box: [x - w / 2 + 0.05, -0.7, x + w / 2 - 0.05, -0.32], to: 'c7_ward3', entry: 'nurses', sound: 'door', blockedMsg: 'Not that way.' });

@@ -490,9 +490,23 @@
         K.prop('streetlight', 61.2, -22, -90, { lit: false, collide: false });
         K.prop('bin', 34.2, -12.2, 90, { variant: 'wheelie', color: '#2c4a2e', collide: false });
         // south of the east arm: the verge shelf runs on to the land's end, then the hill falls away into the fog
-        gnd(70, 6.4, XE, 18, 0.05, VERGE, 2.45);
-        K.plane((10 + XE) / 2, 0.05 - 2.8, 18 + 5.3, XE - 10, 12, VERGE, { rot: [-62, 0, 0] });        // (28° down to the south)
-        if (!RR.east()) K.box(XE + 0.04, -2.4, 12.2, 0.1, 2.45, 11.6, SOIL, { shadow: false });
+        const XS = RR.east() ? 150 : XE;
+        gnd(70, 6.4, XS, 18, 0.05, VERGE, 2.45);
+        K.plane((10 + XS) / 2, 0.05 - 2.8, 18 + 5.3, XS - 10, 12, VERGE, { rot: [-62, 0, 0] });        // (28° down to the south)
+        // after Chapter 6 the road runs on east past the old end (it used to stop at x 97 at an edge): the carriageway
+        // and footpaths, the guardrail, and past the tower's grounds the hill's retaining wall with the grass on top
+        if (RR.east()) {
+          K.box(123.5, -0.3, 0, 53, 0.3, 9, { tex: 'bitumen', color: '#3c3e3c' }, { shadow: false });
+          for (const sz of [-1, 1]) K.box(123.5, -0.3, sz * 5.48, 53, 0.45, 1.96, 'footpath', { shadow: false });
+          for (let x = 99; x < 150; x += 6) K.box(x, 0.004, 0, 3, 0.01, 0.12, { color: '#c8c6bc', roughness: 0.8 }, { shadow: false });
+          for (let x = 98; x < 149; x += 6) K.prop('guardrail', x + 3, 6.6, 0, { len: 6, collide: false });
+          K.box(125, -0.2, -fp - 0.1, 50, 2.8, 0.25, { tex: 'concrete', color: '#7e7d76' }, { shadow: false });
+          K.box(XE + 0.12, -0.2, -fp - 4.3, 0.25, 2.8, 8.2, { tex: 'concrete', color: '#7e7d76' }, { shadow: false });
+          K.box(125, 2.3, -fp - 4.3, 50, 0.3, 8.2, { tex: 'grass', color: '#4e5647' }, { shadow: false });
+          K.prop('gum_tree', 112, -fp - 3.4, 40, { y: 2.6, scale: 0.9, collide: false });
+          K.prop('streetlight', 110, fp - 0.3, 180, { lit: false, collide: false });
+        }
+        if (!RR.east()) K.box(XS + 0.04, -2.4, 12.2, 0.1, 2.45, 11.6, SOIL, { shadow: false });
         // the west arm: a scrub lot behind the north fence, the verge and the fall south of the guardrail
         gnd(-39, -40, -14.3, -6.3, 0.03, SOIL);
         K.box(-39.05, -6, -23.15, 0.1, 6.03, 33.7, SOIL, { shadow: false });
@@ -2005,6 +2019,17 @@
       K.wall(-3.2, 0.02, 0, 0.02, 2.9, { tex: 'plaster', color: '#a9a69c' }, {});
       K.wall(0, D - 0.02, -3.2, D - 0.02, 2.9, { tex: 'plaster', color: '#a9a69c' }, {});
       K.collider(-3.3, 0, -0.02, D, { h: 3 });
+      // (gap sweep) the dark floor round the room for the cameras outside its cut-away north and south walls: floor,
+      // ceiling and walls — past the room's corners and under its edges they used to look into nothing
+      { const EF = { tex: 'carpet', color: '#3e4448' }, EC = { tex: 'ceiling_tile', color: '#4e514c' }, EW = { tex: 'plaster', color: '#3b403d' };
+        for (const [x0, z0, x1, z1] of [[-3.4, D, W + 1.8, D + 4.4], [-3.4, -4.4, W + 1.8, 0], [W, 0, W + 1.8, D]]) {
+          K.box((x0 + x1) / 2, -0.03, (z0 + z1) / 2, x1 - x0, 0.025, z1 - z0, EF, { shadow: false });
+          K.box((x0 + x1) / 2, H + 0.01, (z0 + z1) / 2, x1 - x0, 0.05, z1 - z0, EC, { shadow: false });
+        }
+        K.box(-3.45, 0, D / 2, 0.1, H + 0.06, D + 8.8, EW, { shadow: false });
+        K.box(W + 1.85, 0, D / 2, 0.1, H + 0.06, D + 8.8, EW, { shadow: false });
+        for (const z of [-4.45, D + 4.45]) K.box(W / 2 - 0.8, 0, z, W + 5.3, H + 0.06, 0.1, EW, { shadow: false });
+        K.prop('filing_cabinet', W + 1.4, D + 3.6, -90, {}); K.prop('filing_cabinet', -2.9, -3.8, 90, {}); }
       K.prop('fluoro_tube', -1.5, PR.door, 0, { h: 2.87, variant: 'troffer', bank: 1, name: 'c5pr:out' });
       K.prop('couch', -2.7, 1.2, 90, { variant: 'vinyl', color: '#2e4a4a', len: 1.8 });
       K.fogOnly(() => K.prop('plant_pot', -2.8, 0.55, 0, { variant: 'palm' }));
@@ -2624,6 +2649,9 @@
       }
       K.box(20, AT.roof, 15, 14.4, 0.06, 14.4, { color: '#0d1414', roughness: 0.1, metalness: 0.3 }, { world: 'fog', shadow: false, collide: false });
       for (let i = 0; i <= 4; i++) K.box(V[0] + i * 3.5, AT.roof - 0.2, 15, 0.12, 0.2, 14.4, { tex: 'metal', color: '#5a605e' }, { world: 'fog', collide: false });
+      // (gap sweep) the roof's upstand round the void, down to the dark floors behind Level 4's balustrade: from the stair
+      // the camera looked up through the gap between them into nothing
+      for (const [cx, cz, sx, sz] of [[20, V[1] - 1.9, 14.8, 4.2], [20, V[3] + 1.9, 14.8, 4.2], [V[0] - 1.9, 15, 4.2, 18.6], [V[2] + 1.9, 15, 4.2, 18.6]]) K.box(cx, AT.L4 + 3.0, cz, sx, AT.roof + 0.06 - AT.L4 - 3.0, sz, { color: '#0b0e0e', roughness: 1 }, { world: 'fog', shadow: false, collide: false });
       // Level 4's lit office strips (Fog) / a few red emergency lights (Outage), seen from below
       K.fogOnly(() => { for (const [x, z, r] of [[20, V[1] - 1.2, 0], [20, V[3] + 1.2, 0], [V[0] - 1.2, 15, 90], [V[2] + 1.2, 15, 90]]) K.box(x, AT.L4 + 2.85, z, r ? 0.3 : 10, 0.03, r ? 10 : 0.3, { color: '#e8f2ee', emissive: '#e8f2ee', emissiveIntensity: 1.2 }, { collide: false, shadow: false }); });
       // pendant lights hung from the roof on long cables (Fog); in the Outage a few red emergency fills and the cold

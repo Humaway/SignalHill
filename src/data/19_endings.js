@@ -1133,6 +1133,15 @@
       K.box(RD.door[0], 0.9, 6.4, 5, 0.05, 0.06, { tex: 'metal', color: '#c9cfcc' });
       K.box(RD.door[0], H - 0.02, 5.5, 5, 0.02, 1.9, { tex: 'ceiling_tile', color: '#f4f4f0' }, { shadow: false });
       K.light('fluoro', RD.door[0], H - 0.03, 5.5, { len: 1.2, intensity: 5, distance: 6, real: false });
+      // (gap sweep) the ward round the room for the door camera outside the cut-away wall: floor, ceiling and walls —
+      // past the room's corners and over its ceiling it used to look into the sky
+      { const CF = { tex: 'lino_hospital', color: '#b9bdb2' }, CC = { tex: 'ceiling_tile', color: '#f0f0ea' };
+        K.box(3.2, -0.03, 7.1, 8.4, 0.025, 5.0, CF, { shadow: false });
+        for (const [x0, x1] of [[-1, -0.16], [W + 0.16, W + 1]]) { K.box((x0 + x1) / 2, -0.03, 1.8, x1 - x0, 0.025, 5.6, CF, { shadow: false }); K.box((x0 + x1) / 2, H + 0.01, 1.8, x1 - x0, 0.05, 5.6, CC, { shadow: false }); }
+        K.box(3.2, H + 0.01, 7.1, 8.4, 0.05, 5.0, CC, { shadow: false });
+        for (const x of [-1.05, W + 1.05]) K.box(x, 0, 4.3, 0.1, H + 0.06, 10.6, wm, { shadow: false });
+        for (const [x0, x1] of [[-1.1, -0.1], [W + 0.1, W + 1.1]]) K.box((x0 + x1) / 2, 0, -1.05, x1 - x0, H + 0.06, 0.1, wm, { shadow: false });   // (not across the window's view)
+        for (const x of [-1.0, W + 1.0]) K.box(x, 0.9, 5.5, 0.04, 0.05, 6, { tex: 'metal', color: '#c9cfcc' }, { shadow: false }); }
       // (the door stands open, folded back flat against the corridor wall; just the frame here)
       for (const sx of [-1, 1]) K.box(RD.door[0] + sx * 0.6, 0, D + 0.075, 0.1, 2.2, 0.2, { color: '#8a6a4a', roughness: 0.6 });
       K.box(RD.door[0], 2.15, D + 0.075, 1.3, 0.1, 0.2, { color: '#8a6a4a', roughness: 0.6 });

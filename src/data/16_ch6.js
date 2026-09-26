@@ -595,6 +595,14 @@
       for (const x of [0.6, 1.95, 3.1, 4.25, 5.6]) K.box(x, 0.8, -0.02, 0.06, 1.75, 0.1, { tex: 'metal', color: '#6c7372', metalness: 0.5 });
       K.plane(3.1, 1.68, -0.03, 5.4, 1.75, { color: '#9fb2ae', roughness: 0.08, metalness: 0.3, transparent: true, opacity: 0.14 }, { double: true });
       K.plane(3.1, 1.6, -4.4, 12, 5, fogTex(), { emissive: 0.5 });
+      // (gap sweep) the tower's curtain wall round the window, seen by the camera outside it: the wall itself is one-sided,
+      // so from out there the room showed through above and below the glass and nothing round it
+      { const CW = { color: '#262d2f', roughness: 0.35, metalness: 0.25 }, SP = { tex: 'concrete', color: '#4c5553' };
+        K.box(3.1, -1.5, -0.14, 14, 2.3, 0.1, CW, { shadow: false });
+        K.box(3.1, 2.55, -0.14, 14, 2.0, 0.1, CW, { shadow: false });
+        for (const cx of [-1.75, 7.95]) K.box(cx, 0.8, -0.14, 4.3, 1.75, 0.1, CW, { shadow: false });
+        for (const y of [-0.45, 2.85]) K.box(3.1, y, -0.2, 14, 0.45, 0.04, SP, { shadow: false });
+        for (const x of [-3.1, -0.4, 6.6, 9.3]) K.box(x, -1.5, -0.2, 0.08, 6, 0.06, { tex: 'metal', color: '#7d8683' }, { shadow: false }); }
       // the blinds: half down, one slat bent, the cord hanging
       for (let i = 0; i < 13; i++) { const y = 2.5 - i * 0.07; const bent = i === 9; K.box(3.1, y, 0.06, 5.35, 0.008, 0.045, { color: '#d9d6cb', roughness: 0.5 }, { rot: bent ? 2 : 0 }); }
       K.box(3.1, 2.53, 0.06, 5.45, 0.04, 0.07, { color: '#cfcbbd' });
@@ -1362,6 +1370,15 @@
       K.wall(LO.W, -0.1, LO.W, LO.D + 0.1, H, 'plaster_stained', { skirting: true });
       K.wall(LO.W + 0.1, LO.D, -0.1, LO.D, H, 'plaster', { skirting: true });
       K.wall(0, LO.D + 0.1, 0, -0.1, H, 'plaster', { both: false, skirting: true });
+      // (gap sweep) the dark stock bay outside the cut-away west wall where the desk and CCTV cameras stand: its floor,
+      // ceiling and walls — over the ceiling's edge and past the north wall's end they used to look into nothing
+      { const DK = { tex: 'plaster', color: '#3c403d' };
+        K.box(-1.9, -0.03, LO.D / 2, 3.8, 0.03, LO.D + 0.2, { tex: 'lino', color: '#4a4a42' }, { shadow: false });
+        K.box(-1.9, H, LO.D / 2, 3.8, 0.08, LO.D + 0.2, { tex: 'ceiling_tile', color: '#5a5c56' }, { shadow: false });
+        K.box(-1.9, 0, -0.15, 3.8, H, 0.1, DK, { shadow: false });
+        K.box(-1.9, 0, LO.D + 0.15, 3.8, H, 0.1, DK, { shadow: false });
+        K.box(-3.85, 0, LO.D / 2, 0.1, H, LO.D + 0.4, DK, { shadow: false });
+        K.prop('shelf', -3.5, 3.2, 90, { len: 1.8, h: 2.0 }); }
       K.door({ id: 'c6_lukaoffice:door', x: LO.door, z: 0, rot: 0, w: 0.95, style: 'metal', color: '#6a7472', to: 'c6_level6', entry: 'office', signBack: 'STORE' });
       K.box(LO.door, 2.2, 0.07, 0.14, 0.06, 0.08, { color: '#e8e6de', roughness: 0.5 });
       K.light('led', LO.door + 0.05, 2.23, 0.12, { color: '#ff2a1c', blink: 2 });
@@ -1595,6 +1612,15 @@
       for (let x = 12.06; x < 13.2; x += 0.085) K.box(x, -0.03, 0, 0.018, 0.03, 2.4, { tex: 'metal', color: '#7a807d', metalness: 0.5 });
       for (let z = -1.15; z < 1.2; z += 0.3) K.box(12.61, -0.035, z, 1.18, 0.025, 0.02, { tex: 'metal', color: '#7a807d', metalness: 0.5 });
       K.box(12.61, -1.6, 0, 1.18, 1.55, 2.4, { color: '#040606', roughness: 1 });
+      // (gap sweep) the shaft round the car for the low camera outside its back wall: side walls, the landing wall past
+      // the doors, the pit, the car's roof and underside — beside the car it used to look into nothing
+      { const SC = { tex: 'concrete', color: '#3e4341' }, SM = { tex: 'metal', color: '#3a3e3c' };
+        for (const x of [10.15, 13.85]) K.box(x, -2.5, -1.8, 0.2, 9, 7.6, SC, { shadow: false });
+        K.box(12, -2.5, 2.0, 3.9, 9, 0.2, SC, { shadow: false });
+        K.box(12, -2.6, -1.8, 3.5, 0.1, 7.6, { color: '#0b0d0d', roughness: 1 }, { shadow: false });
+        K.box(12, 2.46, 0, 2.5, 0.35, 2.5, SM, { shadow: false });
+        K.box(11.41, -0.55, 0, 1.2, 0.5, 2.5, SM, { shadow: false });
+        for (const x of [10.35, 13.65]) K.box(x, -2.5, -1.8, 0.06, 9, 0.12, { tex: 'metal', color: '#5d6462' }, { shadow: false }); }
       K.light('point', 12.55, -0.5, -0.3, { color: '#2fb3aa', intensity: 2.6, distance: 3.2 });
       K.light('point', lxx - 0.55, 0.45, lzz - 0.6, { color: '#cfe3de', intensity: 2.0, distance: 1.9 });                 // low fill on his ankles
       const [lx, lz] = SHF.luka;

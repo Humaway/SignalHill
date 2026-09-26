@@ -997,10 +997,10 @@
     // what stands in the side yards (it shows over the building-line fences, between the houses)
     shed(25.3, -9.0, 0); tank(20.1, -7.2);                                     // between 9 and 8
     tank(42.2, -7.4, '#7e8a84'); shed(37.8, -10.2, 90, '#6f786f');              // between 8 and 7
-    shed(69.5, 13.25 + 1.1, 90, '#7a7f76'); tank(68.8, 25.6);                   // east gaps
+    shed(69.5, 14.4, 0, '#7a7f76'); tank(68.8, 25.6);                   // east gaps
     tank(24.6, 48.0); shed(28.6, 49.5, 180, '#737a72');                          // south gaps
     shed(44.5, 50.0, 180); tank(57.5, 48.6, '#7e8a84'); shed(62.6, 50.8, 180, '#6f786f');
-    tank(-8.2, 17.4); shed(-9.5, 29.75 - 1.0, -90, '#737a72');                  // west gaps
+    tank(-8.2, 17.4); shed(-9.5, 28.75, 0, '#737a72');                  // west gaps
     shed(-9.5, 0.2, -90); tank(-3.2, -9.0); tank(69.0, -8.8, '#7e8a84'); shed(71.6, 41.2, -90);   // the corner lots
     // gum trees in the back yards and past the back fences: the skyline between the roofs
     for (const [x, z, k] of [[22.2, -13.4, 0], [41.0, -14.2, 1], [-11.5, -11.5, 0], [70.5, -12.5, 1], [72.5, 12.0, 0], [73.5, 28.5, 1], [79.5, 20, 0],
@@ -1026,7 +1026,7 @@
     // ---- out past the gate: the drive on down toward Hilltop Road, verges either side ----------------------------------
     K.fogOnly(() => K.box(4, -0.05, 63.15, 8, 0.05, 17.7, 'bitumen', { shadow: false }));
     K.outageOnly(() => { K.box(4, -0.6, 63.1, 8, 0.62, 17.8, { color: '#0c0f0f', roughness: 1 }, { shadow: false }); K.dress('cables', [0.2, 54.4, 7.8, 62], 18, { seed: 212 }); });
-    ground(WB, 52.1, 0, 72, VERGE, 0.1); ground(8.0, SB, 30, 72, VERGE, 0.1);
+    ground(WB, 52.1, 0, 72, VERGE, 0.1); ground(8.0, SB, 42, 72, VERGE, 0.1);
   }
 
   defineRoom({
@@ -1473,8 +1473,8 @@
         K.box(-4.5, 0, 12.0, 5, 0.15, 12, { tex: 'grass', color: '#6f7a62' }, { shadow: false });
         K.prop('bench', 4.6, 6.75, 0, { len: 1.3, collide: false });
         K.prop('bin', 7.8, 6.6, 0, { variant: 'street', collide: false });
-        K.light('point', 2.6, 3.6, 9.6, { color: '#9aa8a6', intensity: 1.6, distance: 7.5, world: 'fog' });
-        K.light('point', 2.6, 3.6, 9.6, { color: '#1f6f6a', intensity: 1.0, distance: 7, world: 'outage' }); }
+        K.light('point', 3.2, 3.4, 9.6, { color: '#a4b0ae', intensity: 16, distance: 7.5, world: 'fog', prio: 4 });
+        K.light('point', 2.6, 4.2, 10.8, { color: '#2a7f78', intensity: 4, distance: 9, world: 'outage', prio: 4 }); }
       // the counter (staff behind to the west), the visitor book with its pen on a chain, the bell
       K.prop('counter', 4.6, 2.55, 90, { len: 4.0, variant: 'reception', clutter: false });
       // (on the raised visitors' ledge: top at 1.14 m, x 4.68…4.94)

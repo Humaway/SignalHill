@@ -298,6 +298,31 @@
       const fall = (z) => Math.max(0, z - 12) * 0.5;
       strips(-40, 150, -46, 0.24, (x) => gY(x) + 0.144, 'grass');
       for (const [x0, x1] of [[-40, ER.br[0] - 0.05], [ER.br[1] + 0.05, 150]]) for (const [z0, z1] of [[7.76, 12], [12, 30], [30, 64]]) strips(x0, x1, z0, z1, (x, z) => gY(x) + 0.144 - fall(z), 'grass');
+      // the branch's mouth: a concrete lip under the edge where it leaves the footpath (the footpath falls with the street,
+      // the branch starts level: under its east half the white showed through)
+      K.box(77, erF(ER.br[1]) - 0.4, 8.0, ER.br[1] - ER.br[0], erF(77) - 0.01 - (erF(ER.br[1]) - 0.4), 0.8, { tex: 'concrete', color: '#8a867c' }, { shadow: false });
+      // the branch road's sides down to that ground (the crack between them showed the white under the paling fences)
+      {
+        const pos = [], idx = [], rY = (z) => erF(77) - (z - 7.76) / (ER.brEnd - 7.76) * 1.45;
+        for (const x of [ER.br[0] - 0.03, ER.br[1] + 0.03]) {
+          const N = 10;
+          for (let i = 0; i < N; i++) {
+            const za = lerp(7.76, ER.brEnd, i / N), zb = lerp(7.76, ER.brEnd, (i + 1) / N);
+            const ga = gY(x) + 0.144 - fall(za), gb = gY(x) + 0.144 - fall(zb), ra = rY(za), rb = rY(zb);
+            for (const back of [0, 1]) {                            // both faces (separate vertices: their own normals)
+              const b = pos.length / 3;
+              pos.push(x, Math.min(ga, ra) - 0.3, za, x, Math.min(gb, rb) - 0.3, zb, x, Math.max(gb, rb) + 0.02, zb, x, Math.max(ga, ra) + 0.02, za);
+              if (back) idx.push(b, b + 2, b + 1, b, b + 3, b + 2); else idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+            }
+          }
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        g.setAttribute('uv', new THREE.Float32BufferAttribute(pos.flatMap((v, i) => (i % 3 === 0 ? [] : i % 3 === 1 ? [pos[i + 1] * 0.5, v * 0.5] : [])), 2));
+        g.setIndex(idx); g.computeVertexNormals();
+        const m = new THREE.Mesh(g, K.mat({ tex: 'dirt', color: '#5a5448' })); m.castShadow = false; m.receiveShadow = true; m.userData.ownedGeo = true;
+        K.mesh(m, { static: true });
+      }
       // ---- fences (the street's edges): north picket (gates at each cottage), south picket with the branch gap -------
       const gateGaps = (xs) => xs.map((x) => [x - 0.55, x + 0.55]);
       const run = (x0, x1, z, side, gaps, o) => {

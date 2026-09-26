@@ -66,7 +66,7 @@
     let t = TEXC.get(key);
     if (t) return t;
     const c = document.createElement('canvas'); c.width = w; c.height = h;
-    const ctx = c.getContext('2d');
+    const ctx = c.getContext('2d', { willReadFrequently: true });
     draw(ctx, w, h, U.rng(U.hash('c7:' + key)));
     t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
@@ -151,14 +151,15 @@
     c.fillStyle = '#0c1012'; c.fillRect(0, 0, w, h);
     c.fillStyle = '#1b2327'; c.fillRect(0, 0, w, h * 0.12);
     tx(c, 'Recents', w * 0.08, h * 0.085, h * 0.05, '#e8eef0', { weight: 'bold' });
-    tx(c, 'THIS WEEK', w * 0.08, h * 0.25, h * 0.032, '#6f7c80', { weight: 'bold', spacing: 2 });
-    const rows = [['Store', 'Outgoing', '(3)', true], ['Nan', 'Missed', '(2)', false], ['Work — Dave', 'Incoming', '', false], ['Nan', 'Outgoing', '', false]];
-    rows.forEach(([n, k, cnt, hi], i) => {
-      const y = h * (0.36 + i * 0.12);
-      if (hi) { c.fillStyle = 'rgba(56,210,198,0.16)'; c.fillRect(0, y - h * 0.065, w, h * 0.11); }
-      tx(c, n + (cnt ? '  ' + cnt : ''), w * 0.08, y, h * 0.052, hi ? '#ffffff' : '#c8d0d4', { weight: hi ? 'bold' : '' });
-      tx(c, k, w * 0.08, y + h * 0.04, h * 0.035, k === 'Missed' ? '#e05a4a' : '#8a979c', {});
-      tx(c, ['Tue', 'Mon', 'Mon', 'Sun'][i], w * 0.92, y, h * 0.035, '#8a979c', { align: 'right' });
+    tx(c, 'THIS WEEK', w * 0.08, h * 0.4, h * 0.032, '#6f7c80', { weight: 'bold', spacing: 2 });
+    // (spec 7-2 shot 4, the insert: "Outgoing — Store (3)". The rows sit in the lower part of the screen: his fingers
+    // wrap its top edge in the insert shot)
+    const rows = [['Outgoing — Store (3)', 'Mon · Tue · Wed', true], ['Incoming — District Hospital', 'Sun', false]];
+    rows.forEach(([t, when, hi], i) => {
+      const y = h * (0.52 + i * 0.15);
+      if (hi) { c.fillStyle = 'rgba(56,210,198,0.18)'; c.fillRect(0, y - h * 0.07, w, h * 0.125); }
+      tx(c, t, w * 0.06, y, h * (hi ? 0.058 : 0.042), hi ? '#ffffff' : '#c8d0d4', { weight: hi ? 'bold' : '' });
+      tx(c, when, w * 0.06, y + h * 0.045, h * 0.034, '#8a979c', {});
     });
     if (playing) {
       c.fillStyle = '#1b2327'; c.fillRect(0, h * 0.84, w, h * 0.16);
@@ -638,7 +639,7 @@
   const rrY = (x) => lerp(0, RR7.climb, clamp(x / RR7.L));
   defineRoom({
     id: 'c7_ringroad', name: 'RING ROAD EAST', area: 'RING ROAD', chapter: 7, outdoor: true, surface: 'bitumen', ambient: 'wind',
-    fog: { density: 0.05 },
+    fog: { density: 0.04 },                                   // (the same street as c5_ringroad, the same fog)
     surfaces: [{ box: [0, -6.6, 96, -4.5], s: 'concrete' }, { box: [0, 4.5, 96, 6.6], s: 'concrete' }],
     bounds: [-2, -8, 98, 8],
     entries: { office: [2.4, 1.2, 90], hospital: [93.0, -1.4, -90], start: [2.4, 1.2, 90] },
@@ -646,15 +647,15 @@
       // the old road end: low, behind the pushed-aside barrier — the road simply goes on into the fog
       { id: 'c7_ringroad:before', vol: [0, -6.6, 15, 6.6], type: 'pan', pos: [-4.2, 1.9, -3.4], target: [9, 0.9, 1.2], fov: 50, pan: { lag: 0.3, yaw: 55, pitch: 30 } },
       // the bus stop from out over the guardrail, looking back west
-      { id: 'c7_ringroad:stop', vol: [15, -6.6, 31, 6.6], type: 'pan', pos: [35.5, 4.4, 9.0], target: [22, 0.8, -1], fov: 48, pan: { lag: 0.3, yaw: 66, pitch: 34 } },
+      { id: 'c7_ringroad:stop', vol: [15, -6.6, 31, 6.6], type: 'pan', pos: [27.5, 4.6, 9.8], target: [20, 0.8, -1.5], fov: 48, pan: { lag: 0.3, yaw: 66, pitch: 42 } },
       // along the north footpath, eye level: the blue H sign ahead
-      { id: 'c7_ringroad:sign', vol: [31, -6.6, 47, 6.6], type: 'pan', pos: [27.2, 2.3, -5.6], target: [42, 1.0, 1.6], fov: 50, pan: { lag: 0.3, yaw: 58, pitch: 30 } },
+      { id: 'c7_ringroad:sign', vol: [31, -6.6, 47, 6.6], type: 'pan', pos: [29.0, 2.3, -5.6], target: [42, 1.0, 1.6], fov: 50, pan: { lag: 0.3, yaw: 62, pitch: 32 } },
       // high over the guardrail: the balloon, the fog below the road
-      { id: 'c7_ringroad:rail', vol: [47, -6.6, 63, 6.6], type: 'pan', pos: [67.5, 5.6, 10.2], target: [55, 1.0, 0], fov: 50, pan: { lag: 0.3, yaw: 66, pitch: 38 } },
+      { id: 'c7_ringroad:rail', vol: [47, -6.6, 63, 6.6], type: 'pan', pos: [61.0, 5.2, 10.0], target: [53, 1.0, -0.5], fov: 50, pan: { lag: 0.3, yaw: 66, pitch: 42 } },
       // low from the wall's foot, the writing on it
-      { id: 'c7_ringroad:wall', vol: [63, -6.6, 79, 6.6], type: 'pan', pos: [59.2, 1.6, -5.9], target: [72, 1.3, 0.6], fov: 50, pan: { lag: 0.3, yaw: 58, pitch: 30 } },
+      { id: 'c7_ringroad:wall', vol: [63, -6.6, 79, 6.6], type: 'pan', pos: [60.0, 1.7, -5.9], target: [72, 1.3, 0.6], fov: 50, pan: { lag: 0.3, yaw: 62, pitch: 40 } },
       // the hospital's sign and the car park entrance ahead, the building a darker shape in the fog
-      { id: 'c7_ringroad:gate', vol: [79, -6.6, 96, 6.6], type: 'pan', pos: [74.5, 4.2, 7.6], target: [89, 1.6, -1.5], fov: 50, pan: { lag: 0.3, yaw: 62, pitch: 32 } },
+      { id: 'c7_ringroad:gate', vol: [79, -6.6, 96, 6.6], type: 'pan', pos: [81.5, 4.6, 9.2], target: [90, 1.6, -1.5], fov: 50, pan: { lag: 0.3, yaw: 66, pitch: 42 } },
     ],
     build(K) {
       const fp = RR7.fp;
@@ -674,6 +675,9 @@
       K.collider(0, fp + 0.05, RR7.L, fp + 0.3, { h: 2.2 });
       for (let x = 0; x < RR7.L - 0.5; x += 6) K.prop('guardrail', x + 3, fp + 0.12, 0, { len: 6, y: rrY(x + 3) + 0.15, collide: false });
       K.plane((RR7.L - 16) / 2, -2.3, fp + 5.2, RR7.L + 22, 10.5, { tex: 'grass', color: '#2f352c', roughness: 1 }, { rot: [-62, 0, 0] });
+      // (the verge from the footpath's edge down to the bank's top edge: without it the sky showed through a gap there)
+      slab(K, -16, fp - 0.05, 0, fp + 1.1, [0.13, 0.13, 0.02, 0.02], { tex: 'grass', color: '#353b31' });
+      slab(K, 0, fp - 0.05, RR7.L + 6, fp + 1.1, [0.13, rrY(RR7.L) + 0.13, 0.02, 0.02], { tex: 'grass', color: '#353b31' });
       for (const [x, s] of [[18, 0.8], [52, 0.7], [77, 0.9]]) K.prop('gum_tree', x, fp + 6.5, x * 7, { y: -2.4, scale: s });
       K.collider(-16.5, -fp - 0.2, 0, fp + 0.3, { h: 3 });
       K.collider(RR7.L, -fp - 0.2, RR7.L + 0.3, fp + 0.3, { h: 3 });
@@ -796,27 +800,26 @@
 
   defineRoom({
     id: 'c7_carpark', name: 'HOSPITAL CAR PARK', area: 'DISTRICT HOSPITAL', chapter: 7, outdoor: true, surface: 'bitumen', ambient: 'wind',
-    fog: { density: 0.06 },
+    fog: { density: 0.042 },
     surfaces: [{ box: [13.5, 0, 24.5, 6.4], s: 'concrete' }, { box: [26, 7, 33, 11.5], s: 'grass' }],
     bounds: [-18, -3, 56, 32],
     entries: { road: [8, 27.6, 180], entrance: [19, 1.7, 0], summit: [38.3, 4.5, -90], start: [8, 27.6, 180] },
     cameras: [
+      // high from the multi-storey: a CCTV bracket on its north-east corner, down over the cars nosed up to the hospital
+      { id: 'c7_carpark:high', vol: [0, 0, 13.6, 12], type: 'pan', pos: [0.4, 8.0, 0.9], target: [6.2, 0.3, 7.0], fov: 50, pan: { lag: 0.3, yaw: 55, pitch: 50 } },
       // the multi-storey's face: the decks, FULL, the road in from the south-west
-      { id: 'c7_carpark:ms', vol: [0, 12, 10.9, 30], type: 'static', pos: [19.5, 3.0, 22.5], target: [3.0, 1.4, 21.0], fov: 'fit' },
-      // the north-west corner: the cars nosed up to the building, the facade and the decks meeting
-      { id: 'c7_carpark:deck', vol: [0, 0, 13.5, 12], type: 'static', pos: [16.2, 3.4, 17.6], target: [5.5, 0.6, 5.0], fov: 'fit' },
-      // high from the multi-storey's corner (a CCTV mount): the middle of the car park
-      { id: 'c7_carpark:high', vol: [11, 11, 26, 30], type: 'static', pos: [0.5, 8.6, 30.5], target: [18.5, 0.2, 19.5], fov: 'fit' },
-      // the main entrance, square on: the canopy, the dark glass doors, MAIN ENTRANCE
-      { id: 'c7_carpark:entrance', vol: [13.5, 0, 26, 11], type: 'static', pos: [19.4, 2.3, 17.8], target: [19.2, 1.35, 2.2], fov: 'fit' },
-      // low at the bench: the one sodium light, the fog behind it
-      { id: 'c7_carpark:bench', vol: [26, 7, 40, 18], type: 'static', pos: [21.8, 0.75, 22.2], target: [31, 1.5, 10.5], fov: 'fit' },
-      // the chained gate at the north-east corner
-      { id: 'c7_carpark:gate', vol: [26.2, 0, 40, 6.9], type: 'static', pos: [34.5, 3.6, 17.8], target: [36.5, 1.0, 3.8], fov: 'fit' },
-      // the south rows, from out past the wall
-      { id: 'c7_carpark:south', vol: [16, 18, 40, 30], type: 'pan', pos: [27.5, 5.0, 35.0], target: [27, 0.6, 23], fov: 52, pan: { lag: 0.3, yaw: 62, pitch: 36 } },
-      // Summit Road, climbing away from the gate into the fog
-      { id: 'c7_carpark:summit', vol: [40, 0, 56, 9], type: 'pan', pos: [36.2, 3.6, 12.6], target: [48, 1.8, 4.2], fov: 50, pan: { lag: 0.3, yaw: 55, pitch: 32 } },
+      { id: 'c7_carpark:ms', vol: [0, 12, 11.5, 30], type: 'pan', pos: [16.5, 3.4, 21.0], target: [4.0, 1.3, 21.0], fov: 50, pan: { lag: 0.3, yaw: 66, pitch: 34 } },
+      // from the canopy's edge, out over the middle rows to the fog they came out of
+      { id: 'c7_carpark:mid', vol: [11.5, 11, 26, 20.8], type: 'pan', pos: [19.2, 4.8, 5.8], target: [18.8, 0.3, 16.5], fov: 50, pan: { lag: 0.3, yaw: 62, pitch: 36 } },
+      // the main entrance: the canopy, the dark glass doors, MAIN ENTRANCE
+      { id: 'c7_carpark:entrance', vol: [13.6, 0, 26, 11], type: 'pan', pos: [19.4, 2.8, 15.8], target: [19.2, 1.3, 2.2], fov: 50, pan: { lag: 0.3, yaw: 62, pitch: 36 } },
+      // low at the bench, from the south-east corner by the fence: the one sodium light, the hospital in the fog behind it
+      { id: 'c7_carpark:bench', vol: [26, 7, 40, 19.4], type: 'pan', pos: [39.65, 1.35, 21.35], target: [30, 1.2, 10.5], fov: 50, pan: { lag: 0.3, yaw: 62, pitch: 46 } },
+      // high at the north-east corner: the chained gate, and Summit Road climbing away from it into the fog
+      { id: 'c7_carpark:gate', vol: [26.2, 0, 56, 9], type: 'pan', pos: [40.5, 5.0, 11.5], target: [41, 0.8, 2.0], fov: 52, pan: { lag: 0.3, yaw: 60, pitch: 40 } },
+      // the south rows, from out past the wall (west half, east half)
+      { id: 'c7_carpark:south', vol: [11.5, 20.8, 26, 30], type: 'pan', pos: [18.5, 5.0, 34.2], target: [18.8, 0.6, 24], fov: 50, pan: { lag: 0.3, yaw: 60, pitch: 38 } },
+      { id: 'c7_carpark:southE', vol: [26, 19.4, 40, 30], type: 'pan', pos: [33.0, 5.0, 34.2], target: [33, 0.6, 24], fov: 50, pan: { lag: 0.3, yaw: 60, pitch: 38 } },
     ],
     build(K) {
       const open = flag('c7_room12');
@@ -847,7 +850,9 @@
       K.box(19.4, 3.45, 3.2, 11.2, 0.35, 6.7, { tex: 'concrete', color: '#b8b6ac' });
       for (const x of [14.2, 24.6]) for (const z of [6.1]) K.box(x, 0, z, 0.36, 3.45, 0.36, { tex: 'concrete', color: '#a8a69c' }, { collide: true });
       K.plane(19.4, 3.62, 6.56, 3.6, 0.3, plate('mainent', 'MAIN ENTRANCE', { bg: '#1d5d78', w: 512, h: 64, size: 40, age: 0.3 }), {});
-      for (const x of [16.2, 19.4, 22.6]) K.cyl(x, 3.38, 3.2, 0.18, 0.07, { color: '#d8d8d0', roughness: 0.4 });
+      for (const x of [16.2, 19.4, 22.6]) K.cyl(x, 3.38, 3.2, 0.18, 0.07, x === 19.4 ? { color: '#e8eee8', emissive: '#e8eee8', emissiveIntensity: 1.4 } : { color: '#d8d8d0', roughness: 0.4 });
+      // (the one canopy downlight still on, cold and weak: the drop-off reads, and so does anyone standing under it)
+      K.light('point', 19.4, 3.25, 3.2, { color: '#d6e2dc', intensity: 1.3, distance: 8.5, halo: false });
       // the drop-off lane: zebra stripes and DROP OFF painted on the bitumen
       for (let i = 0; i < 6; i++) K.box(17.4 + i * 0.8, 0.005, 7.9, 0.45, 0.012, 2.4, { color: '#c9c6ba', roughness: 0.8 }, { shadow: false });
       K.plane(27.0, 0.012, 8.4, 3.4, 0.85, dropTex(), { rot: [-90, 0, 0], transparent: true });
@@ -855,8 +860,11 @@
       K.cyl(12.6, 0, 1.0, 0.24, 0.8, { tex: 'metal', color: '#6a6e6c' }, { collide: true });
       K.cyl(12.6, 0.8, 1.0, 0.22, 0.02, { tex: 'dirt', color: '#b8a888' });
       K.sign('NO SMOKING\nWITHIN 4 METRES\nOF ENTRANCE', 11.3, 1.7, 0.2, 0.8, 0.6, { style: 'council', bg: '#ffffff', fg: '#b3261e' });
+      // a caged bulkhead over the smokers' corner, on a dying tube
+      K.box(12.6, 2.75, 0.06, 0.34, 0.16, 0.1, { color: '#3a3e3a', roughness: 0.7 }, { shadow: false });
+      K.light('point', 12.6, 2.7, 0.35, { color: '#e8e2c8', intensity: 0.9, distance: 6.5, flicker: 0.25, halo: false });
       K.examine(12.6, 0.9, 1.0, ['A sand bin full of butts. The nurses come out here.', 'Came.'], { id: 'c7cp:butts', r: 1.2 });
-      K.examine(19.4, 1.6, 0.8, ['"District Hospital." [beat] She\'s in there.', 'Somewhere in there.'], { id: 'c7cp:doors', r: 1.4, when: () => !flag('c7_arrived') });
+      K.examine(22.2, 1.5, 0.45, ['"District Hospital." [beat] She\'s in there.', 'Somewhere in there.'], { id: 'c7cp:doors', r: 1.2, when: () => !flag('c7_arrived') });   // (the dark glass beside the doors — never in front of them: it would take their E)
       K.examine(36.2, 2.6, 0.6, ['Emergency\'s round the side.', 'The side is just fog.'], { id: 'c7cp:emerg', r: 1.6 });
 
       // ---- the multi-storey on the west: three decks, parapets, a ramp, FULL ------------------------------------------
@@ -915,7 +923,7 @@
         const ch = chainAlong([[40.05, 1.1, 4.3], [40.25, 1.18, 4.42], [40.28, 1.05, 4.62], [40.05, 0.98, 4.66], [40.02, 1.12, 4.4], [40.2, 0.9, 4.5], [40.24, 0.62, 4.52]], { name: 'c7cp:chain' });
         K.mesh(ch, { static: true });
         K.mesh(padlock(40.25, 0.56, 4.52, 90), { static: true });
-        K.blocker(39.8, 1.5, 40.5, 7.5, 'Chained.');
+        K.blocker(39.8, 1.5, 40.5, 7.5, 'Chained.', { mapMark: true });   // (§2A: the gate gets its red X; after Room 12 it ticks itself)
         K.examine(39.7, 1.1, 4.5, ['Chained. A padlock the size of my fist.', 'Summit Road. [beat] The mast\'s up there. I can\'t see it.'], { id: 'c7cp:gate', r: 1.5 });
       } else {
         panel(1.5, 1, 72); panel(7.5, -1, -68);
@@ -928,7 +936,8 @@
       }
       K.sign('SUMMIT RD\nMAST ACCESS\nAUTHORISED VEHICLES ONLY', 40.35, 1.55, 0.55, 0.9, 0.6, { style: 'warning', rotY: -90 });
       // Summit Road beyond the gate: climbing east into the fog
-      K.road(40.3, 1.5, 56, 7.5, { axis: 'x', markings: 'none', footpath: 0, kerb: false, slope: { y0: 0, y1: 2.6 } });
+      // (from the car park's own edge: a gap between the two floors would leave the open gate unwalkable)
+      K.road(39.95, 1.5, 56, 7.5, { axis: 'x', markings: 'none', footpath: 0, kerb: false, slope: { y0: 0, y1: 2.6 } });
       K.collider(40.3, 1.2, 56, 1.5, { h: 2.5 }); K.collider(40.3, 7.5, 56, 7.8, { h: 2.5 });
       slab(K, 40.3, -14, 60, 1.5, [2.2, 7.5, 0.1, 2.7], { tex: 'grass', color: '#3a4236' });
       slab(K, 40.3, 7.5, 60, 26, [0.05, 2.6, -2.5, -0.5], { tex: 'grass', color: '#353c32' });
@@ -1128,7 +1137,7 @@
       // the corridor doors and the directory, from the waiting room side
       { id: 'c7_reception:east', vol: [9.5, 0, 16, 5.6], type: 'static', pos: [2.4, 2.6, 9.6], target: [13.2, 0.9, 2.8], fov: 'fit' },
       // behind the desk: the staff strip, the tea room door (a CCTV corner)
-      { id: 'c7_reception:staff', vol: [0, 0, 9.5, 3.2], type: 'static', pos: [9.0, 2.7, 8.4], target: [3.6, 0.6, 1.2], fov: 'fit' },
+      { id: 'c7_reception:staff', vol: [0, 0, 9.5, 3.2], type: 'static', pos: [7.6, 2.85, 7.6], target: [3.8, 0.6, 1.2], fov: 'fit' },
     ],
     build(K) {
       const H = RC.H;
@@ -1203,6 +1212,10 @@
       // light: the tube over the desk stutters; the one by the doors is dead
       tubes(K, [[5.5, 3.6, 0], [10.5, 3.6, 0], [5.5, 8.2, 0], [10.5, 8.2, 0]], { lit: (i) => i === 0 || i === 3, real: [0, 3], flicker: [0], h: H - 0.02 });
       K.light('led', 7.4, 1.62, 0.14, { color: '#ff2a1c', blink: 1.5 });
+      // behind the desk: somebody's desk lamp left on at the return, and the night light over the staff door
+      K.prop('desk_lamp', 9.45, 1.55, -120, { y: 1.01 });
+      K.box(3.0, 2.28, 0.05, 0.3, 0.1, 0.08, { color: '#e8eee8', emissive: '#cfe0d8', emissiveIntensity: 0.9 }, { shadow: false });
+      K.light('point', 3.0, 2.2, 0.35, { color: '#cfe0d8', intensity: 0.8, distance: 5.5, halo: false });
       // ---- examine ------------------------------------------------------------------------------------------------------
       K.examine(6.6, 1.2, RC.desk[2] + 0.35, (G) => C7_visitorBook(G), { id: 'c7rc:book', r: 1.2 });
       K.examine(3.4, 1.2, RC.desk[2] + 0.4, ['A bell on the counter.', 'I don\'t ring it. [beat] I don\'t want to know what comes.'], { id: 'c7rc:bell', r: 1.0 });
@@ -1214,7 +1227,7 @@
       K.examine(0.5, 1.1, 5.2, 'The cooler gurgles as I walk past. Like it\'s clearing its throat.', { id: 'c7rc:cooler', r: 1.1 });
       K.examine(5.5, 2.3, 0.3, ['Ten to four. [beat] In the morning, I think.', 'It hasn\'t moved since I came in.'], { id: 'c7rc:clock', r: 2.2 });
       K.examine(12.2, 0.5, 6.9, 'Caution, wet floor. The floor\'s dry. It\'s been dry a long time.', { id: 'c7rc:wet', r: 1.1 });
-      K.examine(8, 1.4, RC.D - 0.5, 'The car park, through the glass. Grey, then nothing.', { id: 'c7rc:glass', r: 1.6, when: () => !flag('c7_room12') });
+      K.examine(12.5, 1.4, RC.D - 0.45, 'The car park, through the glass. Grey, then nothing.', { id: 'c7rc:glass', r: 1.4, when: () => !flag('c7_room12') });   // (the window east of the doors, not in front of them)
     },
     async onEnter(G, from) {
       G.bars(null);
@@ -1249,7 +1262,7 @@
     if (A.raw) A.raw.idleLife = false;
     await A.turn(90, 0.3);
     A.look([RC.W, 1.7, 8.4]);
-    await G.think('"Ward 3 — Orthopaedics."');
+    await G.think('"Ward 3 — Orthopaedics"');
     await G.think('Broken bones.');
     await G.wait(0.8);
     G.sfx('penclick', { vol: 0.9 });
@@ -1270,12 +1283,14 @@
     bounds: [0, 0, 12, 10],
     entries: { door: [10.85, 5, -90], start: [10.85, 5, -90] },
     cameras: [
-      // from behind the TV, over its shoulder, down at the seated figures
-      { id: 'c7_waiting:tv', vol: [0, 2.4, 9.2, 10], type: 'static', pos: [6.1, 2.84, -1.2], target: [5.0, 0.45, 6.2], fov: 'fit' },
+      // from behind the TV — under the set, in its glow — at the seated figures watching it
+      { id: 'c7_waiting:tv', vol: [0, 2.4, 9.2, 10], type: 'pan', pos: [6.2, 1.38, -0.55], target: [5.4, 0.85, 6.0], fov: 50, pan: { lag: 0.3, yaw: 60, pitch: 32 } },
       // the door end, low: the backs of the chairs, the TV's glow beyond them
       { id: 'c7_waiting:door', vol: [9.2, 0, 12, 10], type: 'static', pos: [2.2, 1.35, 8.9], target: [10.8, 0.9, 3.6], fov: 'fit' },
       // the front of the room under the TV (the vending machine's corner)
       { id: 'c7_waiting:front', vol: [0, 0, 9.2, 2.4], type: 'static', pos: [8.6, 2.5, 9.4], target: [3.2, 0.7, 1.0], fov: 'fit' },
+      // the kids' corner, high over the front rows: the little table, the drawing, the toy box
+      { id: 'c7_waiting:kids', vol: [0, 7.3, 4.4, 10], pri: 1, type: 'static', pos: [7.6, 2.7, 3.4], target: [1.8, 0.4, 8.8], fov: 'fit' },
     ],
     spawns: [
       { id: 'c7_waiting:teth1', type: 'tethered', pos: [4.25, 3.95], rot: 180, anchor: [4.25, 3.95], sit: true, seatH: 0.48, seat: { pos: [4.25, 3.95], rot: 180, h: 0.48 }, noticeRange: 4.2 },
@@ -1338,7 +1353,7 @@
       // sticker10: low on the vending machine's side panel, facing the corner
       K.sticker('sticker10', 0.62, 0.16, 2.79, 0, { size: 0.06 });
       // light: the TV, the vending machine, and one tube over the door that can't decide
-      tubes(K, [[3.5, 3, 0], [8.5, 3, 0], [3.5, 7, 0], [8.5, 7, 0]], { lit: (i) => i === 3, real: [3], flicker: [3], h: H - 0.02 });
+      tubes(K, [[3.5, 3, 0], [8.5, 3, 0], [3.5, 7, 0], [8.5, 7, 0]], { lit: (i) => i >= 2, real: [2, 3], flicker: [3], h: H - 0.02 });   // (the back rows and the kids' corner under the one steady tube)
       // ---- examine --------------------------------------------------------------------------------------------------
       K.examine(0.95, 1.2, 2.3, ['Out of order. Of course.', 'B6 is a packet of lollies I could just about reach. [beat] I don\'t.'], { id: 'c7wr:vending', r: 1.3 });
       K.examine(WR.tv[0], 1.6, 1.2, ['"Stay close. Stay connected." [beat] The Seniors Plan.', 'I\'ve sold that plan. [beat] I\'ve sold it to people like her.', 'It just keeps playing.'], { id: 'c7wr:tv', r: 2.0 });
@@ -1366,10 +1381,14 @@
     bounds: [0, 0, 6, 5],
     entries: { door: [4.5, 4.1, 180], start: [4.5, 4.1, 180] },
     cameras: [
-      // static from the doorway (the south wall cut away): the table, the clock, the bench
-      { id: 'c7_tearoom:door', vol: [0, 0, 6, 3.4], type: 'static', pos: [4.9, 2.45, 8.6], target: [2.6, 0.7, 1.6], fov: 'fit' },
+      // static from the doorway (the south wall cut away; the door is wedged open): the table, the clock, the bench
+      { id: 'c7_tearoom:door', vol: [0, 0, 6, 3.4], type: 'static', pos: [5.7, 2.5, 8.6], target: [2.6, 0.7, 1.6], fov: 'fit' },
       // the door end, from the lockers' corner, high
       { id: 'c7_tearoom:lockers', vol: [0, 3.4, 6, 5], type: 'static', pos: [0.6, 2.55, 0.4], target: [4.4, 0.4, 4.3], fov: 'fit' },
+      // the sink bench from the west, past the open door: the kettle, the mugs, the wash-your-own-cups sign
+      { id: 'c7_tearoom:sink', vol: [3.3, 0, 6, 3.4], pri: 1, type: 'static', pos: [0.9, 2.4, 8.8], target: [4.4, 0.8, 0.9], fov: 'fit' },
+      // at the break table, low from the fridge's side: the clock on the wall behind it
+      { id: 'c7_tearoom:table', vol: [1.2, 1.3, 3.4, 3.4], pri: 1, type: 'pan', pos: [5.55, 1.5, 4.55], target: [2.4, 0.9, 1.9], fov: 46, pan: { lag: 0.3, yaw: 40, pitch: 34 } },
     ],
     build(K) {
       const H = TR7.H;
@@ -1380,7 +1399,7 @@
       hwall(K, TR7.W + 0.08, TR7.D, -0.08, TR7.D, H, { both: false, dado: false, openings: [{ at: 1.58, w: 0.95, h: 2.1 }], mat: { tex: 'plaster', color: '#c4c1ac' } });
       hwall(K, 0, TR7.D + 0.08, 0, -0.08, H, { mat: { tex: 'plaster', color: '#c4c1ac' }, dado: false });
       annex(K, 0, TR7.D, 6, 9.4, H, ['w', 'e', 's']);
-      K.door({ id: 'c7_tearoom:door', x: 4.5, z: TR7.D, rot: 0, w: 0.95, style: 'wood', to: 'c7_reception', entry: 'tea', signBack: 'STAFF ONLY' });
+      K.door({ id: 'c7_tearoom:door', x: 4.5, z: TR7.D, rot: 0, w: 0.95, style: 'wood', to: 'c7_reception', entry: 'tea', signBack: 'STAFF ONLY', open: 1, hinge: 'right' });   // (wedged open: the leaf stands out of the cut-away camera's way)
       K.breakTable(2.5, 2.3, 0, { id: 'c7_tearoom:break', time: [3, 50], clock: [2.5, 2.2, 0.08, 0] });
       K.prop('chair', 1.6, 2.2, 90, { variant: 'plastic', color: '#4d6d6e' });
       K.prop('cardigan_chair', 3.4, 2.4, -90, { color: '#1c2a44' });
@@ -1447,7 +1466,7 @@
       // the north-east corner, from down the second leg: an empty corner, the third leg hidden round it
       { id: 'c7_corridor:ne', vol: [21.7, -22, 26, -17.4], type: 'static', pos: [24.0, 2.7, -12.4], target: [23.6, 0.5, -20.3], fov: 'fit' },
       // the third leg, both ways; the nurses' station door at the far end
-      { id: 'c7_corridor:tlE', vol: [10.6, -22, 22, -18], type: 'pan', pos: [2.4, 2.55, -20.0], target: [22, 1.1, -20.0], fov: 44, pan: { lag: 0.3, yaw: 20, pitch: 26 } },
+      { id: 'c7_corridor:tlE', vol: [10.6, -22, 22, -18], type: 'pan', pos: [0.8, 2.5, -20.0], target: [22, 1.1, -20.0], fov: 44, pan: { lag: 0.3, yaw: 20, pitch: 26 } },
       { id: 'c7_corridor:tlW', vol: [0, -22, 10.9, -18], type: 'pan', pos: [18.4, 2.55, -20.0], target: [0, 1.1, -20.0], fov: 44, pan: { lag: 0.3, yaw: 20, pitch: 26 } },
       // the bays (open only in the store), shot through their cut-away back walls
       { id: 'c7_corridor:b1', vol: [7, 4, 13, 10], type: 'static', pos: [10.0, 2.75, 14.6], target: [10.0, 0.5, 6.4], fov: 'fit' },
@@ -1571,7 +1590,7 @@
     K.dress('papers', [22.3, -17.5, 25.7, -0.5], 6, { seed: 742 });
     K.dress('papers', [1, -21.7, 25, -18.3], 8, { seed: 743 });
     // light: most tubes dead; five still working down the U
-    const T = [[2, 2, 90], [6, 2, 90], [10, 2, 90], [14, 2, 90], [19.6, 2, 90], [24, 2, 0], [24, -3.5, 0], [24, -7.5, 0], [24, -14, 0], [24, -20, 0], [20, -20, 90], [16, -20, 90], [12, -20, 90], [8, -20, 90], [4, -20, 90]];
+    const T = [[2, 2, 90], [6, 2, 90], [10, 2, 90], [14, 2, 90], [19.6, 2, 90], [24, 2, 0], [24, -3.5, 0], [24, -7.5, 0], [24, -14, 0], [24, -18.9, 0], [20, -20, 90], [16, -20, 90], [12, -20, 90], [8, -20, 90], [4, -20, 90]];
     tubes(K, T, { lit: (i) => [1, 4, 7, 9, 11, 14].includes(i), real: [1, 4, 7, 9, 11, 14], flicker: [7], h: H - 0.02 });
     // ---- examine ----------------------------------------------------------------------------------------------------
     K.examine(6, 2.3, 2, 'Ward 3. [beat] Round the corner, and round again.', { id: 'c7co:sign', r: 2.2 });
@@ -1617,7 +1636,7 @@
     // banners hung across the legs
     const banner = (x, z, rot, text, key) => { for (const [r, o] of [[rot, 0.012], [rot + 180, -0.012]]) K.plane(x + Math.sin(rot * D2R) * o, H - 0.36, z + Math.cos(rot * D2R) * o, 2.8, 0.44, storeTex(key, text, { w: 768, h: 140, size: 58, logo: false }), { rotY: r }); for (const d of [-1.3, 1.3]) K.cyl(x + Math.cos(rot * D2R) * d, H - 0.2, z - Math.sin(rot * D2R) * d, 0.006, 0.2, { tex: 'metal', color: '#c8ccc8' }); };
     banner(9.5, 2, 90, 'HI THERE!', 'hi');
-    banner(24, -5.5, 0, 'WHAT BRINGS YOU IN TODAY?', 'what');
+    banner(24, -8.3, 0, 'WHAT BRINGS YOU IN TODAY?', 'what');
     banner(15, -20, 90, "WE'RE HERE TO HELP", 'help');
     // the bays: Bay 1 PLANS, Bay 2 ACCESSORIES, Bay 3 BUNDLES
     K.plane(10, 2.45, 4.1, 1.8, 0.34, storeTex('bay1', 'BAY 1 — PLANS', { w: 512, h: 96, size: 38, logo: false }), { emissive: 0.4 });
@@ -1645,7 +1664,7 @@
     K.prop('wheelchair', 25.3, -19.0, 180, {});
     K.box(25.3, 0.55, -19.3, 0.2, 0.12, 0.01, { color: '#b3261e', roughness: 0.5 });
     // light: every tube on, clinical white; a handful of them real
-    const T = [[2, 2, 90], [6, 2, 90], [10, 2, 90], [14, 2, 90], [19.6, 2, 90], [24, 2, 0], [24, -3.5, 0], [24, -7.5, 0], [24, -14, 0], [24, -20, 0], [20, -20, 90], [16, -20, 90], [12, -20, 90], [8, -20, 90], [4, -20, 90], [10, 7, 90], [18, -3.5, 90], [29, -11, 0]];
+    const T = [[2, 2, 90], [6, 2, 90], [10, 2, 90], [14, 2, 90], [19.6, 2, 90], [24, 2, 0], [24, -3.5, 0], [24, -7.5, 0], [24, -14, 0], [24, -18.9, 0], [20, -20, 90], [16, -20, 90], [12, -20, 90], [8, -20, 90], [4, -20, 90], [10, 7, 90], [18, -3.5, 90], [29, -11, 0]];
     tubes(K, T, { lit: true, real: [1, 3, 6, 8, 12, 16], h: H - 0.02 });   // (6 real + the two lit fittings in the bays: the 8-light pool)
     // ---- examine --------------------------------------------------------------------------------------------------------
     K.examine(5.4, 1.0, 1.0, ['A phone on every pillow. All the same lock screen. [beat] 8:59.', 'One minute before open.'], { id: 'c7st:phones', r: 1.4 });
@@ -1658,7 +1677,7 @@
     K.examine(19.8, 1.35, -6.4, ['A medical alarm pendant on a hook. $49.95.', 'Compatible with most home phone services. [beat] Most.'], { id: 'c7st:pendant', r: 1.1 });
     K.examine(20.6, 1.3, 0.8, 'An IV stand with a price tag on it. "Ask about our payment plans."', { id: 'c7st:iv', r: 1.2 });
     K.examine(29, 1.2, -11, ['Tablets on plinths, still sealed.', 'She had one of these. [beat] She never opened it.'], { id: 'c7st:tablets', r: 1.8 });
-    K.examine(24, 2.3, -5.5, '"What brings you in today?" [beat] I don\'t know anymore.', { id: 'c7st:what', r: 2.4 });
+    K.examine(24, 2.3, -8.3, '"What brings you in today?" [beat] I don\'t know anymore.', { id: 'c7st:what', r: 2.4 });
     // the empty corner (north-east) and the one who steps into it
     K.trigger([21.7, -18.3, 26, -17.4], (G) => C7_cornerStep(G), { id: 'c7_corridor:ne', when: () => flag('c7_store') && !(C7.pageUntil > now()) });
   }
@@ -1699,6 +1718,10 @@
       { id: 'c7_nurses:desk', vol: [0, -0.7, 5.6, 6], type: 'static', pos: [4.0, 2.78, 10.3], target: [4.0, 0.5, 1.4], fov: 'fit' },
       // the CCTV corner over the Ward 3 doors, down at the corridor door and the desk's end
       { id: 'c7_nurses:door', vol: [5.6, -0.7, 8, 6], pri: 1, type: 'static', pos: [0.35, 2.72, 0.35], target: [6.8, 0.5, 3.9], fov: 'fit' },
+      // at the PA: low from behind the desk, over the counter — the doors to Ward 3 behind him (and whoever stands in them)
+      { id: 'c7_nurses:pa', vol: [1.1, 1.6, 3.7, 3.1], pri: 2, type: 'static', pos: [2.45, 1.62, 5.55], target: [2.4, 1.2, 0.6], fov: 'fit' },
+      // the high corner over the desk (spec §7B): from above the filing cabinet, across to the ward doors
+      { id: 'c7_nurses:corner', vol: [0, -0.7, 4.6, 1.6], pri: 1, type: 'static', pos: [7.55, 2.62, 5.65], target: [2.0, 0.6, 0.4], fov: 'fit' },
     ],
     spawns: [
       { id: 'c7_nurses:d1', type: 'c7_smile', seed: 81, pos: [1.6, 0.15], rot: 0, post: [1.6, 0.15, 0], colR: 0.44, when: () => flag('c7_store') && !(C7.pageUntil > now()) },
@@ -1738,7 +1761,7 @@
       K.pickup('energy_drink', 1.2, 1.0, 3.4, { id: 'c7_nurses:energy', rot: 30 });
       K.pickup('coffee', 5.4, 1.01, 5.0, { id: 'c7_nurses:coffee', rot: 70 });
       // behind the desk: the bed board, the medication trolley, the charts
-      K.prop('whiteboard', 2.6, NU.D - 0.08, 180, { text: st ? 'TODAY\'S TARGET: 12\nACHIEVED: 12  ✓\nEVERY CUSTOMER\nLEAVES WITH A PLAN' : 'WARD 3 — BEDS\n1 —   2 —   3 —   4 —\n5 —   6 —   7 —   8 —\n9 —  10 —  11 —  12 ?', mount: 1.6, w: 1.6, h: 1.0 });
+      K.prop('whiteboard', 0.08, 4.15, 90, { text: st ? 'TODAY\'S TARGET: 12\nACHIEVED: 12  ✓\nEVERY CUSTOMER\nLEAVES WITH A PLAN' : 'WARD 3 — BEDS\n1 —   2 —   3 —   4 —\n5 —   6 —   7 —   8 —\n9 —  10 —  11 —  12 ?', mount: 1.75, w: 1.5, h: 0.95 });
       K.box(0.55, 0, 5.3, 0.6, 1.0, 0.45, { tex: 'metal', color: '#c8ccc8' }, { collide: true });
       for (let i = 0; i < 4; i++) K.box(0.55, 0.2 + i * 0.2, 5.55, 0.54, 0.16, 0.02, { color: ['#5a8ab0', '#b35a5a', '#5ab07a', '#d8c85a'][i], roughness: 0.6 });
       K.prop('filing_cabinet', 7.55, 5.55, -90, { n: 4 });
@@ -1748,7 +1771,7 @@
       K.sign('CALL, DON\'T FALL', 7.91, 1.9, 1.6, 0.7, 0.34, { style: 'hospital', rotY: -90 });
       if (st) {
         K.ambient('#e2f2ef', 1.3);
-        K.plane(3.2, 2.45, NU.D - 0.1, 2.6, 0.42, storeTex('cs', 'CUSTOMER SERVICE', { w: 768, h: 128, size: 50 }), { rotY: 180, emissive: 0.5 });
+        K.plane(NU.W - 0.1, 2.5, 5.0, 1.7, 0.3, storeTex('cs', 'CUSTOMER SERVICE', { w: 768, h: 128, size: 50 }), { rotY: -90, emissive: 0.5 });
         for (const [x, w] of NU.doors) for (const s of [-1, 1]) { K.box(x + s * (w / 2 + 0.15), 0, 0.35, 0.1, 1.55, 0.34, { color: '#eef2ef', roughness: 0.3 }, { collide: true }); K.box(x + s * (w / 2 + 0.15), 1.3, 0.35, 0.11, 0.05, 0.35, { color: '#19c8c0', emissive: '#19c8c0', emissiveIntensity: 0.8 }); }
         tubes(K, [[2, 1.6, 90], [6, 1.6, 90], [2, 4.6, 90], [6, 4.6, 90]], { lit: true, real: [0, 1, 3], h: H - 0.02 });
       } else {
@@ -1759,7 +1782,7 @@
       // ---- the PA ------------------------------------------------------------------------------------------------------
       K.interact(NU.mic[0], 1.2, NU.mic[1] - 0.45, (G) => C7_paMic(G), { id: 'c7_nurses:pa', r: 1.2 });
       // ---- examine --------------------------------------------------------------------------------------------------
-      K.examine(2.6, 1.6, NU.D - 0.3, st ? ['"Today\'s target: twelve. Achieved: twelve."', '"Every customer leaves with a plan."'] : ['The bed board. Every bed a dash.', 'Twelve has a question mark next to it.'], { id: 'c7nu:board', r: 1.6 });
+      K.examine(0.35, 1.7, 4.15, st ? ['"Today\'s target: twelve. Achieved: twelve."', '"Every customer leaves with a plan."'] : ['The bed board. Every bed a dash.', 'Twelve has a question mark next to it.'], { id: 'c7nu:board', r: 1.6 });
       K.examine(7.6, 1.8, 1.6, ['"Call, don\'t fall."', 'She couldn\'t call. [beat] That was the whole point of the pendant.'], { id: 'c7nu:callsign', r: 1.4 });
       K.examine(0.55, 1.1, 5.3, 'The medication trolley. Every drawer labelled. Every drawer locked.', { id: 'c7nu:trolley', r: 1.2 });
       K.examine(0.3, 2.2, 2.5, 'Eight minutes to four.', { id: 'c7nu:clock', r: 1.6 });
@@ -1819,6 +1842,8 @@
       { id: 'c7_ward3:long', vol: [0, -30, 3, -4.6], type: 'static', pos: [1.5, 2.3, -0.35], target: [1.5, 1.05, -29.5], fov: 'fit' },
       // the ward doors, from a third of the way down
       { id: 'c7_ward3:doors', vol: [0, -4.8, 3, 0], type: 'pan', pos: [1.5, 2.45, -10.5], target: [1.5, 0.9, -1.0], fov: 44, pan: { lag: 0.3, yaw: 22, pitch: 26 } },
+      // halfway: the same symmetrical line, closer — Room 12's door and the call light over it at the end
+      { id: 'c7_ward3:mid', vol: [0, -22.5, 3, -14], pri: 1, type: 'static', pos: [1.5, 2.45, -9.6], target: [1.5, 1.0, -29.5], fov: 'fit' },
       // Room 12's door and the chair, from the west wall a few doors down
       { id: 'c7_ward3:end', vol: [0, -30, 3, -22.5], pri: 1, type: 'static', pos: [0.35, 2.45, -17.6], target: [2.0, 0.85, -27.9], fov: 'fit' },
     ],
@@ -1902,10 +1927,14 @@
     bounds: [0, 0, 6, 4],
     entries: { door: [1.2, 3.1, 180], start: [1.2, 3.1, 180] },
     cameras: [
-      // from the doorway side (the south wall cut away): the bed, the window
+      // from the doorway side (the south wall cut away, the door standing open): the bed, the window
       { id: 'c7_room12:door', vol: [2.0, 0, 6, 4], type: 'static', pos: [2.7, 2.35, 8.3], target: [2.2, 0.8, 1.3], fov: 'fit' },
       // the window corner, back at the door: the empty bed in the foreground
       { id: 'c7_room12:window', vol: [0, 0, 2.0, 4], pri: 1, type: 'static', pos: [5.75, 2.45, 0.3], target: [1.1, 0.7, 2.8], fov: 'fit' },
+      // at the window, from the bedside corner: his back, the glass, the fog against it (the mast beyond, after the call)
+      { id: 'c7_room12:sill', vol: [2.6, 0.3, 4.4, 2.0], pri: 1, type: 'pan', pos: [0.45, 2.35, 3.65], target: [3.8, 1.2, 0.2], fov: 48, pan: { lag: 0.3, yaw: 40, pitch: 34 } },
+      // at the bedside phone, low from the far end of the room
+      { id: 'c7_room12:phone', vol: [0, 2.7, 1.25, 4], pri: 2, type: 'static', pos: [5.6, 1.5, 3.1], target: [0.6, 0.85, 3.2], fov: 'fit' },
     ],
     build(K) {
       const H = R12.H;
@@ -1916,12 +1945,18 @@
       hwall(K, R12.W + 0.08, R12.D, -0.08, R12.D, H, { both: false, dado: false, openings: [{ at: R12.W - 1.2 + 0.08, w: 1.0, h: 2.1 }], mat: { tex: 'plaster', color: '#c2c6b2' } });
       hwall(K, 0, R12.D + 0.08, 0, -0.08, H, { mat: { tex: 'plaster', color: '#c2c6b2' } });
       annex(K, 0, R12.D, R12.W, 8.6, H, ['w', 'e', 's']);
-      K.door({ id: 'c7_room12:door', x: 1.2, z: R12.D, rot: 0, w: 1.0, style: 'wood', to: 'c7_ward3', entry: 'room12' });
-      // the view: the hill above the fog, the mast; its red light (fog-proof)
+      K.door({ id: 'c7_room12:door', x: 1.2, z: R12.D, rot: 0, w: 1.0, style: 'wood', to: 'c7_ward3', entry: 'room12', open: 1 });   // (left open behind him: the leaf stays out of the cut-away camera's view)
+      // the view: the hill above the fog, the mast; its red light (fog-proof). Spec 7-4: the mast is seen above the fog
+      // for the first time in the game at the scene's last shot — until then the window is only fog against the glass
+      const seen = flag('c7_room12');
       const vm = new THREE.MeshBasicMaterial({ map: mastViewTex(), fog: false });
       const view = new THREE.Mesh(new THREE.PlaneGeometry(34, 17), vm); view.position.set(R12.win[0], -1.0, -13.5);
       K.mesh(view, { name: 'c7r12:view' });
-      mastLight(K, R12.win[0] + 0.13 * 34, -1.0 + 0.43 * 17 + 0.35, -13.4, 1.1);
+      const ml = mastLight(K, R12.win[0] + 0.13 * 34, -1.0 + 0.43 * 17 + 0.35, -13.4, 1.1);
+      const fogv = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 2.6), new THREE.MeshBasicMaterial({ color: '#5d6865', fog: false }));
+      fogv.position.set(R12.win[0], 1.55, -0.9);
+      K.mesh(fogv, { name: 'c7r12:fogview' });
+      view.visible = seen; if (ml) ml.visible = seen; fogv.visible = !seen;
       // the bed: blanket turned back, her reading glasses folded on the pillow
       K.prop('hospital_bed', R12.bed[0], R12.bed[1], 90, { empty: true, glasses: true, chart: true });
       K.prop('bedside_table', R12.phone[0], R12.phone[1], 90, { items: true });
@@ -1944,11 +1979,11 @@
       K.prop('whiteboard', R12.W - 0.08, 2.1, -90, { text: 'ROOM 12\nYour nurse today: —\nGoal: sit out in the chair\nMobility: 2 assist', mount: 1.55, w: 1.1, h: 0.8 });
       K.prop('clock', 3.5, R12.D - 0.08, 180, { mount: 2.35, time: [3, 54] });
       K.box(3.1, H - 0.05, 2.0, 0.04, 0.04, 3.6, { tex: 'metal', color: '#b8bcb8' });
-      K.plane(3.1, 1.6, 3.35, 1.2, 2.3, { color: '#8fa8b0', roughness: 0.95 }, { rotY: 90, double: true });
-      K.box(4.9, 0, 3.6, 0.9, 1.8, 0.55, { tex: 'wood', color: '#b0946a' }, { collide: true });
+      K.plane(3.1, 1.6, 3.68, 0.5, 2.3, { color: '#8fa8b0', roughness: 0.95 }, { rotY: 90, double: true });
+      K.box(5.7, 0, 3.25, 0.55, 1.8, 0.9, { tex: 'wood', color: '#b0946a' }, { collide: true });
       K.prop('water_stain', 4.5, 1.2, 0, { surface: 'ceiling', ceil: H });
       K.light('lamp', R12.phone[0] + 0.1, 1.0, R12.phone[1] + 0.3, { color: '#ffd9a0', intensity: 1.2, distance: 3.2, name: 'c7r12:lamp' });
-      K.light('point', R12.win[0], 1.6, -0.6, { color: '#8fa0a8', intensity: 0.6, distance: 5 });
+      K.light('point', R12.win[0], 1.6, -0.6, { color: '#8fa0a8', intensity: 0.6, distance: 5, halo: false });   // (the night through the glass; no halo: the glass camera looks in past it)
       // ---- examine --------------------------------------------------------------------------------------------------
       K.examine(R12.bed[0] - 0.4, 0.9, R12.bed[1], ['Her glasses. Folded on the pillow, the way you do before you go to sleep.', 'She\'s not here.'], { id: 'c7r12:glasses', r: 1.1 });
       K.examine(R12.bed[0] + 0.6, 0.8, R12.bed[1], 'The blanket\'s turned back. Like she just got up.', { id: 'c7r12:bed', r: 1.3 });
@@ -1977,7 +2012,7 @@
   // =================================================================================================================
   const FB = { W: 7, D: 5, H: 2.7, desk: [0.42, 2.4], chair: [1.1, 2.4], door: [7, 4.3], board: [10.3, 2.3], luka: [9.55, 1.9, 62] };
   defineRoom({
-    id: 'c7_flashback', name: 'BACK OFFICE (MEMORY)', area: 'STORE 0412 — CITY', outdoor: false, surface: 'carpet', ambient: 'office',
+    id: 'c7_flashback', name: 'BACK OFFICE (MEMORY)', area: 'STORE 0412 — CITY', outdoor: false, surface: 'carpet', ambient: 'office', cutsceneOnly: true,
     noFog: true, grade: 'flashback',
     env: { ambient: ['#f4efe4', 1.35], sheets: false, specks: false },
     bounds: [0, -3, 16, 8],
@@ -2154,7 +2189,7 @@
     if (A.raw) A.raw.idleLife = false;
     await A.walkTo(mx, mz - 0.64, { speed: 1.0 });
     await A.turn(0, 0.3);
-    G.cam({ pos: [mx - 1.3, 1.5, mz - 2.3], target: [mx + 0.1, 1.2, mz - 0.1], fov: 36 });
+    G.cam({ pos: [mx - 1.65, 1.48, mz - 1.05], target: [mx + 0.15, 1.12, mz + 0.05], fov: 38 });   // (from his left: the microphone in front of him)
     q(A.gesture('reach', { hand: 'L', target: [mx + 0.04, 1.04, mz - 0.03], dur: 1.0 }));
     await G.wait(0.5);
     G.sfx('click', { vol: 0.6 });
@@ -2509,7 +2544,7 @@
     await G.say('LUKE', 'Who the hell are you?');
     G.cam({ ...faceOn(C, 1.4, 32, -0.1, 0.35) });
     q(C.gesture('tremor', { amount: 1.4, hold: true }));
-    await G.say('CHASE', 'Back off. [beat] Back OFF.');
+    await G.say('CHASE', 'Back off. Back OFF.');
     // 4. TIMED CHOICE — ten seconds, heartbeat, the camera slowly pushing in
     const mid = V3((SO.luke[0] + SO.chase[0]) / 2, 1.35, (SO.luke[1] + SO.chase[1]) / 2);
     G.cam({ pos: [25.4, 1.62, 15.9], target: arr(mid), fov: 40, to: { pos: [26.6, 1.58, 15.0], fov: 30 }, dur: 10 });
@@ -2541,7 +2576,9 @@
         await G.say('CHASE', '...He\'s just a bloke.');
         chaseSaved = true; lukeSaved = true;
       } else {
-        // Chase can't hear him. He swings. (Aidan takes the hit.)
+        // Aidan says it — Chase can't hear him. He swings. (Aidan takes the hit.)
+        G.cam({ ...faceOn(A, 1.25, 32, -0.05, -0.3) });
+        await G.say('AIDAN', 'Chase. Look at him. [beat] He\'s just a bloke.');
         G.cam({ ...faceOn(C, 1.6, 34, -0.1, 0.4) });
         C.expr('shout');
         q(C.gesture('swing', { hand: 'R' }));
@@ -2556,7 +2593,11 @@
         await G.fade(0, 0.8);
         // he stares at what he's done
         C.expr('wide'); C.look(A); C.eyes('at', A);
-        await G.wait(2.2);
+        await G.wait(0.9);
+        G.cam({ ...faceOn(C, 1.35, 30, -0.08, 0.3) });
+        await G.wait(1.6);
+        // (wide: the bar out of his hand, Aidan down behind him, the fog he runs into)
+        G.cam({ pos: [25.0, 1.45, 17.8], target: [30.6, 1.0, 16.0], fov: 42 });
         if (C.raw) C.raw.hold('R', null);
         G.sfx('bar_concrete', { vol: 1.0, pos: [SO.chase[0], 0.1, SO.chase[1]] });
         C7_droppedBar(G, SO.chase[0] + 0.3, SO.chase[1] - 0.2);
@@ -2633,6 +2674,9 @@
     if (A.raw) { A.raw.finishGestures(); A.raw.idleLife = true; }
     A.pose('idle'); A.expr('neutral'); A.look(null);
     await G.goto('c7_carpark', { pos: [27.6, 13.2], yaw: 0 }, { fade: false, sound: 'none' });
+    // (back to the room's own cameras before the fade-in: the rebuilt car park has whoever stayed standing by the bench,
+    // and the scene's last lens would be inside one of them)
+    G.camRelease(); try { Cam.snap(); } catch (e) { /* cam */ }
     await G.fade(0, 1.2);
   }, { letterbox: true, skippable: true });
   // a snapped steel bar lying on the bitumen (dressing for the rest of the scene)
@@ -2686,6 +2730,7 @@
     A.eyes('ahead');
     await G.wait(0.8);
     // 4. through the window: the mast on the hill, its red light blinking, above the fog for the first time
+    for (const [n, v] of [['c7r12:view', true], ['c7:mastlight', true], ['c7r12:fogview', false]]) { const o = G.obj(n); if (o) o.visible = v; }
     G.cam({ pos: [2.4, 1.25, 2.7], target: [7.6, 5.9, -13.4], fov: 34, to: { pos: [2.55, 1.3, 2.4], fov: 30 }, dur: 7 });
     A.look([7.6, 5.9, -13.4]);
     await G.wait(4.6);

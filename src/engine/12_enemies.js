@@ -67,7 +67,9 @@
 //   lockable, body:false (no collider), stompable, invincible, hitbox(e) → [{x,z,r,y0,y1}…] | hitTest(e,o,yaw,range,arc),
 //   threatDist(e, pos), post(e, dt) (after the actor updates), alert(e), onReact, onDown, onUp, onDie(e, o), onFreed,
 //   remove(e), stun(e,sec)→false blocks, knockdown(e)→false blocks, steps:{stride, vol, heavy}}). Custom enemies get
-//   the same resolution, hit tests, threat, footsteps and world-tag handling.
+//   the same resolution, hit tests, threat, footsteps and world-tag handling. e.pinned (def.pinned / def.static /
+//   T.static; default true for body:false types): hits don't push it back and bodies don't shove it.
+//   hitTest's line of sight ignores any collider containing the hitbox centre (the target's own stand-in collider).
 //   Enemies.standard = { start({graph, node, name, mode:'patrol'|'hunt', route, speed}), stop(), hunt(), patrol(route),
 //   chime(vol), setName(name), teleport(nodeId), e, active, state → {room, node, next, mode, physical, away, follow} }.
 //   graph = { nodes:{ id:{ room, pos:[x,z], door?, pause? (s), face? (deg) } }, edges:[[a,b]…] }. Off-room it travels
@@ -466,6 +468,17 @@ const Enemies = (() => {
       const hide = menusOpen();
       if (host) host.style.visibility = hide ? 'hidden' : 'visible';
       if (hide) return;
+      // just above the subtitles — and above whatever subtitle / message is actually up (a two-line thought, a message
+      // stepped up over a line), so a monster's line and Aidan's thought never overlap
+      if (host) {
+        let top = null;
+        try { top = hasUI() && UI.textTop ? UI.textTop() : null; } catch (e) { top = null; }
+        const H = window.innerHeight || 1, base = H * 0.136, want = top === null ? base : Math.max(base, H - top + H * 0.012);
+        const cur = parseFloat(host.dataset.bot || '0') || base;
+        const next = Math.abs(want - cur) < 1 ? want : cur + (want - cur) * Math.min(1, dt * 12);
+        host.dataset.bot = String(next);
+        host.style.bottom = next.toFixed(1) + 'px';
+      }
       for (const L of lines.slice()) {
         L.t += dt;
         const fin = L.t >= L.life;
@@ -534,6 +547,8 @@ const Enemies = (() => {
     if (e.fx.parent !== scene()) scene().add(e.fx);
     list.push(e); byId.set(e.id, e);
     if (T.body !== false && e.actor) addCollider(e);
+    // Game's fog culling hides the fx group (tether, held box, glows) with the body it belongs to
+    if (e.actor) { e.actor.cullWith = e.actor.cullWith || []; if (!e.actor.cullWith.includes(e.fx)) e.actor.cullWith.push(e.fx); }
     if (e.actor) { e.actor.update(0); if (T.post) T.post(e, 0); }
     return e;
   }
@@ -551,6 +566,10 @@ const Enemies = (() => {
       lockable: T.lockable !== false, invincible: !!T.invincible,
       downed: false, downT: 0, knocked: false, knockT: 0, stunT: 0, flinchT: 0,
       col: null, loops: new Set(), data: {}, T,
+      // pinned: hits never push it back and other bodies never shove it (separate()). Default: def.pinned, else
+      // def.static / T.static, else true for body:false types — hitbox-only stand-ins for static set pieces (a plinth,
+      // a cage) whose e.pos, and so hitbox, must stay on the prop they represent
+      pinned: def.pinned ?? def.static ?? T.static ?? (T.body === false),
     };
     e.fx.name = 'enemyfx:' + e.id;
     Object.defineProperty(e, 'yaw', { get() { return e.obj ? e.obj.rotation.y : 0; }, set(v) { if (e.obj) e.obj.rotation.y = v; }, enumerable: true });
@@ -1847,7 +1866,9 @@ const Enemies = (() => {
     if (D.nameT <= 0) { D.nameT = 1; const n = e.def.name && !ctlOwns(e) ? e.def.name : (ctl && ctl.name) || standardName(); if (n !== D.name) { D.name = n; a.setCard(n, 'STORE LEADER'); } }
     standardForm(e, dt);
     standardMirror(e, dt);
-    if (D.contact) { standardContactUpdate(e, dt); return; }
+    // (the engine's own contact state lives in data._stdContact: a custom type that reuses this update for the look —
+    // form, mirror, name card — may keep its own `data.contact` without the engine running it)
+    if (D._stdContact) { standardContactUpdate(e, dt); return; }
     if (D.vanished || e.puppet || e.def.puppet) return;
     if (!ai) { if (!e.scripted && a.anim !== 'idle') a.setAnim('idle', { blend: 0.5 }); return; }
     const seen = standardGaze(e);
@@ -1892,7 +1913,7 @@ const Enemies = (() => {
   }
   function standardContact(e) {
     const D = e.data, a = e.actor;
-    D.contact = { t: 0, hit: false };
+    D._stdContact = { t: 0, hit: false };
     D.lastContact = clock;
     e.yaw = yawTo(e.pos, Player.pos);
     a.setAnim('idle', { blend: 0.3 });
@@ -1902,7 +1923,7 @@ const Enemies = (() => {
     sfx('keys', { pos: P3(e.pos, 1.4), vol: 0.5 });
   }
   function standardContactUpdate(e, dt) {
-    const C = e.data.contact, a = e.actor;
+    const C = e.data._stdContact, a = e.actor;
     C.t += dt;
     if (C.t > 0.8 && !C.said) { C.said = true; Voice.say('Got a sec?', 'quiet', 2.2); }
     if (C.t > 1.3 && !C.hit) { C.hit = true; if (pOK()) Player.damage(40, e, { force: true }); }
@@ -1919,7 +1940,7 @@ const Enemies = (() => {
     if (C.gone) {
       e.data.fadeT += dt;
       a.setOpacity(1 - clamp(e.data.fadeT / 1.2));
-      if (e.data.fadeT >= 1.2) { e.data.contact = null; standardVanish(e); }
+      if (e.data.fadeT >= 1.2) { e.data._stdContact = null; standardVanish(e); }
     }
   }
   function standardVanish(e) {
@@ -1944,7 +1965,7 @@ const Enemies = (() => {
     onHit(e) { sfx('thud', { pos: P3(e.pos, 1.4), vol: 0.4 }); if (Math.random() < 0.4) e.actor.gesture('pen_click', { hand: 'L' }); return false; },
     stun() { return false; }, knockdown() { return false; },
     threat: (e) => !e.data.vanished && !e.hidden,
-    remove(e) { const M = e.data.mirror; if (M && M.rt) { M.rt.dispose(); M.rt = null; } if (e.data.form) e.data.form.tex.dispose(); if (hasPlayer() && e.data.contact) Player.lock('standard', false); if (ctl && ctl.e === e) ctl.e = null; },
+    remove(e) { const M = e.data.mirror; if (M && M.rt) { M.rt.dispose(); M.rt = null; } if (e.data.form) e.data.form.tex.dispose(); if (hasPlayer() && e.data._stdContact) Player.lock('standard', false); if (ctl && ctl.e === e) ctl.e = null; },
   });
   // e.clipboard(false): lowers the clipboard from the face (8-1 "The Mirror"); true raises it again
   function standardClipboard(e, up) {
@@ -2716,7 +2737,14 @@ const Enemies = (() => {
         if (d > range) continue;
         if (origin.y < b.y0 - 0.9 || origin.y > b.y1 + 0.9) continue;
         if (dc > 0.3) { const ang = Math.abs(U.angleDiff(dirYaw, Math.atan2(dx, dz))); if (ang > half + Math.atan2(b.r, Math.max(dc, 0.1))) continue; }
-        if (dc > 0.6 && !los(origin.x, origin.z, b.x - dx / dc * b.r, b.z - dz / dc * b.r, { minH: 1.0, y: floorY(origin.x, origin.z, origin.y - 1.1) })) continue;
+        // line of sight to the rim point facing the attacker (pulled 5 cm inside the rim); a collider that contains the
+        // hitbox centre is the target's own body / stand-in (an enemy standing for a prop with its own K.collider — the
+        // plinths) and never blocks the swing aimed at it
+        if (dc > 0.6) {
+          const rr = Math.max(0, b.r - 0.05), tx = b.x - dx / dc * rr, tz = b.z - dz / dc * rr;
+          const own = (c) => isEnemyCol(c) || !!Kit.collide(c, b.x, b.z, 0.01);
+          if (!los(origin.x, origin.z, tx, tz, { minH: 1.0, y: floorY(origin.x, origin.z, origin.y - 1.1), ignore: own })) continue;
+        }
         if (!hit || d < hit.d) hit = { e, d };
       }
       if (hit) out.push(hit);

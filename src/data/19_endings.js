@@ -44,7 +44,7 @@
     let t = TEXC.get(key);
     if (t) return t;
     const c = document.createElement('canvas'); c.width = w; c.height = h;
-    const ctx = c.getContext('2d');
+    const ctx = c.getContext('2d', { willReadFrequently: true });
     draw(ctx, w, h, U.rng(U.hash('end:' + key)));
     t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
@@ -269,12 +269,22 @@
     A.hide();
     return A;
   }
+  // (the carry poses are reset too: Ch 8's E-C1 leaves his right arm up at his ear — 'phone_ear' — and a pose set by a
+  // scene outlives it. o.phone:false puts the phone away: hidden, the arm hanging free.)
   function aidanOn(G, x, z, rot, o = {}) {
     const A = G.aidan;
     try { Player.setTorch(false); } catch (e) { /* player */ }
     A.show(); A.place(x, z, rot);
     A.pose(o.pose || 'idle');
-    if (A.raw) { A.raw.setPhoneLight && A.raw.setPhoneLight(0); A.raw.idleLife = false; A.raw.lookAt(null); A.raw.finishGestures && A.raw.finishGestures(); A.raw.expr(o.expr || 'neutral'); A.raw.eyes('ahead'); }
+    if (A.raw) {
+      A.raw.setPhoneLight && A.raw.setPhoneLight(0); A.raw.idleLife = false; A.raw.lookAt(null); A.raw.finishGestures && A.raw.finishGestures(); A.raw.expr(o.expr || 'neutral'); A.raw.eyes('ahead');
+      try {
+        const ph = A.raw.held && A.raw.held.R;
+        if (ph) ph.visible = o.phone !== false;
+        A.raw.armPose('R', ph && o.phone !== false ? 'phone' : null);
+        if (!(A.raw.held && A.raw.held.L)) A.raw.armPose('L', null);
+      } catch (e) { /* rig */ }
+    }
     return A;
   }
   // a room's own clean slate between setups: every post effect off, the grade the room asks for
@@ -380,7 +390,8 @@
       const g = x.createLinearGradient(0, 0, w, h); g.addColorStop(0, 'rgba(255,255,255,0.35)'); g.addColorStop(0.6, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(0,0,0,0.05)');
       x.fillStyle = g; x.fillRect(0, 0, w, h);
       // ghosts of old writing
-      x.globalAlpha = 0.08; hand(x, 'NPS!!  bundles  →  ask about NBN', 40, 330, { size: 22, color: '#1b3a8a', seed: 5 }); hand(x, 'Target 12', 300, 120, { size: 26, color: '#1b3a8a', seed: 6 }); x.globalAlpha = 1;
+      // (Tex.handwriting sets its own globalAlpha per glyph: the faintness goes in through its alpha option)
+      hand(x, 'NPS!!  bundles  →  ask about NBN', 40, 330, { size: 22, color: '#1b3a8a', seed: 5, alpha: 0.09 }); hand(x, 'Target 12', 300, 120, { size: 26, color: '#1b3a8a', seed: 6, alpha: 0.07 });
       // printed header strip
       x.fillStyle = BR.tealDark; x.fillRect(0, 0, w, 46);
       tx(x, 'HUDDLE', 18, 32, 24, '#ffffff', { weight: 'bold', spacing: 3 });
@@ -896,7 +907,7 @@
   const dawnSkyStops = [[0, '#6d8db0'], [0.45, '#a9bccb'], [0.72, '#dcd2c2'], [0.84, '#f0d3aa'], [0.9, '#f7c996'], [0.95, '#e9c7a2'], [1, '#c8b597']];
   const hospSignTex = () => ctex('hospsign', 1024, 128, (x, w, h) => {
     x.fillStyle = '#f2efe6'; x.fillRect(0, 0, w, h);
-    tx(x, 'SIGNAL HILL DISTRICT HOSPITAL', w / 2, h * 0.66, 64, '#24406a', { align: 'center', weight: 'bold', spacing: 6 });
+    tx(x, 'SIGNAL HILL DISTRICT HOSPITAL', w / 2, h * 0.68, 54, '#24406a', { align: 'center', weight: 'bold', spacing: 4, maxWidth: w * 0.94 });
   });
   const hTex = () => ctex('hblue', 128, 128, (x, w, h) => { x.fillStyle = '#1d4e9a'; x.fillRect(0, 0, w, h); x.strokeStyle = '#ffffff'; x.lineWidth = 5; x.strokeRect(6, 6, w - 12, h - 12); tx(x, 'H', w / 2, h * 0.78, 92, '#ffffff', { align: 'center', weight: 'bold' }); });
   const winBandTex = () => ctex('hospwin', 512, 64, (x, w, h, r) => {
@@ -959,7 +970,9 @@
       // the canopy over the entrance, the glass doors, the sign
       K.box(hx, 3.1, hz + 8.4, 9, 0.35, 5, { color: '#e8e4da', roughness: 0.6 });
       for (const [px, pz] of [[-4.2, 10.6], [4.2, 10.6]]) K.cyl(hx + px, 0, hz + pz, 0.14, 3.1, { color: '#e8e4da', roughness: 0.5 });
-      K.plane(hx, 4.2, hz + 6.03, 13, 1.6, hospSignTex(), {});
+      // the name stands on the canopy's front edge (on the wall behind it the canopy hid it from every low angle)
+      K.box(hx, 3.45, hz + 10.86, 9.1, 1.16, 0.1, { color: '#e8e4da', roughness: 0.6 });
+      K.plane(hx, 4.03, hz + 10.92, 8.9, 1.1, hospSignTex(), {});
       // the entrance: sliding glass doors, lit from inside, the foyer beyond
       K.box(hx, 0, hz + 5.95, 4.4, 2.7, 0.1, { color: '#2e3a3e', roughness: 0.2, metalness: 0.3 });
       K.plane(hx, 1.3, hz + 6.02, 4.1, 2.5, { color: '#f4ead2', emissive: '#f4ead2', emissiveIntensity: 0.35, roughness: 0.4 }, {});
@@ -1038,7 +1051,7 @@
   // e_room12_day — Room 12 in morning daylight. x 0–6.4, z 0–4.6; the window on the north wall (the real hill beyond),
   // the bed's head against the west wall, the door in the south wall (x 4.9) onto the ward corridor.
   // =================================================================================================================
-  const RD = { W: 6.4, D: 4.6, H: 2.8, bed: [1.45, 2.2], nan: [1.02, 2.2], luke: [0.85, 0.75], chair: [1.5, 3.25], door: [4.9, 4.6], win: [2.9, 3.0] };
+  const RD = { W: 6.4, D: 4.6, H: 2.8, bed: [1.45, 2.2], nan: [1.02, 2.2], luke: [0.85, 0.75], chair: [1.45, 3.1], door: [4.9, 4.6], win: [2.9, 3.0] };
   const r12ViewTex = () => ctex('r12view', 1024, 512, (x, w, h, r) => {
     const sky = x.createLinearGradient(0, 0, 0, h * 0.62);
     sky.addColorStop(0, '#9fb8cc'); sky.addColorStop(0.6, '#e2d6c0'); sky.addColorStop(1, '#f2d9b0');
@@ -1204,10 +1217,10 @@
     const L = G.actor('lukeday', 'luke', { rig: { habits: [], idleLife: false, hold: { L: ['phone', { case: '#8a6f94', screen: false }] } } });
     L.place(RD.luke[0], RD.luke[1] - 0.05, 160); L.pose('sit', { seat: 0.46 });
     if (L.raw) { L.raw.idleLife = false; L.raw.eyes('closed'); L.raw.lookAt(V3(RD.luke[0] + 0.6, 0.3, RD.luke[1] + 1.2)); }
-    const A = aidanOn(G, RD.door[0] - 0.05, 4.3, -40, { expr: 'tired' });
-    if (A.raw) { A.raw.posture = Math.max(A.raw.posture || 0, 0.75); try { if (A.raw.held && A.raw.held.R) A.raw.held.R.visible = false; } catch (e) { /* rig */ } }
+    const A = aidanOn(G, RD.door[0] - 0.05, 4.3, -40, { expr: 'tired', phone: false });
+    if (A.raw) A.raw.posture = Math.max(A.raw.posture || 0, 0.75);
     const PB = END_pendantBox();
-    A.hold('L', PB.obj, { pose: 'hold' });
+    A.hold('L', PB.obj, { pose: 'cup' });                 // (held in front of him, where it reads: the small box)
     PB.obj.position.set(0.0, -0.035, 0.02); PB.obj.rotation.set(0, 0, 90 * D2R);
     // (she looks up at him: a look target lifted a little above his eyes keeps her chin up through the gestures)
     const lookUp = (X, lift = 0.18) => { const h = headOf(X); return [h.x, h.y + lift, h.z]; };
@@ -1263,11 +1276,12 @@
       if (t > 6.5 && t < 6.6) N.eyes('down');
       if (t > 8.5 && t < 8.6) { N.eyes('at', A); q(N.gesture('nod')); }
       if (t > 12 && t < 12.1) N.expr('cry');
-      if (t > 12.6 && t < 12.7) q(A.gesture('reach', { hand: 'R', target: [1.22, 0.87, 2.6], hold: true, dur: 1.2 }));
+      // (his hand onto the blanket at the bed's edge, within reach from the chair — a bent arm, not a straight one)
+      if (t > 12.6 && t < 12.7) q(A.gesture('reach', { hand: 'R', target: [1.27, 0.88, 2.74], hold: true, dur: 1.2 }));
       return t >= 15;
     });
     // ---- 4. close on hands: her hand rests on his --------------------------------------------------------------------
-    G.cam({ pos: [2.3, 1.04, 2.98], target: [1.18, 0.9, 2.72], fov: 28, to: { pos: [2.22, 1.03, 2.94], fov: 26 }, dur: 8 });
+    G.cam({ pos: [2.12, 1.1, 3.02], target: [1.22, 0.9, 2.66], fov: 30, to: { pos: [2.05, 1.08, 2.98], fov: 28 }, dur: 8 });
     await G.wait(1.0);
     {
       const hp = A.raw && A.raw.bones && A.raw.bones.handR ? wpos(A.raw.bones.handR) : V3(1.2, 0.89, 2.75);
@@ -1344,7 +1358,7 @@
     await G.title('SIGNAL HILL', { fadeIn: 2.2, dur: 3.2, fadeOut: 2.2 });
     await G.wait(1.0);
     // (state: none — but the scene gives Aidan's body back as it found it)
-    try { if (Player.actor && Player.actor.held && Player.actor.held.R) Player.actor.held.R.visible = true; } catch (e) { /* rig */ }
+    try { const pa = Player.actor; if (pa && pa.held && pa.held.R) { pa.held.R.visible = true; pa.armPose('R', 'phone'); } } catch (e) { /* rig */ }
     A.hold('L', null);
     if (A.raw) A.raw.finishGestures();
   }, { letterbox: true, skippable: true });
@@ -1483,7 +1497,11 @@
     K.plane(...P(0.67, (BL + R0) / 2 + 0.02, 0), 0.62, ZI * 2, glass, { rot: [0, -90, -58], double: true });
     K.plane(...P(-1.36, (BL + R0) / 2, 0), 0.5, ZI * 2, glass, { rot: [0, 90, 10], double: true });
     bx(1.45, 0.3, 0, 0.9, 0.5, ZI * 2 + 0.2, PAINT);
+    // the rear-view mirror on its stem (its glass faces the seats: it catches the daylight — without the stem and the
+    // glass it read as a black bar floating in the windscreen)
     bx(0.4, R0 - 0.16, 0, 0.04, 0.06, 0.24, { color: '#18191a' });
+    bx(0.42, R0 - 0.105, 0, 0.02, 0.08, 0.025, TRIM);
+    K.plane(...P(0.378, R0 - 0.13, 0), 0.22, 0.045, { color: '#b9c4c6', roughness: 0.15, metalness: 0.5 }, { rotY: -90 });
     K.cyl(...P(0.38, R0 - 0.36, 0.02), 0.0015, 0.2, '#d8d4c8');
     // his things: the servo coffee in the cup holder, receipts on the dash, the P plate
     K.prop('coffee_cup', ...[cx + 0.18, cz], 0, { y: 0.52 });
@@ -1736,8 +1754,10 @@
       if (sp) {
         sp.visible = true;
         const n = V3(0, 0, 1).applyQuaternion(sp.quaternion), up = V3(0, 1, 0).applyQuaternion(sp.quaternion), c0 = sp.position.clone();
-        const cp = c0.clone().addScaledVector(n, 0.24).addScaledVector(up, -0.01);
-        G.cam({ pos: [cp.x, cp.y, cp.z], target: [c0.x, c0.y, c0.z], fov: 34, to: { pos: [cp.x - n.x * 0.02, cp.y - n.y * 0.02, cp.z - n.z * 0.02], fov: 32 }, dur: 9 });
+        // (close — any further back and the lens is inside his chest — but wide enough that the whole screen, "TO: LUKA"
+        // at its top, stays inside the letterbox as it pushes in)
+        const cp = c0.clone().addScaledVector(n, 0.25).addScaledVector(up, -0.004);
+        G.cam({ pos: [cp.x, cp.y, cp.z], target: [c0.x, c0.y, c0.z], fov: 46, to: { pos: [cp.x - n.x * 0.015, cp.y - n.y * 0.015, cp.z - n.z * 0.015], fov: 45 }, dur: 9 });
       }
       let typed = '';
       for (const ch of RESIGN) {
@@ -1800,7 +1820,7 @@
     await G.textOnBlack('He never found out if she was okay.', 4.5);
     await G.wait(0.8);
     // (state: none — the scene gives Aidan's body back as it found it)
-    try { if (Player.actor && Player.actor.held && Player.actor.held.R) Player.actor.held.R.visible = true; } catch (e) { /* rig */ }
+    try { const pa = Player.actor; if (pa && pa.held && pa.held.R) { pa.held.R.visible = true; pa.armPose('R', 'phone'); } } catch (e) { /* rig */ }
     S.flags.p0_carDead = true;
   }, { letterbox: true, skippable: true });
 
@@ -1914,7 +1934,7 @@
       tx(x, '36-MONTH PLAN', w / 2, 262, 54, BR.tealDark, { align: 'center', weight: '900', font: FN.heavy });
       tx(x, 'UNLIMITED EVERYTHING', w / 2, 320, 30, BR.ink, { align: 'center', weight: 'bold' });
       const small = ['Unlimited calls, texts and data, forever-ish.', 'Unlimited Ollie stickers (12 included).', 'Cake provided on activation.', 'Customer confirms they have been asked', 'what they need it to work with.', 'Party lights not included. They are.', 'Confetti is non-refundable.', 'Terms and conditions: be nice.'];
-      small.forEach((sx, i) => tx(x, sx, 40, 400 + i * 38, 22, '#3a4442', { font: FN.mono }));
+      small.forEach((sx, i) => tx(x, sx, 40, 400 + i * 38, 19, '#3a4442', { font: FN.mono, maxWidth: w - 76 }));
       for (let i = 0; i < 16; i++) { x.fillStyle = 'rgba(40,50,48,0.16)'; x.fillRect(40, 740 + i * 26, w - 80 - (i % 3) * 40, 9); }
       x.strokeStyle = BR.ink; x.lineWidth = 3; x.beginPath(); x.moveTo(60, 1260); x.lineTo(w - 60, 1260); x.stroke();
       tx(x, 'SIGN HERE', 60, 1300, 26, BR.ink, { weight: 'bold' });
@@ -1989,8 +2009,9 @@
     x.fillStyle = '#ffffff'; x.fillRect(0, 0, w, h);
     for (let i = 0; i < 40; i++) { x.fillStyle = ['#ffcc00', '#13a6a2', '#ff6f91'][i % 3]; x.beginPath(); x.arc(r() * w, r() * h, 3 + r() * 5, 0, Math.PI * 2); x.fill(); }
     x.font = `900 ${h * 0.46}px ${FN.heavy}`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.lineJoin = 'round';
-    x.lineWidth = 10; x.strokeStyle = '#0b4f52'; x.strokeText('YOU\'RE PRE-APPROVED, AIDAN!', w / 2, h * 0.55);
-    x.fillStyle = BR.yellow; x.fillText('YOU\'RE PRE-APPROVED, AIDAN!', w / 2, h * 0.55);
+    // (squeezed to the banner's width: at this size the line is wider than the cloth)
+    x.lineWidth = 10; x.strokeStyle = '#0b4f52'; x.strokeText('YOU\'RE PRE-APPROVED, AIDAN!', w / 2, h * 0.55, w * 0.93);
+    x.fillStyle = BR.yellow; x.fillText('YOU\'RE PRE-APPROVED, AIDAN!', w / 2, h * 0.55, w * 0.93);
   });
   const skyWinTex = () => ctex('skywin', 256, 256, (x, w, h, r) => {
     const g = x.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#4aa3e8'); g.addColorStop(1, '#bfe6ff'); x.fillStyle = g; x.fillRect(0, 0, w, h);
@@ -2225,7 +2246,8 @@
     }
     await G.wait(1.6);
     // ---- 5. the cast weigh in ----------------------------------------------------------------------------------------
-    G.cam({ pos: [5.55, 1.62, 7.95], target: [7.0, 1.5, 4.6], fov: 34 });
+    // (from the left of Ollie, who stands between the door and the cast: Chloe and Chase both in the clear)
+    G.cam({ pos: [4.6, 1.7, 7.6], target: [7.1, 1.5, 4.6], fov: 34 });
     q(cast.chase.gesture('hands_up'));
     await G.say('CHASE', 'LEGEND!');
     q(cast.chloe.gesture('laugh'));

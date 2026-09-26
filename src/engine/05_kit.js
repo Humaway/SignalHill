@@ -1217,8 +1217,9 @@ const Kit = (() => {
       }
       return obj;
     };
-    K.collider = (x0, z0, x1, z1, o = {}) => { const b = normBox([x0, z0, x1, z1]); return collRec((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, (b[2] - b[0]) / 2, (b[3] - b[1]) / 2, 0, { ...o, world: W(o) }); };
-    K.colliderRot = (cx, cz, w, d, rotDeg = 0, o = {}) => collRec(cx, cz, w / 2, d / 2, rotDeg, { ...o, world: W(o) });
+    // (bare: an invisible collider with no geometry of its own — Cam.check's lens test ignores it)
+    K.collider = (x0, z0, x1, z1, o = {}) => { const b = normBox([x0, z0, x1, z1]); const r = collRec((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, (b[2] - b[0]) / 2, (b[3] - b[1]) / 2, 0, { ...o, world: W(o) }); r.bare = true; return r; };
+    K.colliderRot = (cx, cz, w, d, rotDeg = 0, o = {}) => { const r = collRec(cx, cz, w / 2, d / 2, rotDeg, { ...o, world: W(o) }); r.bare = true; return r; };
     K.blocker = (x0, z0, x1, z1, msg, o = {}) => K.collider(x0, z0, x1, z1, { h: 3, ...o, blocker: msg ?? "I can't go that way." });
     K.ambient = (color, intensity) => { rb.ambient = { color, intensity }; return rb.ambient; };
 
@@ -2676,7 +2677,85 @@ const Kit = (() => {
       for (const a of ws) { let n = 0; for (const b of ws) if (a.pos.distanceTo(b.pos) < 14) n++; most = Math.max(most, n); }
       if (most > 8) console.warn(`[Kit] room ${ctx.def.id}: ${most} point lights within ~14 m of each other in the ${w} world (pool: the 8 nearest Aidan are real) — pass light:false (or real:false) to some`);
     }
+    if (!ctx.detached) { try { lintRoom(ctx, rb); } catch (e) { console.error('[Kit] lint', e); } }
     return rb;
+  }
+  // Build-time authoring checks (warnings, once per room and thing):
+  //  * an interactable Aidan can't reach — no floor (any layer) within its use radius from which it is no more than
+  //    2.6 m above his feet (World.nearestInteractable drops anything higher as "another level") and no more than 1 m
+  //    below (a yBand limits the layers);
+  //  * an examine within 0.6 m (XZ) of a door, payphone or ladder: the two compete for the same E press — the
+  //    nearer / better-faced one always wins, so one of them can't be used head-on (move it, or give one {prio});
+  //  * a seam: two walkable floors of about the same height whose edges run side by side less than 0.5 m apart, with
+  //    nothing walkable between them — an invisible strip Aidan can't cross.
+  function lintRoom(ctx, rb) {
+    const rid = String(ctx.def.id || 'room');
+    const outOf = (w) => w === 'outage';
+    const overlapW = (a, b) => !a || !b || a === 'both' || b === 'both' || a === b;
+    // (every floor layer counts, stacked or not: rooms that sort their floors at run time — a stairwell — stay quiet)
+    const layersAt = (x, z, outage) => floorLayers(rb.floors, x, z, outage);
+    const r2 = (v) => Math.round(v * 100) / 100;
+    // unreachable interactables
+    for (const it of rb.interactables) {
+      if (it.kind === 'ladder' || !it.pos) continue;
+      const outage = outOf(it.world), lim = (it.r ?? 1.2) + 0.1;
+      let best = Infinity, any = false;
+      for (const rr of [0, 0.3, 0.6, 0.9, 1.2, 1.6, 2.0]) {
+        if (rr > lim) break;
+        const n = rr === 0 ? 1 : 12;
+        for (let k = 0; k < n; k++) {
+          const a = (k / n) * Math.PI * 2, x = it.pos.x + Math.cos(a) * rr, z = it.pos.z + Math.sin(a) * rr;
+          for (const y of layersAt(x, z, outage)) {
+            if (it.yBand && (y < it.yBand[0] - 0.01 || y > it.yBand[1] + 0.01)) continue;
+            any = true;
+            const dy = it.pos.y - y;
+            if (dy >= -1.0) best = Math.min(best, dy);
+          }
+        }
+      }
+      if (!any) continue;                                        // no floor around it at all (a set piece the player never walks)
+      if (best > 2.6) warnOnce(`reach:${rid}:${it.id}`, `[Kit] room ${rid}: ${it.kind} "${it.id}" at (${r2(it.pos.x)}, ${r2(it.pos.y)}, ${r2(it.pos.z)}) is ${best === Infinity ? 'below every floor around it' : r2(best) + ' m above the floor beneath it'} — Aidan can't use it from there (World.nearestInteractable ignores anything over 2.6 m above his feet or 1 m below); lower it or give it a yBand on the level it belongs to`);
+    }
+    // examines competing with a door (or a payphone / ladder — things that stay) for the same E press; interactables
+    // whose when() is false at build time (decorative doors, conditional lines) are left out, and so are pickups (the
+    // pickup takes the first press, then it's gone and the examine is free)
+    const liveNow = (it) => { try { return !it.when || !!it.when(S); } catch (e) { return true; } };
+    const hard = rb.interactables.filter((it) => ['door', 'payphone', 'ladder'].includes(it.kind) && it.prio === undefined && liveNow(it));
+    for (const ex of rb.interactables) {
+      if (ex.kind !== 'examine' || ex.prio !== undefined || !ex.pos || !liveNow(ex)) continue;
+      for (const d of hard) {
+        if (!overlapW(ex.world, d.world)) continue;
+        const dxz = Math.hypot(ex.pos.x - d.pos.x, ex.pos.z - d.pos.z);
+        if (dxz >= 0.6 || Math.abs(ex.pos.y - d.pos.y) > 1.6) continue;
+        warnOnce(`clash:${rid}:${ex.id}:${d.id}`, `[Kit] room ${rid}: examine "${ex.id}" sits ${r2(dxz)} m from ${d.kind} "${d.id}" — they compete for the same E press (the nearer, better-faced one wins; the ${d.kind} at priority 0, the examine at +0.6 m), so one of them can't be used head-on. Move the examine off the ${d.kind}'s line, or give one of them {prio}`);
+      }
+    }
+    // seams between floors
+    const F = rb.floors;
+    if (F.length > 1 && F.length < 700) {
+      for (let i = 0; i < F.length; i++) for (let j = i + 1; j < F.length; j++) {
+        const a = F[i], b = F[j];
+        if (!overlapW(a.world, b.world)) continue;
+        const outage = a.world === 'outage' || b.world === 'outage';
+        for (const ax of ['x', 'z']) {
+          const o = ax === 'x' ? 'z' : 'x';
+          const lo = Math.max(a[o + '0'], b[o + '0']), hi = Math.min(a[o + '1'], b[o + '1']);
+          if (hi - lo < 0.5) continue;                            // edges must run side by side for at least 0.5 m
+          const g1 = b[ax + '0'] - a[ax + '1'], g2 = a[ax + '0'] - b[ax + '1'];
+          const gap = g1 > 0 ? g1 : g2 > 0 ? g2 : 0;
+          if (!(gap > 0.02 && gap < 0.5)) continue;
+          const e0 = g1 > 0 ? a[ax + '1'] : b[ax + '1'], mid = e0 + gap / 2, m2 = (lo + hi) / 2;
+          const px = ax === 'x' ? mid : m2, pz = ax === 'x' ? m2 : mid;
+          if (floorAt(F, px, pz, outage) !== null) continue;     // something walkable spans the gap
+          const ya = rampY(a, ax === 'x' ? a.x1 * (g1 > 0) + a.x0 * (g1 <= 0) : m2, ax === 'z' ? a.z1 * (g1 > 0) + a.z0 * (g1 <= 0) : m2);
+          const yb = rampY(b, ax === 'x' ? b.x0 * (g1 > 0) + b.x1 * (g1 <= 0) : m2, ax === 'z' ? b.z0 * (g1 > 0) + b.z1 * (g1 <= 0) : m2);
+          if (Math.abs(ya - yb) > 0.45) continue;                 // a step Aidan couldn't take anyway
+          const yy = Math.min(ya, yb);                            // a wall standing in the seam: nothing to cross anyway
+          if (rb.colliders.some((c) => overlapW(c.world, a.world) && !c.blocker && (c.y || 0) <= yy + 1.2 && (c.y || 0) + c.h >= yy + 0.4 && collide(c, px, pz, 0.02))) continue;
+          warnOnce(`seam:${rid}:${i}:${j}:${ax}`, `[Kit] room ${rid}: a ${r2(gap)} m unwalkable seam between two floors at ${ax} ≈ ${r2(mid)} (${o} ${r2(lo)}–${r2(hi)}) — Aidan can't cross it; make the floors meet or overlap`);
+        }
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------------------------------------------

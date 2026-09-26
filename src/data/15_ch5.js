@@ -25,7 +25,8 @@
 //                 (SE → c5_print:door), the south collaboration zone (Huddle Whiteboard 3, the fire stairs → c6_firestairs),
 //                 the balcony ring round the 14 × 14 atrium void (the three-storey leaderboard on its north side, the
 //                 feature stair down its west side → c5_atrium:stairs). The Standard patrols the ring clockwise,
-//                 pausing 4 s at each meeting-room door; CALL 5; Tethered ×1, Reach ×1, the Borrowed "Chloe". After 5-2
+//                 pausing 4 s at each meeting-room door; CALL 5 as he steps onto the floor (its keys on the stairs
+//                 behind him); Tethered ×1, Reach ×1, the Borrowed "Chloe". After 5-2
 //                 the Outage: contracts on every desk, circuit carpet, receipts, the Unread in the kitchenette, the
 //                 Pedestal rising through the void.
 //   c5_print      8 × 5 m print room: CUTSCENE 5-2 "Print Room"; chloe_pin on the floor; the copier prints rmap_office.
@@ -55,7 +56,7 @@
     let t = TEXC.get(key);
     if (t) return t;
     const c = document.createElement('canvas'); c.width = w; c.height = h;
-    const ctx = c.getContext('2d');
+    const ctx = c.getContext('2d', { willReadFrequently: true });
     draw(ctx, w, h, U.rng(U.hash('c5:' + key)));
     t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
@@ -227,7 +228,9 @@
     // the Standard at a Level 4 window (from the forecourt) — gone once you've looked away and back
     if (o.figure) {
       const fig = K.plane(o.figure[0], L4 + 1.55, tz + 0.1, 0.9, 2.4, figureTex(), { transparent: true, name: 'c5:towerfig' });
-      fig.material.depthWrite = false;
+      // (drawn after the lit floor's glazing: sorted by centre distance the wider glazing plane would otherwise paint
+      // over it)
+      fig.material.depthWrite = false; fig.renderOrder = 3;
       return fig;
     }
     return null;
@@ -486,7 +489,7 @@
   // monolith sign, planters, benches, the canopy, the revolving door (x 16) → c5_lobby:doors. Low, looking up, the
   // tower is ten storeys of dark glass with one lit floor — and something tall at one of its windows.
   // =================================================================================================================
-  const FC = { door: 16, figX: 22.6 };
+  const FC = { door: 16, figX: 19.75 };                                  // (figX: the middle of a lit bay)
   defineRoom({
     id: 'c5_forecourt', name: 'REGIONAL OFFICE FORECOURT', area: 'REGIONAL OFFICE', chapter: 5, outdoor: true, surface: 'concrete', ambient: 'wind',
     fog: { density: 0.035 },
@@ -495,7 +498,9 @@
     entries: { road: [16, 20.8, 180], doors: [16, 3.2, 0], start: [16, 20.8, 180] },
     cameras: [
       // low from the road edge, looking up: ten floors of dark glass, one lit
-      { id: 'c5_forecourt:low', vol: [8, 9, 24, 24.3], type: 'pan', pos: [16.4, 0.55, 27.2], target: [16, 10.5, 4], fov: 52, pan: { lag: 0.35, yaw: 55, pitch: 36 } },
+      // (the pan can only dip a little: he stays low in the frame and the lit floor — and whoever stands at its
+      // windows — stays in it)
+      { id: 'c5_forecourt:low', vol: [8, 9, 24, 24.3], type: 'pan', pos: [16.4, 0.55, 27.2], target: [16, 11.2, 4], fov: 54, pan: { lag: 0.35, yaw: 55, pitch: 10 } },
       // across the forecourt from the monolith's side (west) and from the flagpoles (east)
       { id: 'c5_forecourt:west', vol: [0, 1.2, 8, 24.3], type: 'pan', pos: [13, 4.2, 12.5], target: [3, 0.6, 12.5], fov: 48, pan: { lag: 0.3, yaw: 75, pitch: 40 } },
       { id: 'c5_forecourt:east', vol: [24, 1.2, 32, 24.3], type: 'pan', pos: [19, 4.2, 12.5], target: [29, 0.6, 12.5], fov: 48, pan: { lag: 0.3, yaw: 75, pitch: 40 } },
@@ -586,10 +591,12 @@
       K.sign('DELIVERIES — BUZZ SECURITY', 0.18, 3.2, 5.2, 2.2, 0.3, { style: 'council', bg: '#e8e4d2', rotY: 90 });
       K.prop('roller_door', 31.8, 7.2, -90, { w: 3.6, h: 2.6, open: 0, color: '#6a7470' });
       K.sign('CARPARK — PERMIT HOLDERS', 31.83, 3.1, 7.2, 2.6, 0.3, { style: 'council', bg: '#e8e4d2', rotY: -90 });
+      K.interact(31.3, 1.2, 7.2, async (G) => { G.sfx('door_locked', { pos: [31.8, 1.2, 7.2] }); await G.msg('It\'s locked.'); await G.think('Permit holders only. [beat] Even the cars had to earn it.'); }, { id: 'c5_forecourt:carpark', r: 1.6 });
       K.writing('IT\'LL BE FINE', 0.18, 1.5, 13.5, 2.0, { rotY: 90, world: 'fog' });
       K.dress('leaves', [0.5, 2, 31.5, 21.5], 70, { seed: 541 });
       K.dress('papers', [4, 6, 28, 20], 10, { seed: 542 });
-      K.sticker('sticker08', 6.62, 0.3, 16.5, 90, { size: 0.06 });
+      // (low on the monolith's east end face: the slab stands at 25°, so that face points 115°)
+      K.sticker('sticker08', 6.637, 0.3, 16.203, 115, { size: 0.06 });
       // the way back to the road
       K.exit({ id: 'c5_forecourt:road', box: [0.2, 23.4, 31.8, 24.3], to: 'c5_ringroad', entry: 'forecourt', sound: 'steps' });
       K.collider(0, 24.2, 32, 24.5, { h: 2 });
@@ -676,8 +683,10 @@
       { id: 'c5_lobby:hall', vol: [0, 7.4, 15.5, 11.4], type: 'pan', pos: [1.2, 4.5, 15.4], target: [9, 0.6, 8.6], fov: 48, pan: { lag: 0.3, yaw: 70, pitch: 44 } },
       // the security desk, side on
       { id: 'c5_lobby:desk', vol: [15.5, 7.4, 24, 11.4], type: 'static', pos: [9.4, 3.1, 13.2], target: [20.5, 0.6, 9.0], fov: 'fit' },
-      // the CCTV corner: high in the north-west, down over the gates, the dead lifts and the stairwell door
-      { id: 'c5_lobby:cctv', vol: [5.4, 0, 24, 7.4], type: 'static', pos: [1.0, 4.75, 1.1], target: [15.5, 0.2, 6.6], fov: 'fit' },
+      // high over the turnstiles: through the gates to the dead lifts and Stairwell A's door (NE)
+      { id: 'c5_lobby:gates', vol: [11, 0, 24, 7.4], type: 'pan', pos: [10.2, 4.55, 10.6], target: [18.5, 0.6, 1.8], fov: 50, pan: { lag: 0.3, yaw: 50, pitch: 46 } },
+      // the CCTV dome over the gate line: back along the north wall to the photo wall and the dead garden
+      { id: 'c5_lobby:cctv', vol: [5.4, 0, 11, 7.4], type: 'static', pos: [16.4, 4.55, 6.7], target: [7.6, 0.5, 2.8], fov: 'fit' },
     ],
     build(K) {
       const H = LB.H, TILE = { tex: 'tile', color: '#b1ada2' };
@@ -752,6 +761,7 @@
       K.box(2.5, 0, 3.45, 5.0, 0.5, 6.9, { tex: 'dirt', color: '#3e3a30' }, { collide: true });
       for (const [x, z] of [[1.5, 1.2], [3.2, 2.8], [1.4, 4.6], [3.0, 5.8]]) K.prop('shrub', x, z, 0, { w: 1.4, h: 1.2, dead: true, collide: false, y: 0.5 });
       K.prop('photo_wall', 9.6, 0.06, 0, { n: 8, title: 'TOP PERFORMERS — REGION', subject: 'blank' });
+      K.light('lamp', 9.6, 3.1, 0.6, { color: '#e6dcc4', intensity: 1.8, distance: 5.5, bank: 2, name: 'c5lb:photos' });
       K.prop('couch', 8.4, 3.4, 90, { variant: 'vinyl', color: '#2e3a3a', len: 2.0 });
       K.box(10.2, 0, 3.4, 0.7, 0.4, 1.2, { tex: 'wood', color: '#4a3a2a' }, { collide: true });
       K.prop('mug', 10.1, 3.2, 20, { y: 0.4, text: 'WORLD\'S OKAYEST MANAGER' });
@@ -766,7 +776,7 @@
       K.prop('desk_lamp', 22.9, LB.desk[1] - 0.25, -120, { y: 1.0, lit: true, bank: 2 });
       K.light('led', LB.stairX + 0.7, 1.25, 0.1, { color: '#2aff5a' });
       // ---- examine lines (Aidan) --------------------------------------------------------------------------------
-      K.examine(6.6, 1.3, 12.3, ['Store rankings, scrolling. Every name blurred except one.', 'CHLOE. At the top. [beat] She\'s always at the top.'], { id: 'c5lb:rankings', r: 1.5 });
+      K.examine(6.6, 1.3, 12.3, async (G) => { await G.think('Store rankings, scrolling. Every name blurred except one. CHLOE, at the top.'); await G.think('She\'s always at the top.'); }, { id: 'c5lb:rankings', r: 1.5 });
       K.interact(LB.lifts[0] + 0.9, 1.1, 0.5, async (G) => { G.sfx('click', { pos: [LB.lifts[0] + 0.9, 1.1, 0.1] }); await G.msg('"OUT OF SERVICE"'); await G.think('Stairs, then.'); }, { id: 'c5lb:lift1', r: 0.9 });
       K.interact(LB.lifts[1] + 0.9, 1.1, 0.5, async (G) => { G.sfx('click', { pos: [LB.lifts[1] + 0.9, 1.1, 0.1] }); await G.msg('"OUT OF SERVICE"'); await G.think('Stairs, then.'); }, { id: 'c5lb:lift2', r: 0.9 });
       K.interact(11.2, 1.0, 7.9, async (G) => {
@@ -901,7 +911,7 @@
     D.vanished = true;                                            // (keeps the engine's own AI and keys loop out of it)
     const keysOn = !e.hidden && !D.gone && !e.removed;
     try { Snd.loop('standard_keys', keysOn, { id: 'c5:climbkeys', pos: [e.pos.x, e.pos.y + 1.4, e.pos.z], vol: 0.7 }); } catch (err) { /* audio */ }
-    if (D.contact) { C5_climberContact(e, dt); return; }
+    if (D.c5contact) { C5_climberContact(e, dt); return; }
     if (D.gone) {
       D.goneT -= dt;
       if (D.goneT <= 0 && ai) {
@@ -938,7 +948,7 @@
   // "Got a sec?" — a long hand on his shoulder, all sound drains away, 40 damage; it's gone for 45 s, keys fading
   function C5_climberStartContact(e) {
     const D = e.data, a = e.actor;
-    D.contact = { t: 0 }; D.lastContact = D.t || 0;
+    D.c5contact = { t: 0 }; D.lastContact = D.t || 0;
     e.yaw = Math.atan2(Player.pos.x - e.pos.x, Player.pos.z - e.pos.z);
     a.setAnim('idle', { blend: 0.3 });
     a.gesture('hand_on_shoulder', { hand: 'L', target: Player.actor, dur: 3.2 });
@@ -948,7 +958,7 @@
     sfx('keys', { pos: [e.pos.x, e.pos.y + 1.4, e.pos.z], vol: 0.5 });
   }
   function C5_climberContact(e, dt) {
-    const C = e.data.contact, a = e.actor;
+    const C = e.data.c5contact, a = e.actor;
     C.t += dt;
     if (C.t > 0.8 && !C.said) { C.said = true; Enemies.say('Got a sec?', 'quiet', 2.2); }
     if (C.t > 1.3 && !C.hit) { C.hit = true; if (!Player.dead) Player.damage(40, e, { force: true }); }
@@ -960,17 +970,17 @@
     if (C.gone) {
       C.fade = (C.fade || 0) + dt;
       a.setOpacity(1 - clamp(C.fade / 1.2));
-      if (C.fade >= 1.2) { e.data.contact = null; e.data.gone = true; e.data.goneT = 45; Enemies.visible(e, false); e.noBody = true; }
+      if (C.fade >= 1.2) { e.data.c5contact = null; e.data.gone = true; e.data.goneT = 45; Enemies.visible(e, false); e.noBody = true; }
     }
   }
   Enemies.defineType('c5_climber', {
     hp: Infinity, radius: 0.35, height: 2.9, tell: 'battery', downs: false, invincible: true, stompable: false, lockable: true,
-    create(e, def) { STD_T().create(e, def); e.data.vanished = true; e.data.s = def.s ?? 0; e.data.dir = 1; e.data.scripted = !!def.scripted; e.data.t = 0; C5_climberPlace(e, 0); },
+    create(e, def) { STD_T().create(e, def); e.puppet = true; e.data.vanished = true; e.data.s = def.s ?? 0; e.data.dir = 1; e.data.scripted = !!def.scripted; e.data.t = 0; C5_climberPlace(e, 0); },
     update: C5_climberUpdate,
     onHit(e) { sfx('thud', { pos: [e.pos.x, e.pos.y + 1.4, e.pos.z], vol: 0.4 }); if (Math.random() < 0.4) e.actor.gesture('pen_click', { hand: 'L' }); return false; },
     stun() { return false; }, knockdown() { return false; },
     threat: (e) => !e.hidden && !e.data.gone,
-    remove(e) { try { Snd.loop('standard_keys', false, { id: 'c5:climbkeys', fade: 1.2 }); } catch (err) { /* audio */ } if (e.data.contact) Player.lock('c5climb', false); try { STD_T().remove(e); } catch (err) { /* dispose */ } if (C5.climber === e) C5.climber = null; },
+    remove(e) { try { Snd.loop('standard_keys', false, { id: 'c5:climbkeys', fade: 1.2 }); } catch (err) { /* audio */ } if (e.data.c5contact) Player.lock('c5climb', false); try { STD_T().remove(e); } catch (err) { /* dispose */ } if (C5.climber === e) C5.climber = null; },
   });
   function C5_spawnClimber(s, o = {}) {
     if (C5.climber && !C5.climber.removed) C5.climber.remove();
@@ -1028,7 +1038,7 @@
       }
       K.box(2.3, -0.05, 3.3, ST.v1 - ST.v0, 0.05, ST.sz - ST.nz, { tex: 'concrete_wet', color: '#5f605a' });
       K.box(3.95, 0, 3.3, 1.3, 1.6, 3.6, { tex: 'cardboard', color: '#8a7658' });
-      K.prop('box_stack', 3.95, 4.3, 12, { n: 4 }); K.prop('mop_bucket', 2.0, 5.3, 200, {});
+      K.prop('box_stack', 3.95, 4.3, 12, { n: 4, y: 0 }); K.prop('mop_bucket', 2.0, 5.3, 200, {});
       K.dress('papers', [1.4, 1.6, 3.2, 5.0], 5, { seed: 561, y: 0.01 });
       K.ceiling(0, 0, ST.W, ST.D, ST.roof, CONC);
       // walls: four storeys of painted block, a door in the south wall of each landing
@@ -1203,7 +1213,9 @@
       await G.wait(2.6);
     }
     // 3. SHOT — close on Aidan's face, eyes wide. The phone's battery icon drops a notch.
-    if (A.raw) { A.raw.armPose('R', 'phone_look'); A.raw.expr('wide'); A.raw.eyes('at', e.actor); }
+    //    (the head turned down toward the void, the eyes straight out of it — wide open, not lidded by a steep look)
+    A.look([3.4, y2 + 1.2, 3.75]);
+    if (A.raw) { A.raw.armPose('R', 'phone_look'); A.raw.expr('wide', { k: 1 }); A.raw.eyes('ahead'); }
     G.bars({ n: 0, battery: 0.75 });
     if (fill) fill.on(false);
     { const p0 = C5_rel(A, 0.52, -0.08, -0.36), p1 = C5_rel(A, 0.44, -0.07, -0.34), t0 = C5_rel(A, 0.1, 0, -0.2); G.cam({ pos: p0, target: t0, fov: 32, to: { pos: p1, target: t0, fov: 30 }, dur: 3 }); }
@@ -1214,12 +1226,17 @@
       let sp;
       if (scr && scr.geometry) { if (!scr.geometry.boundingBox) scr.geometry.computeBoundingBox(); const bb = scr.geometry.boundingBox; scr.updateWorldMatrix(true, false); sp = scr.localToWorld(new THREE.Vector3((bb.min.x + bb.max.x) / 2, bb.min.y + (bb.max.y - bb.min.y) * 0.8, (bb.min.z + bb.max.z) / 2)); }
       else sp = C5_worldOf(A.raw.root).add(new THREE.Vector3(0, 1.1, 0));
+      // his eye line down onto the screen, far enough back that the fingers round its edges stay at the edges of the
+      // frame and the status row (NO SERVICE … the battery, top right) reads whole
+      let nrm = null;
+      if (scr && scr.geometry) { const bb = scr.geometry.boundingBox, c0 = new THREE.Vector3((bb.min.x + bb.max.x) / 2, (bb.min.y + bb.max.y) / 2, (bb.min.z + bb.max.z) / 2); nrm = scr.localToWorld(c0.clone().add(new THREE.Vector3(0, 0, 1))).sub(scr.localToWorld(c0.clone())).normalize(); }
       const hp = C5_headAt(A);
-      const cp = sp.clone().lerp(hp, 0.28);
-      G.cam({ pos: [cp.x, cp.y + 0.03, cp.z], target: [sp.x, sp.y, sp.z], fov: 24 });
+      if (!nrm || nrm.dot(hp.clone().sub(sp)) < 0) nrm = hp.clone().sub(sp).normalize();
+      const cp = sp.clone().addScaledVector(nrm, 0.3).lerp(hp, 0.15);
+      G.cam({ pos: [cp.x, cp.y + 0.02, cp.z], target: [sp.x, sp.y - 0.012, sp.z], fov: 30 });
     }
     await G.wait(0.7);
-    G.bars({ n: 0, battery: 0.5 });
+    G.bars({ n: 0, battery: 0.5, letterbox: true });
     await G.wait(1.2);
     G.sfx('keys', { pos: [e.pos.x, e.pos.y + 1.6, e.pos.z], vol: 0.8, n: 2 });
     await G.wait(0.6);
@@ -1496,7 +1513,10 @@
       // the open plan: a rail along the west walkway at head height, looking across the desks to the windows
       { id: 'c5_level4:open', vol: [0, 5, 10.3, 30], type: 'rail', pos: [12.4, 2.4, 15], fov: 50, rail: { a: [12.4, 2.4, 5.5], b: [12.4, 2.4, 29.5], look: [0, 0.6, 0], lag: 0.35 } },
       // the north desks: a rail over the north walkway (behind the leaderboard) looking up the strip to the windows
-      { id: 'c5_level4:north', vol: [6, 0, 29.2, 7.6], type: 'rail', pos: [17, 2.5, 7.55], fov: 52, rail: { a: [7, 2.5, 7.55], b: [28.5, 2.5, 7.55], look: [0, 0.4, -1.0], lag: 0.35 } },
+      { id: 'c5_level4:north', vol: [6, 0, 29.2, 5.9], type: 'rail', pos: [17, 2.5, 7.55], fov: 52, rail: { a: [7, 2.5, 7.55], b: [28.5, 2.5, 7.55], look: [0, 0.4, -1.0], lag: 0.35 } },
+      // the walkway between the north desks and the void: from high over the north desks by the windows, across to it —
+      // the leaderboard's black back behind him, three storeys of it going down into the void
+      { id: 'c5_level4:walk', vol: [10.3, 5.9, 27, 8.2], pri: 1, type: 'pan', pos: [18.6, 2.72, 0.7], target: [18.6, 0.9, 7.1], fov: 52, pan: { lag: 0.3, yaw: 62, pitch: 32 } },
       // the stair corridor from the north-west, low: whatever comes out of Stairwell A comes toward the lens
       { id: 'c5_level4:corridor', vol: [27, 5.8, 40, 8.2], pri: 1, type: 'static', pos: [25.0, 0.95, 6.9], target: [36, 1.5, 7.2], fov: 'fit' },
       // the kitchenette, through its (cut-away) east wall from inside the stair core
@@ -1716,6 +1736,11 @@
         K.light('point', 3.4, 1.2, 15.6, { color: '#ff3b2a', intensity: 1.6, distance: 5 });
         K.light('point', 28.6, 2.1, 27.4, { color: '#8fb8b2', intensity: 2.2, distance: 8 });
         K.prop('fluoro_tube', 17, 3.0, 90, { h: H - 0.03, variant: 'troffer', flicker: true, bank: 2 });
+        // the way to the feature stair: a stuttering tube over the west walkway and one over the south zone, a cold
+        // spill at the stair head (the Pedestal's light coming up out of the void)
+        K.prop('fluoro_tube', 11.9, 16.5, 0, { h: H - 0.03, variant: 'troffer', flicker: true, bank: 1 });
+        K.prop('fluoro_tube', 24.5, 23.4, 90, { h: H - 0.03, variant: 'troffer', flicker: true, bank: 3 });
+        K.light('point', 13.4, 2.2, 9.2, { color: '#9cc9c2', intensity: 2.4, distance: 6.5 });
       });
       // ---- light (Fog): tubes over the open plan and the ring (a few), the rest dead; screens ------------------------
       K.fogOnly(() => {
@@ -1733,7 +1758,7 @@
       K.trigger([0, 5, 10.8, 30], (G) => C5_call5(G), { id: 'c5_level4:call5', once: false, when: () => L4_std() && !(S.calls && S.calls.luka5) && flag('c5_l4') && C5.stdOn });
       K.trigger([16, 24.2, 26, 30], (G) => C5_call5(G), { id: 'c5_level4:call5b', once: false, when: () => L4_std() && !(S.calls && S.calls.luka5) && flag('c5_l4') && C5.stdOn });
       // ---- examine lines (Aidan) --------------------------------------------------------------------------------------
-      K.examine(7.4, 1.0, 16.2, ['A kid\'s drawing on a desk. "My mum at work." A photo frame beside it — her face is a number.', 'Somebody\'s kid drew a picture on this desk. Their mum\'s a sixty-three.'], { id: 'c5l4:drawing', r: 1.3 });
+      K.examine(7.4, 1.0, 16.2, 'Somebody\'s kid drew a picture on this desk. Their mum\'s a sixty-three.', { id: 'c5l4:drawing', r: 1.3 });
       K.examine(2.8, 1.0, 8.4, ['A photo frame on a desk. The face in it is just "87%".', 'On the next desk, "112%". Every frame. Every face.'], { id: 'c5l4:frames', r: 1.3 });
       K.examine(32.9, 1.4, 16.5, async (G) => { await G.msg('"Q3: WHAT DOES WINNING LOOK LIKE?"'); await G.think('Winning looks like everyone\'s asleep.'); }, { id: 'c5l4:projector', r: 2.4 });
       K.examine(20, 1.4, 22.4, ['The leaderboard. Three floors tall.', '"CHLOE — #1 — 30 MONTHS." [beat] Thirty months without a single bad one.'], { id: 'c5l4:board', r: 2.6, when: () => !S.outage });
@@ -1754,7 +1779,7 @@
       K.examine(14.15, 1.0, 7.4, ['"Atrium closed — Regional Kick-off set-up in progress."', 'The stairs go down to Level 2. The rope\'s across them.'], { id: 'c5l4:gate', r: 1.3, world: 'fog' });
     },
     onUpdate(dt) {
-      C5_ambient(['#57625f', 0.36], ['#1f6f6a', 0.07]);
+      C5_ambient(['#5d6966', 0.44], ['#2a8a84', 0.5]);
       // the print room's breathing: slow, careful, close to the door
       const want = S.chapter === 5 && !flag('c5_chloe');
       if (want !== !!C5.breath) {
@@ -1817,6 +1842,9 @@
         await G.wait(0.6);
         G.sfx('breath', { pos: [L4.printDoor[0] + 1.6, 1.0, L4.printDoor[1]], vol: 0.6, n: 2, phone: false });
       }
+      // CALL 5 — the Standard is on the floor (or its keys are coming up the stairwell behind him): it rings as soon as
+      // he is on Level 4, so no route to the print room can miss it (the open-plan triggers stay as a fallback)
+      if (L4_std() && !(S.calls && S.calls.luka5)) { await G.wait(1.4); if (L4_std()) await C5_call5(G); }
     },
   });
   const G_door = (id) => { try { return World.door(id); } catch (e) { return null; } };
@@ -1866,6 +1894,10 @@
       { id: 'c5_print:south', vol: [0, 0, PR.W, PR.D], type: 'pan', pos: [2.55, 2.25, 7.5], target: [2.7, 0.6, 2.1], fov: 42, pan: { lag: 0.3, yaw: 30, pitch: 24 } },
       // through the (cut-away) north wall, low: the copier corner, the door beyond
       { id: 'c5_print:north', vol: [3.2, 0, PR.W, PR.D], pri: 1, type: 'static', pos: [2.2, 1.55, -3.1], target: [4.3, 0.55, 2.3], fov: 'fit' },
+      // high in the corner over the paper shelves, back at the door: the lit strip of Level 4 beyond it
+      { id: 'c5_print:door', vol: [0, 0, 1.6, PR.D], pri: 1, type: 'static', pos: [5.2, 2.4, 3.95], target: [0.6, 0.75, 2.05], fov: 'fit' },
+      // through the (cut-away) north wall, down the room to the print-queue board: nothing between him and the wall
+      { id: 'c5_print:queue', vol: [1.6, 2.2, 3.2, PR.D], pri: 1, type: 'static', pos: [1.1, 1.95, -2.7], target: [2.45, 0.5, 3.3], fov: 'fit' },
     ],
     build(K) {
       const W = PR.W, D = PR.D, H = PR.H, PART = { tex: 'plaster', color: '#b3b0a4' };
@@ -1886,7 +1918,7 @@
       K.collider(-3.3, 0, -0.02, D, { h: 3 });
       K.prop('fluoro_tube', -1.5, PR.door, 0, { h: 2.87, variant: 'troffer', bank: 1, name: 'c5pr:out' });
       K.prop('couch', -2.7, 1.2, 90, { variant: 'vinyl', color: '#2e4a4a', len: 1.8 });
-      K.fogOnly(() => K.prop('plant_pot', -2.8, 3.6, 0, { variant: 'palm' }));
+      K.fogOnly(() => K.prop('plant_pot', -2.8, 0.55, 0, { variant: 'palm' }));
       // ---- the copier, its light bar the only light: a pooled glow pulsing with each sweep ------------------------------
       K.prop('photocopier', PR.copier[0], PR.copier[1], -90, { light: true, name: 'c5_copier' });
       K.light('point', 4.3, 1.15, 1.05, { color: '#cfeee6', intensity: 0.001, distance: 6.5, name: 'c5pr:sweep' });
@@ -1951,7 +1983,7 @@
       K.examine(4.2, 0.4, 2.2, 'The floor where she was sitting. [beat] Still warm.', { id: 'c5pr:spot', r: 1.0, when: () => flag('c5_chloe') });
       K.examine(4.0, 1.0, 0.7, 'Boxes of glossy brochures. "The bundle — more of everything."', { id: 'c5pr:boxes', r: 1.2 });
     },
-    onUpdate() { C5_ambient(['#3d4644', 0.2], ['#1f5f5a', 0.1]); },
+    onUpdate() { C5_ambient(['#46504e', 0.3], ['#2a8a84', 0.4]); },
     onLeave() { C5_ambientOff(); C5.prSweep = null; },
     async onEnter(G, from) {
       if (S.chapter !== 5) return;
@@ -1989,7 +2021,7 @@
     if (door) door.open();
     G.sfx('door_open', { pos: [0, 1.1, PR.door], vol: 0.7 });
     G.cam({ pos: [cx - 0.55, 0.72, cz + 0.42], target: [0.3, 1.42, PR.door], fov: 38 });
-    await A.walkTo(0.38, PR.door, { speed: 0.8 });
+    await A.walkTo(0.38, PR.door, { speed: 0.8, face: 90 });
     A.look(C);
     await G.wait(0.5);
     await G.say('AIDAN', 'Chloe?');
@@ -2031,8 +2063,8 @@
     await G.say('CHLOE', 'Did you? Offer it? To her? The one you\'re looking for?');
     //    … close on Aidan for the long beat
     {
-      const p0 = C5_rel(A, 0.7, -0.22, -0.26), t0 = C5_rel(A, 0.05, 0, -0.08);
-      G.cam({ pos: p0, target: t0, fov: 30, to: { pos: C5_rel(A, 0.62, -0.2, -0.25), target: t0, fov: 29 }, dur: 10 });
+      const p0 = C5_rel(A, 0.95, -0.26, -0.24), t0 = C5_rel(A, 0.05, 0, -0.2);
+      G.cam({ pos: p0, target: t0, fov: 30, to: { pos: C5_rel(A, 0.86, -0.24, -0.23), target: t0, fov: 29 }, dur: 10 });
     }
     if (A.raw) { A.raw.expr('sad'); A.raw.eyes('down'); }
     await G.longBeat();
@@ -2047,6 +2079,8 @@
     await G.wait(0.8);
     // 5. SHOT — the copier light sweeps, and in its flash, for a single frame, the room is Outage. The siren starts.
     G.cam({ pos: [2.3, 1.62, 0.7], target: [PR.copier[0] - 0.2, 0.85, 1.55], fov: 44 });
+    // (the light banks die in the transition: a cold spill from the copier's glass keeps her readable through it)
+    G.addLight('point', { pos: [PR.copier[0] - 0.6, 1.5, PR.copier[1] + 0.5], color: '#cfeee6', intensity: 2.2, distance: 3.6 });
     await G.wait(0.9);
     C5.prFlash = 9;
     G.sfx('copier', { pos: [PR.copier[0], 1.0, PR.copier[1]], vol: 0.9 });
@@ -2250,8 +2284,11 @@
   // ---- the fight's enemies: the six base plinths (HP 40), the top figure (any hit: chloeSaved false), the reps ------
   Enemies.defineType('c5_plinth', {
     hp: 40, radius: 0.5, height: 2.4, downs: false, stompable: false, lockable: true, body: false, threat: false, tell: 'plain',
-    create(e, def) { e.obj = new THREE.Group(); e.obj.name = 'c5_plinth'; e.pos = e.obj.position; e.data.i = def.idx; e.obj.position.set(def.pos[0], 0, def.pos[1]); e.placed = true; },
-    hitbox: (e) => [{ x: e.pos.x, z: e.pos.z, r: 0.5, y0: 0, y1: 2.4 }],
+    // (pinned: a hit's push-back would move its hitbox off the plinth it stands for)
+    create(e, def) { e.obj = new THREE.Group(); e.obj.name = 'c5_plinth'; e.pos = e.obj.position; e.data.i = def.idx; e.obj.position.set(def.pos[0], 0, def.pos[1]); e.placed = true; e.pinned = true; },
+    // (r reaches past the corners of the plinth's own ±0.45 m collider: Enemies.hitTest checks the line of sight to the
+    // hitbox's rim, and a rim point inside that collider would block every swing from a diagonal approach)
+    hitbox: (e) => [{ x: e.pos.x, z: e.pos.z, r: 0.7, y0: 0, y1: 2.4 }],
     stun: () => false, knockdown: () => false,
     onHit(e, n) {
       const P = C5.ped, bp = P && P.base[e.data.i];
@@ -2309,7 +2346,8 @@
       const P = C5.ped;
       if (!P || !P.fight || P.level < 5 || P.level >= 6) return [];
       const feet = P.colY + P.tw.figY;
-      return feet > 2.0 ? [] : [{ x: AT.cx, z: AT.cz, r: 0.42, y0: feet, y1: feet + 1.7 }];
+      // (r 0.9: past the corners of the column's ±0.6 m collider, or the line-of-sight test would refuse every swing)
+      return feet > 2.0 ? [] : [{ x: AT.cx, z: AT.cz, r: 0.9, y0: feet, y1: feet + 1.7 }];
     },
     stun: () => false, knockdown: () => false,
     onHit(e) {
@@ -2423,7 +2461,7 @@
     async run(G) {
       const P = C5.ped;
       if (!P || !G.inRoom('c5_atrium')) return 'won';
-      P.fight = true; P.spawnT = 3.5; P.paT = 0.8; P.beamsOff = false;
+      P.fight = true; P.spawnT = 3.5; P.paT = 4.6; P.beamsOff = false;            // (the PA waits for the objective line to clear)
       G.control(true);
       try { Player.setTorch(true); } catch (e) { /* torch */ }
       note(G, 'The six plinths at its base. Bring it down.', 'c5_goal');
@@ -2431,8 +2469,13 @@
       const plinths = [];
       P.base.forEach((bp, i) => { if (!P.broken[i]) { const e = Enemies.spawn({ id: 'c5_atrium:plinth' + i, type: 'c5_plinth', idx: i, pos: bp.userData.wpos, persist: false, world: 'outage' }); if (e) plinths.push(e); } });
       const top = Enemies.spawn({ id: 'c5_atrium:top', type: 'c5_top', pos: [AT.cx, AT.cz], persist: false, world: 'outage' });
+      // the stage finds him: a faint pale follow-light over his head, so he never goes black on the black floor while
+      // the beams sweep (the Outage floor is darker than his hoodie)
+      const follow = G.addLight('point', { pos: [AT.cx, 2.6, AT.cz + 4], color: '#a9ddd4', intensity: 3.2, distance: 5.2 });
+      const followTo = () => { const p = Player.pos; if (follow && p) follow.set({ pos: [p.x, p.y + 2.5, p.z] }); };
+      followTo();
       try {
-        await G.loop((dt) => { C5_pedTick(G, dt); return P.broken.every(Boolean); });
+        await G.loop((dt) => { followTo(); C5_pedTick(G, dt); return P.broken.every(Boolean); });
       } finally {
         P.fight = false;
         for (const e of P.crawl) { try { if (!e.resolved) Enemies.kill(e); } catch (err) { /* gone */ } }
@@ -2458,10 +2501,12 @@
     bounds: [AT.V[0], AT.V[1], AT.V[2], AT.V[3]],
     entries: { stairs: [14.15, AT.entryZ, 180], start: [14.15, AT.entryZ, 180], floor: [16.4, 20.2, 60] },
     cameras: [
-      // four pans from the Level 3 balcony corners, each watching the quarter of the floor beside it (the tower stays
-      // to one side of every sightline)
-      { id: 'c5_atrium:nw', vol: [13, 8, 20, 15.2], type: 'pan', pos: [13.7, 5.7, 21.3], target: [16.6, 0.8, 11.8], fov: 48, pan: { lag: 0.35, yaw: 42, pitch: 40 } },
-      { id: 'c5_atrium:ne', vol: [20, 8, 27, 15.2], type: 'pan', pos: [15.6, 5.7, 8.7], target: [23.5, 0.8, 11.5], fov: 48, pan: { lag: 0.35, yaw: 42, pitch: 40 } },
+      // four pans from the Level 3 balcony, each watching a quarter of the floor past the tower (the tower stays to one
+      // side of every sightline): the two north quarters from the south balcony, the leaderboard beyond the fight;
+      // (the stair's solid flight hides the north-west quarter from the south-west corner, and the board's face runs
+      // edge-on past a camera in the north-west one)
+      { id: 'c5_atrium:nw', vol: [13, 8, 20, 15.2], type: 'pan', pos: [15.7, 6.0, 22.1], target: [17.6, 0.8, 11.8], fov: 46, pan: { lag: 0.35, yaw: 40, pitch: 42 } },
+      { id: 'c5_atrium:ne', vol: [20, 8, 27, 15.2], type: 'pan', pos: [26.7, 6.0, 22.1], target: [23.4, 0.8, 11.6], fov: 46, pan: { lag: 0.35, yaw: 40, pitch: 42 } },
       { id: 'c5_atrium:se', vol: [20, 15.2, 27, 22], type: 'pan', pos: [26.3, 5.7, 8.7], target: [23.5, 0.8, 18.5], fov: 48, pan: { lag: 0.35, yaw: 42, pitch: 40 } },
       { id: 'c5_atrium:sw', vol: [13, 15.2, 20, 22], type: 'pan', pos: [26.3, 5.7, 21.3], target: [16.8, 0.8, 18.5], fov: 48, pan: { lag: 0.35, yaw: 42, pitch: 40 } },
     ],
@@ -2552,7 +2597,8 @@
       K.pickup('coffee', 16.1, 0.02, 9.2, { id: 'c5_atrium:coffee', rot: 70, when: () => !flag('c5_bossDone') });
       // ---- the stair: back up to Level 4 (before the fight), CALL 6 on the way up after it, the chapter's end -------
       K.exit({ id: 'c5_atrium:up', box: [AT.sx[0], AT.top - 0.2, AT.sx[1], AT.entryZ - 0.35], to: 'c5_level4', entry: 'atriumstairs', sound: 'steps', when: () => S.chapter === 5 && !flag('c5_bossDone'), blockedMsg: null, mapMark: false });
-      K.trigger([AT.sx[0], AT.top - 0.2, AT.sx[1], AT.entryZ - 0.35], (G) => C5_toCh6(G), { id: 'c5_atrium:out', once: false, when: () => S.chapter === 5 && flag('c5_done') });
+      // (just below the exit box: after the fight that exit's when() is false, and a closed exit is a wall)
+      K.trigger([AT.sx[0], AT.entryZ - 0.35, AT.sx[1], AT.entryZ + 1.0], (G) => C5_toCh6(G), { id: 'c5_atrium:out', once: false, when: () => S.chapter === 5 && flag('c5_done') });
       K.trigger([AT.sx[0], 12.5, AT.sx[1], 19.5], (G) => C5_call6(G), { id: 'c5_atrium:call6', once: false, when: () => S.chapter === 5 && flag('c5_done') && !(S.calls && S.calls.luka6) });
       // CUTSCENE 5-3 at the foot of the stair
       K.trigger([AT.sx[0], 19.6, 17.2, AT.V[3]], (G) => G.cutscene('5-3'), { id: 'c5_atrium:53', once: false, when: () => S.chapter === 5 && !done('cs:5-3') && S.outage });
@@ -2569,7 +2615,7 @@
       K.examine(15.8, 1.0, 20.6, 'The feature stair. Four floors of it, all glass.', { id: 'c5at:stair', r: 1.2 });
     },
     onUpdate(dt) {
-      C5_ambient(['#5a6461', 0.4], ['#2d6a63', 0.27]);
+      C5_ambient(['#5a6461', 0.42], ['#2a8a84', 0.62]);
       if (C5.plinthObj) C5.plinthObj.visible = !S.outage && flag('c5_bossDone') && flag('chloeSaved');
       if (!(C5.ped && C5.ped.fight)) { C5_laterTick(dt); C5_animTick(dt); }
     },
@@ -2628,7 +2674,8 @@
     // 1. SHOT — an extreme low angle from the atrium floor, looking up. The tower of plinths rises under crossing
     //    spotlights. At the top, Chloe turns slowly. Behind her the leaderboard: "CHLOE — #1 — 30 MONTHS".
     const fy = P ? P.colY + P.tw.figY : 13.4;
-    G.cam({ pos: [21.3, 0.16, 21.7], target: [20, 6.5, 15.2], fov: 66, to: { pos: [21.3, 0.18, 21.6], target: [20, fy + 1.15, 15.2], fov: 12 }, dur: 11, ease: 'inOut' });
+    //    (the board's "CHLOE — #1 — 30 MONTHS" low in the frame under the plinths first, then up the tower to her)
+    G.cam({ pos: [21.3, 0.16, 21.7], target: [20.2, 7.1, 12.6], fov: 64, to: { pos: [21.3, 0.18, 21.6], target: [20, fy + 1.0, 15.2], fov: 17 }, dur: 11, ease: 'inOut' });
     G.sfx('smile_hum', { pos: [20, 3, 15.2], vol: 0.5 });
     await G.wait(4.2);
     //    CHLOE (her voice through the PA, echoing)
@@ -2696,15 +2743,17 @@
     await A.turn(C, 0.4);
     C.hold('L', 'card');
     {
-      const hb = C.raw && C.raw.bones && C.raw.bones.handL ? C5_worldOf(C.raw.bones.handL) : new THREE.Vector3(19.7, 1.0, 15.0);
-      const ab = C5_headAt(A);
-      const mx = (hb.x + ab.x) / 2, mz = (hb.z + ab.z) / 2, dx = ab.x - hb.x, dz = ab.z - hb.z, l = Math.hypot(dx, dz) || 1;
-      const px = -dz / l, pz = dx / l;
-      G.cam({ pos: [mx + px * 0.85, hb.y + 0.28, mz + pz * 0.85], target: [mx, hb.y + 0.02, mz], fov: 32, to: { pos: [mx + px * 0.75, hb.y + 0.25, mz + pz * 0.75], fov: 30 }, dur: 9 });
+      // side on to the two of them, the board behind: her hand coming out with the card, his coming up to take it
+      const cp = C.pos, ap = A.pos;
+      const mx = (cp.x + ap.x) / 2, mz = (cp.z + ap.z) / 2, dx = ap.x - cp.x, dz = ap.z - cp.z, l = Math.hypot(dx, dz) || 1;
+      let px = -dz / l, pz = dx / l;
+      if (pz < 0) { px = -px; pz = -pz; }
+      G.cam({ pos: [mx + px * 1.25, 1.34, mz + pz * 1.25], target: [mx, 1.08, mz], fov: 36, to: { pos: [mx + px * 1.12, 1.32, mz + pz * 1.12], fov: 34 }, dur: 9 });
     }
-    q(C.gesture('offer', { hand: 'L', target: A }));
+    const handOff = [(C.pos.x + A.pos.x) / 2, 1.14, (C.pos.z + A.pos.z) / 2];
+    q(C.gesture('reach', { hand: 'L', target: handOff, dur: 2.4 }));
     await G.say('CHLOE', 'Escalations. That\'s what you\'re after, isn\'t it?');
-    if (A.raw) q(A.raw.gesture('reach', { hand: 'R', target: C.raw && C.raw.bones && C.raw.bones.handL ? C5_worldOf(C.raw.bones.handL) : [19.7, 1.0, 15.0], dur: 1.1 }));
+    if (A.raw) q(A.raw.gesture('reach', { hand: 'R', target: handOff, dur: 1.1 }));
     await G.wait(0.9);
     C.hold('L', null);
     G.give('keycard', 1, { silent: true });
@@ -2716,14 +2765,14 @@
     await G.say('CHLOE', 'Luka\'s here. He\'s upstairs. He\'s looking for you.');
     // 4. SHOT — close on Aidan. Keys chime somewhere above.
     {
-      const p0 = C5_rel(A, 0.62, 0.2, -0.06), t0 = C5_rel(A, 0.05, 0, -0.04);
-      G.cam({ pos: p0, target: t0, fov: 30, to: { pos: C5_rel(A, 0.55, 0.18, -0.06), target: t0, fov: 28 }, dur: 12 });
+      const p0 = C5_rel(A, 0.8, 0.22, -0.18), t0 = C5_rel(A, 0.05, 0, -0.2);
+      G.cam({ pos: p0, target: t0, fov: 30, to: { pos: C5_rel(A, 0.72, 0.2, -0.18), target: t0, fov: 28 }, dur: 12 });
     }
     if (A.raw) { A.raw.expr('scared'); A.raw.eyes('away', C.raw); }
     await G.wait(0.6);
     G.sfx('keys_far', { pos: [20, 9.5, 12], vol: 0.85 });
     await G.wait(1.4);
-    A.look([AT.cx, 9.5, 12]);
+    A.look([AT.cx - 0.6, 3.3, 9.5]);
     await G.say('AIDAN', '...I can\'t.');
     if (A.raw) A.raw.eyes('at', C.raw);
     await G.say('CHLOE', 'He\'s not who you think he is.');
@@ -2736,7 +2785,7 @@
     if (A.raw) { A.raw.idleLife = true; A.raw.expr('sad'); A.raw.eyes('ahead'); }
     A.look(null);
     G.camRelease();
-    G.bg(async (G2) => { await G2.msg('Aidan took the LEVEL 4 KEYCARD.', 3); });
+    G.bg(async (G2) => { await G2.msg('Aidan took the Level 4 keycard.', 3); });
   }, { letterbox: true, skippable: true });
 
   // =================================================================================================================
@@ -2785,7 +2834,7 @@
     note(G, 'Her keycard. Back up the stair to Level 4 — the escalations office.', 'c5_goal');
     if (A.raw) A.raw.idleLife = true;
     G.camRelease();
-    G.bg(async (G2) => { await G2.msg('Aidan took the LEVEL 4 KEYCARD.', 3); });
+    G.bg(async (G2) => { await G2.msg('Aidan picked up the Level 4 keycard.', 3); });
   }, { letterbox: true, skippable: true });
 
   // ==== END OF CHAPTER 5 CONTENT ====

@@ -15,7 +15,7 @@
     let t = TEXC.get(key);
     if (t) return t;
     const c = document.createElement('canvas'); c.width = w; c.height = h;
-    draw(c.getContext('2d'), w, h, U.rng(U.hash('ttl:' + key)));
+    draw(c.getContext('2d', { willReadFrequently: true }), w, h, U.rng(U.hash('ttl:' + key)));
     t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.userData.shared = true; t.name = 'ttl:' + key;
     TEXC.set(key, t);
     return t;
@@ -104,7 +104,9 @@
       // the amber traffic light at the junction, blinking
       const amber = TTL_glow(K, lights, -22, TTL_town(-22, -120) + 3.6, -120, 2.6, '#ffab2e', 0.0);
       // ---- the mast on the summit, far off: a lattice lost in the fog, its red aircraft lights blinking --------------
-      const mx = 58, mz = -150, my = TTL_town(58, -150) + 2;
+      // (at 160 m the fog swallows the lattice whole — only the fog-immune light reads. It is placed for the frame: the
+      // top light sits in the upper right third, clear of the title and the frame's edge, not up against the top edge.)
+      const mx = 75, mz = -145, my = 17.6 - 34.8;
       for (let k = 0; k < 3; k++) { const a = (k / 3) * Math.PI * 2 + 0.4; K.cyl(mx + Math.cos(a) * 1.5, my, mz + Math.sin(a) * 1.5, 0.18, 34, '#1b2120', { r2: 0.06, seg: 5 }); }
       for (let yy = 3; yy < 32; yy += 4) K.box(mx, my + yy, mz, 3.4 - yy * 0.08, 0.12, 0.12, '#1b2120', { rot: yy * 17 });
       const red = TTL_glow(K, lights, mx, my + 34.8, mz, 6.0, '#ff2a1c', 0);
@@ -143,14 +145,21 @@
       // the Crescent: from the community hall's roof, the loop road and the doorsteps with their modem boxes
       ['c2_crescent', TTL_shot('c2_crescent', 'c2_crescent:hall', { pos: [33.8, 3.3, 43.2], target: [29.4, 0.9, 28.2] }, { fov: 46, push: 1.6 })],
       // the Operators' Hall: the long symmetrical shot down the centre aisle to Wai's board
-      ['c3_hall', TTL_shot('c3_hall', 'c3_hall:long', { pos: [39.35, 3.25, 7], target: [4, 1.25, 7] }, { fov: 40, push: 3.0 })],
-      // the atrium: extreme low, looking up the three storeys to the leaderboard wall
-      ['c5_atrium', TTL_shot('c5_atrium', 'none', { pos: [20, 0.55, 20.2], target: [20, 7.5, 8.4], fov: 52 }, { push: 0.6, lift: 0.25 })],
+      // (from under the pendant lamps' line, not level with it: the push would carry the lens through a lamp shade)
+      ['c3_hall', TTL_shot('c3_hall', 'c3_hall:long', { pos: [39.35, 3.25, 7], target: [4, 1.25, 7] }, { fov: 40, push: 2.2, pos: [39.3, 2.6, 7], target: [4, 1.35, 7] })],
+      // the atrium: low (clear of the furniture in front of the lens), looking up the three storeys to the leaderboard wall
+      ['c5_atrium', TTL_shot('c5_atrium', 'none', { pos: [20, 1.0, 20.6], target: [20, 7.5, 8.4], fov: 52 }, { push: 0.5, lift: 0.15 })],
     ];
+    // rooms build from S, and the title's S is a fresh state: the Operators' Hall would be built with its HALL circuit
+    // off (black but for Wai's lamp). For its shot the hall has its lights on — the room as the player first sees it lit
+    // (the fresh state is put back straight after; a new game or a load replaces S anyway).
+    const TTL_state = { c3_hall: (s) => { s.done = s.done || {}; const had = Object.prototype.hasOwnProperty.call(s.done, 'c3:circ'), v = s.done['c3:circ']; s.done['c3:circ'] = 'HALL|FRAME|BASEMENT'; return () => { if (had) s.done['c3:circ'] = v; else delete s.done['c3:circ']; }; } };
     for (const [room, cam] of shots) {
       if (signal && signal.aborted) return;
       if (!ROOMS[room]) continue;
-      const ok = await show(room, { cam, dur: 7.5 });
+      const undo = TTL_state[room] ? TTL_state[room](S) : null;
+      let ok = false;
+      try { ok = await show(room, { cam, dur: 7.5 }); } finally { if (undo) undo(); }
       if (!ok) return;
     }
   });

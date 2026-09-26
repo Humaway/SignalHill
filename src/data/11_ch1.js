@@ -32,7 +32,7 @@
     let t = TEXC.get(key);
     if (t) return t;
     const c = document.createElement('canvas'); c.width = w; c.height = h;
-    draw(c.getContext('2d'), w, h, U.rng(U.hash('c1:' + key)));
+    draw(c.getContext('2d', { willReadFrequently: true }), w, h, U.rng(U.hash('c1:' + key)));
     t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
     if (o.wrap) t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -119,28 +119,7 @@
   // hanging Outage dressing (tethers, receipt strips) always clears his head: nothing brushes through Aidan's face, and
   // nothing hangs to head height (spec §1 content rules)
   const C1_hang = (K, kind, x, z, len, ceil, rot = 0) => K.prop(kind, x, z, rot, { ceil, len: Math.max(0.35, Math.min(len, ceil - (kind === 'tether_hanging' ? 2.3 : 2.0))) });
-  // The torch's bounce: while the torch is on, a soft fill a metre ahead of Aidan (the beam's spill back off the floor
-  // and walls), so he reads in every shot of a dark interior — stronger in the Outage, where nothing else lights him.
-  // One pool light per room, ranked as if right beside him so it keeps a real slot.
-  function C1_bounce(K, fog = 0.8, out = 2.3) {
-    const L = K.light('point', 0, 1.3, 0, { color: '#cfe2dc', intensity: 0, distance: 3.4, decay: 1.5, prio: 20 });
-    let key = '';
-    K.animate(() => {
-      if (typeof Player === 'undefined' || !Player.pos || (World.outageBusy && !Player.torchOn)) return;
-      const on = !!Player.torchOn && !Player.dead;
-      const out1 = !!S.outage, I = on ? (out1 ? out : fog) : 0;
-      // half along the beam, half toward the lens: the spill that reaches him from the side the shot sees
-      let cx = 0, cz = 0;
-      try { const c = Render.camera.position, dx = c.x - Player.pos.x, dz = c.z - Player.pos.z, d = Math.hypot(dx, dz) || 1; cx = dx / d; cz = dz / d; } catch (e) { /* no camera */ }
-      const x = Player.pos.x + Math.sin(Player.yaw) * 0.55 + cx * 0.6, z = Player.pos.z + Math.cos(Player.yaw) * 0.55 + cz * 0.6, y = (Player.pos.y || 0) + 1.3;
-      const k = `${I}|${x.toFixed(2)}|${z.toFixed(2)}|${y.toFixed(2)}`;
-      if (k === key) return;
-      key = k;
-      if (I > 0 && !L.isOn) L.on(true);
-      L.set({ pos: [x, y, z], intensity: I, color: out1 ? '#8fd8cc' : '#cfe2dc' });
-    });
-    return L;
-  }
+  // (the torch's bounce fill — a soft light that keeps Aidan readable in dark interiors — is the engine's now: Player)
   // the ring of the food court payphone: positional in the food court, muffled one room away elsewhere in the Plaza
   function C1_ringTick(roomId) {
     let want = '';
@@ -666,7 +645,6 @@
         else K.light('fluoro', x, H - 0.02, 1.5, { len: 1.2, rot: 90, bank: 1 + (i >> 1), real: st !== 'glow', flicker: st === 'flick', intensity: 6, distance: 8 });
       });
       K.light('led', 39.9, 2.35, 0.5, { color: '#2aff5a', intensity: 2 });
-      C1_bounce(K);
       K.prop('exit_sign', 0.08, 1.5, 90, { mount: 2.35 });
       // along the north wall: the mop bucket and wet-floor sign, a cleaner's trolley, boxes, a fire hose reel
       K.prop('mop_bucket', 20.2, 0.45, 20, { sign: true });
@@ -793,7 +771,6 @@
       K.light('fluoro', 4, H - 0.02, 2.2, { len: 1.2, intensity: 5, distance: 8, bank: 1, flicker: true });
       K.light('fluoro', 4, H - 0.02, 4.4, { len: 1.2, on: false });
       K.light('screen', 6.7, 1.4, 3.0, { color: '#b8c4c0', intensity: 1.6, distance: 4.5, bank: 2 });
-      C1_bounce(K);
       // the CCTV bank on the east wall, facing west; its six feeds are ours to paint
       const bank = K.prop('cctv_bank', SO.bank[0], SO.bank[1], -90, { name: 'c1s_bank' });
       K.prop('office_chair', 6.2, 3.1, 110, { turn: 30 });
@@ -948,7 +925,6 @@
       K.door({ id: 'c1_staffroom:door', x: 4, z: -0.075, rot: 180, w: 0.9, style: 'wood', to: 'c1_corridor', entry: 'staff', color: '#d8d0bc', sign: 'STAFF ROOM' });
       K.light('fluoro', 3.2, H - 0.02, 3.0, { len: 1.2, intensity: 6, distance: 8, bank: 1 });
       K.light('fluoro', 6.2, H - 0.02, 3.0, { len: 1.2, real: false, bank: 2 });
-      C1_bounce(K);
       // the break table (the chapter's 15 minutes) — its clock goes on the nearest wall at 8:59
       K.breakTable(4.4, 3.7, 0, { id: 'c1_staffroom:break', time: [8, 59] });
       K.prop('mug', 4.15, 3.55, 30, { y: 0.745, text: 'I ♥ SIGNAL HILL' });
@@ -1190,7 +1166,6 @@
         K.light('fluoro', 56, B - 0.02, 2.2, { len: 1.2, on: false });
       });
       K.light('led', 0.2, 2.6, 7.3, { color: '#2aff5a', intensity: 2.5 });
-      C1_bounce(K);
       // ---- the Outage: contract walls, hanging tethers and receipts, the store walled off, red light ------------------
       K.outageOnly(() => {
         // the wall of paper across the store's front
@@ -1348,7 +1323,6 @@
         K.light('screen', 1.9, 1.2, 2.0, { color: '#cfe8e6', intensity: 1.6, distance: 4.5 });
       });
       K.light('led', 15, 3.9, 19.9, { color: '#2aff5a', intensity: 2 });
-      C1_bounce(K);
       // ---- the Outage: circuit board through the carpet, receipts hanging, contracts, the receipt map -----------------
       K.outageOnly(() => {
         for (const [x, z, len] of [[5, 9, 2.4], [11, 14, 3], [16, 12, 2.2], [24, 14.5, 2.8], [8, 4, 2]]) C1_hang(K, 'receipt_strip', x, z, len, H, (x * 13) % 90);
@@ -1424,7 +1398,6 @@
       K.light('fluoro', 5, H - 0.02, 3, { len: 1.2, intensity: 5, distance: 8, flicker: true, color: '#cfe8dc' });
       K.light('fluoro', 8.4, H - 0.02, 3, { len: 1.2, intensity: 3.2, distance: 6, color: '#bfe0d4' });
       K.light('point', 2.0, 1.9, 4.6, { color: '#ff3b2a', intensity: 2.2, distance: 5 });
-      C1_bounce(K);
       K.pickup('coffee', 3.1, 0.94, 0.55, { id: 'c1_kitchen:coffee' });
       // examine
       K.examine(4.6, 1.4, 0.3, ['The docket rail. Every docket says the same thing.', 'Order 22. [beat] Customer callback.'], { id: 'c1k:dockets', r: 1.3 });
@@ -1553,7 +1526,6 @@
         for (const [x, z, real] of [[5, 5.5, true], [15, 5.5, true], [5, 11.5, false], [15, 11.5, true], [10, 9, false], [10, 14.5, true]]) K.light('fluoro', x, H - 0.02, z, { len: 1.2, diffuser: true, intensity: 7, distance: 9, bank: z < 9 ? 1 : 2, real });
         K.light('point', 10, 2.4, 1.6, { color: '#e8f4ef', intensity: 4, distance: 6, bank: 1 });
       });
-      C1_bounce(K);
       // ---- the Outage: the floor runs back into the dark; rows of demo tables ringing; contracts on the counter -------
       K.outageOnly(() => {
         K.floor(0, 16.4, 20, ST.deep, { tex: 'vinyl_retail', color: '#d8d6ce' });
@@ -1714,7 +1686,6 @@
       K.box(5.9, 1.2, 3.55, 0.05, 0.62, 0.44, { tex: 'fabric_knit', color: '#10403f' });
       K.dress('papers', [0.5, 1.5, 5.5, 4.5], 6, { seed: 111 });
       K.fogOnly(() => { K.light('fluoro', 3, H - 0.02, 2.5, { len: 1.2, intensity: 5, distance: 7, bank: 1 }); });
-      C1_bounce(K);
       K.outageOnly(() => {
         K.light('fluoro', 3, H - 0.02, 2.5, { len: 1.2, intensity: 4, distance: 7, flicker: true, color: '#cfe8dc' });
         K.light('led', 6.0, 2.3, 2.5, { color: '#2aff5a', intensity: 3, halo: 0.4 });
@@ -1824,7 +1795,6 @@
       K.dress('papers', [1, 1, 8.4, 9], 10, { seed: 122 });
       // light: caged tubes (dead in the Fog world but one); the Outage: flickering, red over the cage
       K.fogOnly(() => { K.light('fluoro', 4, H - 0.3, 5, { len: 1.2, intensity: 6, distance: 10, bank: 1 }); K.light('fluoro', 8.5, H - 0.3, 5, { len: 1.2, on: false }); });
-      C1_bounce(K);
       K.outageOnly(() => {
         K.light('fluoro', 4, H - 0.3, 5, { len: 1.2, intensity: 7, distance: 12, flicker: true, color: '#cfe8dc' });
         K.light('point', 9.2, 3.6, 5, { color: '#ff2a1c', intensity: 5, distance: 11 });

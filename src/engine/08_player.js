@@ -44,7 +44,9 @@
 //   lookTarget, turnAround(), impulse(dx,dz,dur), knockback(fromPos,dist), noclip, saveState(), actor, yawDeg,
 //   weapon() → current weapon stats, attackState.
 // CONTRACT+ (maintenance): Player.restoreBody() (the actor back to a new game's defaults; reset() calls it),
-//   Player.holdOverride(on) (a scripted left-hand prop wins over the equipped weapon), crawl-mode interactables
+//   Player.holdOverride(on) (a scripted left-hand prop wins over the equipped weapon), the weapon put away while a
+//   letterboxed scene owns Aidan, poseSnapshot() / poseRestore(snap) (Script restores his arm poses after each
+//   letterboxed scene), the torch bounce (a fill light that keeps Aidan readable in the dark), crawl-mode interactables
 //   ({crawl:true}), E with a message up goes to the faced target unless it is the thing just used.
 const Player = (() => {
   const TAU = Math.PI * 2, D2R = Math.PI / 180;
@@ -271,6 +273,37 @@ const Player = (() => {
     }
     flickerLv = dt > 0 ? U.damp(flickerLv, lv, 6, dt) : lv;
     Render.torch.flicker(flickerLv < 0.02 ? 0 : flickerLv);
+    updateBounce(dt);
+  }
+  // Torch bounce: the torch lights what is in front of Aidan, never Aidan himself, and in a dark interior (the Outage)
+  // a fixed camera 6–15 m away lost him even with the torch on. While the torch is on, one pool light (prio 20) hangs
+  // ~0.55 m ahead of him along his facing and ~0.6 m toward the lens, 1.3 m up (the spill that would bounce back onto
+  // him from the side the shot sees): range 3.4 m, 0.8 cd in the Fog world / 2.3 in the Outage, scaled down where the
+  // room's own lights already reach him (Render.lightAt without it), off with the torch, in death and when he is hidden.
+  const BOUNCE = { fog: 0.8, outage: 2.3, range: 3.4, color: '#cfe2dc', colorOut: '#8fd8cc' };
+  let bounce = null, bounceLv = 0;
+  const _bp = V();
+  function updateBounce(dt) {
+    if (bounce && bounce.freed) bounce = null;
+    const want = torchOn && !deadSt && actor && actor.root.visible && !!actor.root.parent && typeof World !== 'undefined' && !!World.room;
+    let I = 0;
+    if (want) {
+      const p = pos(), out = !!S.outage;
+      let cx = 0, cz = 0;
+      try { const c = Render.camera.position, dx = c.x - p.x, dz = c.z - p.z, d = Math.hypot(dx, dz) || 1; cx = dx / d; cz = dz / d; } catch (e) { /* no camera */ }
+      _bp.set(p.x + Math.sin(yaw) * 0.55 + cx * 0.6, (p.y || 0) + 1.3, p.z + Math.cos(yaw) * 0.55 + cz * 0.6);
+      // how lit he already is by the room (pool lights near him + the sky light), without the torch and this light
+      let lit = 0;
+      try { lit = Render.lightAt(_a.set(p.x, (p.y || 0) + 1.2, p.z), { torch: false, ambient: true, exclude: bounce }); } catch (e) { lit = 0; }
+      const dark = U.clamp(1 - (lit - 0.05) / 0.45);
+      I = (out ? BOUNCE.outage : BOUNCE.fog) * dark;
+      if (!bounce && I > 0.02 && typeof Render !== 'undefined' && Render.allocLight) bounce = Render.allocLight('point', { color: BOUNCE.color, intensity: 0, distance: BOUNCE.range, decay: 1.5, prio: 20 });
+      bounceLv = dt > 0 ? U.damp(bounceLv, I, 4, dt) : I;
+      if (bounce) bounce.set({ pos: _bp, intensity: bounceLv < 0.02 ? 0 : bounceLv, color: out ? BOUNCE.colorOut : BOUNCE.color });
+    } else {
+      bounceLv = 0;
+      if (bounce) bounce.set({ intensity: 0 });
+    }
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -302,11 +335,28 @@ const Player = (() => {
   let weaponOverride = 0;
   function holdOverride(on) {
     weaponOverride = Math.max(0, weaponOverride + (on ? 1 : -1));
-    if (!weaponOverride) { heldFor = undefined; heldKind = null; }
+    if (!weaponOverride) {
+      // the scripted prop leaves his hand with the override (even with nothing equipped); the weapon is re-held next frame
+      if (actor && actor.held && actor.held.L) { try { actor.hold('L', null); } catch (e) { /* rig */ } }
+      heldFor = undefined; heldKind = null;
+    }
     return weaponOverride > 0;
   }
-  function syncWeapon() {
+  // The equipped weapon is put away while a letterboxed scene owns Aidan (Script.cutscene and no player control): he
+  // doesn't sit at a switchboard or talk to Wai with the steel bar in his hand. It comes back the frame the scene ends,
+  // is suspended by a G.boss, or hands control back (G.control(true)). A scene can still show it: A.hold('L', 'bar').
+  const cutsceneStow = (ctl) => { try { return !ctl && typeof Script !== 'undefined' && !!Script.cutscene; } catch (e) { return false; } };
+  function syncWeapon(stow = false) {
     if (!actor || weaponOverride > 0) return;
+    if (stow) {
+      if (heldKind) {
+        if (readyOn) endReady();
+        try { actor.hold('L', null); } catch (e) { console.error('[Player] stow weapon', e); }
+        heldKind = null;
+      }
+      heldFor = undefined;                                          // re-synced when the scene lets go
+      return;
+    }
     const id = S.equipped || null;
     if (id === heldFor) return;
     heldFor = id;
@@ -822,7 +872,7 @@ const Player = (() => {
     if (ctl && !hadControl) { lastAnim = null; if (actor.root.rotation.y !== yaw) yaw = U.wrapAngle(actor.root.rotation.y); }
     hadControl = ctl;
     if (!ctl && mode === 'normal') yaw = U.wrapAngle(actor.root.rotation.y);
-    syncWeapon();
+    syncWeapon(cutsceneStow(ctl));
     updateGaze(dt);
     const p = pos();
     const ox = p.x, oz = p.z, oyaw = yaw;
@@ -1037,6 +1087,25 @@ const Player = (() => {
     weaponOverride = 0;
   }
 
+  // CONTRACT+: Player.poseSnapshot() / poseRestore(snap) — Aidan's arm carry poses and held props. Script takes one when a
+  // letterboxed scene starts and restores it when the scene ends, so a pose a scene sets (phone_ear, a raised phone …)
+  // doesn't outlive it; a hand whose prop the scene changed keeps what the scene gave it.
+  function poseSnapshot() {
+    const a = actor;
+    if (!a || !a.state || !a.state.carry) return null;
+    return { L: a.state.carry.L, R: a.state.carry.R, hL: a.held ? a.held.L : null, hR: a.held ? a.held.R : null };
+  }
+  function poseRestore(snap) {
+    const a = actor;
+    if (!snap || !a || !a.state || !a.state.carry || deadSt) return false;
+    let n = 0;
+    for (const h of ['L', 'R']) {
+      if ((a.held ? a.held[h] : null) !== snap['h' + h] || a.state.carry[h] === snap[h]) continue;
+      a.state.carry[h] = snap[h]; n++;
+    }
+    return n > 0;
+  }
+
   Bus.on('cam:cut', () => { cutFlag = true; });
   Bus.on('save', () => { try { saveState(); } catch (e) { /* no actor yet */ } });
   Bus.on('room:leave', () => {
@@ -1049,7 +1118,7 @@ const Player = (() => {
 
   const api = {
     init, update, place, teleport, face, damage, hurt: damage, heal, kill, status, setGaze, grab, release, climb, crawl, pin,
-    setMode, setControl, lock, reset, restoreBody, holdOverride, saveState, setTorch, toggleTorch, turnAround, impulse, knockback, weapon,
+    setMode, setControl, lock, reset, restoreBody, holdOverride, poseSnapshot, poseRestore, saveState, setTorch, toggleTorch, turnAround, impulse, knockback, weapon,
     isEnemySource,
     get actor() { return init(); },
     get pos() { return pos(); },

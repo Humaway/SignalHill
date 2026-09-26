@@ -493,7 +493,7 @@
       base(x, w, h);
       x.fillStyle = BR.teal; x.fillRect(0, 0, w, h * 0.34);
       Tex.drawWordmark(x, w * 0.06, h * 0.24, h * 0.13, { color: BR.yellow });
-      T(x, '5G HOME INTERNET', w * 0.06, h * 0.47, { size: 50, font: F.heavy, weight: '900', color: BR.ink });
+      TF(x, '5G HOME INTERNET', w * 0.06, h * 0.47, w * 0.88, 50, { font: F.heavy, weight: '900', color: BR.ink });   // (fitted: it ran off the box)
       T(x, 'Plug in. Switch on. Connected.*', w * 0.06, h * 0.55, { size: 24, font: F.sans, color: '#333' });
       // the modem, drawn
       x.fillStyle = '#e1dfd8'; rrPath(x, w * 0.58, h * 0.6, w * 0.3, h * 0.34, 16); x.fill(); x.fillStyle = BR.teal; x.fillRect(w * 0.58, h * 0.6, w * 0.3, 10);
@@ -504,7 +504,7 @@
     const front = face('front', (x, w, h, r) => {
       base(x, w, h);
       x.fillStyle = BR.teal; x.fillRect(0, 0, w, h * 0.14);
-      T(x, '5G HOME INTERNET', w * 0.05, h * 0.36, { size: 58, font: F.heavy, weight: '900', color: BR.ink });
+      TF(x, '5G HOME INTERNET', w * 0.05, h * 0.36, w * 0.9, 58, { font: F.heavy, weight: '900', color: BR.ink });
       T(x, 'Modem · power supply · cables', w * 0.05, h * 0.5, { size: 26, font: F.sans, color: '#444' });
       // the returns label with her account number
       x.save(); x.translate(w * 0.56, h * 0.56); x.rotate(-0.03);
@@ -877,7 +877,7 @@
       T(x, 'Please take a seat.', w / 2, 80, { size: 16, font: F.mono, color: ink, align: 'center' });
       x.fillStyle = ink; for (let xx = 16; xx < w - 16; xx += 8) x.fillRect(xx, 100, 4, 2);
       T(x, 'You are number', w / 2, 150, { size: 22, font: F.mono, color: ink, align: 'center' });
-      T(x, '4,112.', w / 2, 238, { size: 76, font: F.mono, weight: 'bold', color: '#161618', align: 'center' });
+      TF(x, '4,112.', w / 2, 238, w - 28, 76, { font: F.mono, weight: 'bold', color: '#161618', align: 'center' });
       for (let xx = 16; xx < w - 16; xx += 8) x.fillRect(xx, 272, 4, 2);
       T(x, 'Customers ahead: 4,111', w / 2, 306, { size: 15, font: F.mono, color: ink, align: 'center' });
       T(x, 'Estimated wait: --:--', w / 2, 330, { size: 15, font: F.mono, color: ink, align: 'center' });

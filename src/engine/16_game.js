@@ -30,7 +30,8 @@
 //   ([{flag, saved, lost}], data/19_endings.js) when defined, else Menus' own table. Results are recorded
 //   (META.endingsSeen / results / completed → EXTRA and New Game+ unlock); Aidan's body is put back as a new game
 //   expects it (posture, the phone in his hand, nothing in the other), then the title.
-// Fog culling: Rig actors beyond the fog's cutoff (≈ 2.45 / density m) are skipped by the renderer (render layer 1).
+// Fog culling: Rig actors beyond the fog's cutoff (≈ 2.45 / density m) are skipped by the renderer (render layer 1),
+//   with the groups listed in actor.cullWith (an enemy's fx group); it runs on SH.advance's manual ticks too.
 // Debug jumps (Game.debugRoom = SH.goto) in play cancel a transition in flight and abort running blocking scripts.
 // CONTRACT+: Game.fps, Game.culled, Game.manual(on) (SH.advance), Game.autosave(), Game.goTitle(), Game.results(name) (the §2A results
 //   record + stars without showing it), Game.rank(stats), Game.stickerCount(S), Game.debugStart(n, o),
@@ -262,7 +263,8 @@ const Game = (() => {
     dt = Math.min(0.05, Math.max(0, +dt || 0));
     Time.frame++;
     Time.real += dt;
-    safe('Input', () => Input.update());
+    // under SH.advance (manual ticks) Input's clock follows the game tick, so held keys / SH.press holds last game time
+    safe('Input', () => Input.update(manualN > 0 ? dt : undefined));
     if (safe('Menus.isOpen', () => Menus.isOpen())) safe('Menus', () => Menus.update(dt));
     const menu = !!safe('Menus.isOpen', () => Menus.isOpen());
     const title = isTitle();
@@ -289,7 +291,9 @@ const Game = (() => {
     stepTimers(dt);
     safe('UI', () => UI.update(dt));
     safe('Render.update', () => Render.update(gdt, focus()));
-    if (render) { safe('fogCull', fogCull); safe('Render', () => Render.render(dt)); }
+    // (fog culling runs on manual ticks too, so Render.render(0) after SH.advance draws — and counts — what a real frame would)
+    safe('fogCull', fogCull);
+    if (render) safe('Render', () => Render.render(dt));
     safe('Debug', () => Debug.update(dt));
   }
   const _f = new THREE.Vector3(), _d = new THREE.Vector3();
@@ -307,9 +311,13 @@ const Game = (() => {
   const CULL_LAYER = 1;
   const culled = new Set();
   const _cp = new THREE.Vector3(), _ap = new THREE.Vector3();
+  // actor.cullWith = [Object3D…]: groups that live outside the actor's root but belong to its body (an enemy's fx group —
+  // the Tethered's tether and box — set by Enemies) are culled with it
   function setCulled(a, off) {
     if (off) culled.add(a); else culled.delete(a);
-    a.root.traverse((o) => { if (off) o.layers.set(CULL_LAYER); else o.layers.set(0); });
+    const set = (o) => { if (off) o.layers.set(CULL_LAYER); else o.layers.set(0); };
+    a.root.traverse(set);
+    if (Array.isArray(a.cullWith)) for (const g of a.cullWith) if (g && g.traverse) g.traverse(set);
   }
   function fogCull() {
     const live = Rig.actors;
@@ -598,7 +606,9 @@ const Game = (() => {
   }
   async function playCs(id, o) {
     if (!CUTSCENES[id]) { console.info(`[Game] ending cutscene "${id}" is not registered yet — skipped`); return false; }
-    const r = await Script.playCutscene(id, o.parent ? { parent: o.parent } : {});
+    // inheritSkip:false — the ending's scenes never inherit a skip of the Ch 8 scene that called G.ending (a skipped
+    // 8-1 would otherwise swallow E-YES and cut straight to the credits); each stays skippable on its own
+    const r = await Script.playCutscene(id, o.parent ? { parent: o.parent, inheritSkip: false } : { inheritSkip: false });
     return r !== Script.ABORT;
   }
   async function endingFlow(name, o, tok) {
@@ -704,7 +714,10 @@ const Game = (() => {
     if (!ROOMS[room]) { console.warn(`[Game] no room "${room}"`); return false; }
     if (mode === 'play' && World.room && !flow) {
       // a debug jump wins over whatever was moving Aidan: a transition in flight and a running cutscene / blocking
-      // beat (the Prologue's P-1 still changing sets after SH.newGame) would otherwise refuse or undo it
+      // beat (the Prologue's P-1 still changing sets after SH.newGame) would otherwise refuse or undo it; an open menu
+      // screen (a document's reading view an interaction opened) is closed first — it pauses the game ticks the room
+      // change needs, so the jump would never finish
+      if (safe('Menus.isOpen', () => Menus.isOpen())) { try { await Menus.close(null); } catch (e) { console.error('[Game] debugRoom: Menus.close', e); } }
       safe('World.cancelTransition', () => { if (World.transitioning) World.cancelTransition(); });
       safe('Script.abort', () => { for (const c of Script.list()) if (c.blocking && !c.queued) Script.abort(c.name, 'debug'); });
       safe('Cam.release', () => Cam.release());

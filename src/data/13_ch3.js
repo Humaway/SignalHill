@@ -60,7 +60,7 @@
     let t = TEXC.get(key);
     if (t) return t;
     const c = document.createElement('canvas'); c.width = w; c.height = h;
-    draw(c.getContext('2d'), w, h, U.rng(U.hash('c3:' + key)));
+    draw(c.getContext('2d', { willReadFrequently: true }), w, h, U.rng(U.hash('c3:' + key)));
     t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
     if (o.wrap) t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -170,6 +170,24 @@
     const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 16, r, 4, false), K.mat({ color, roughness: 0.7 }));
     m.castShadow = false; m.userData.ownedGeo = true;
     K.mesh(m, { static: o.static !== false, world: o.world, name: o.name });
+    return m;
+  }
+  // a vertical run of timber battens (slats with gaps) from a to b ([x, z]), bottom heights yb0 → yb1, tops yt0 → yt1
+  const C3_battenMat = (() => { let m = null; return () => m || (m = (() => {
+    const t = C3_tex('battens', 32, 16, (x, w, h) => { x.clearRect(0, 0, w, h); x.fillStyle = '#6a5a48'; x.fillRect(2, 0, 20, h); x.fillStyle = 'rgba(0,0,0,0.25)'; x.fillRect(18, 0, 4, h); }, { wrap: true });
+    const mm = new THREE.MeshStandardMaterial({ map: t, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.95, color: '#9a8a74' });
+    mm.userData.shared = true;
+    return mm;
+  })()); })();
+  function C3_battens(K, a, b, yb0, yb1, yt0, yt1) {
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]), u = L / 0.13;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([a[0], yb0, a[1], b[0], yb1, b[1], b[0], yt1, b[1], a[0], yt0, a[1]], 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, u, 0, u, 1, 0, 1], 2));
+    g.setIndex([0, 1, 2, 0, 2, 3]); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, C3_battenMat()); m.castShadow = false; m.receiveShadow = true;
+    m.userData.ownedGeo = true;
+    K.mesh(m, { static: true });
     return m;
   }
   // colliders along a slope: split into short pieces, each with its own base height (colliders are 2D + y/h)
@@ -314,6 +332,11 @@
           K.box(x + dx, gy - 0.1, z, 0.16, y + 0.62 - gy, 0.16, { tex: 'wood', color: '#4a3f33' });
         }
         K.box(x, y + 0.45, 12.72, 7.0, 0.18, 0.08, { tex: 'wood', color: '#5a4c3c' });
+        // timber battens between the stumps, front and sides, down to the falling ground (not a house floating on sticks)
+        const gyAt = (xx, z) => erF(xx) - 0.006 - Math.max(0, z - 12) * 0.5;
+        const top = y + 0.46;
+        C3_battens(K, [x - 3.5, 12.76], [x + 3.5, 12.76], gyAt(x - 3.5, 12.76) - 0.05, gyAt(x + 3.5, 12.76) - 0.05, top, top);
+        for (const sx of [-3.42, 3.42]) C3_battens(K, [x + sx, 12.76], [x + sx, 19.9], gyAt(x + sx, 12.76) - 0.05, gyAt(x + sx, 19.9) - 0.05, top, top);
         K.prop('letterbox', x + 1.9 - 0.95, 8.35, 180, { y, variant: 'brick', seed: 60 + i });
       });
       // side fences between the yards, sheds, gum trees, shrubs — the gaps between the houses go to fog
@@ -472,9 +495,9 @@
       // ---- the flagpole, the sign plinth, the bench and the butts bin ---------------------------------------------------
       K.cyl(34, 0, 3.6, 0.06, 9.5, { tex: 'metal', color: '#b8bdb8' }, { r2: 0.035, collide: true });
       K.sphere(34, 9.55, 3.6, 0.07, { tex: 'metal', color: '#c9a84a' });
-      const rope = C3_wire(K, [34.06, 9.3, 3.6], [34.12, 1.1, 3.65], -0.05, 0.006, '#c9c2a8', { static: false, name: 'c3fc_rope' });
-      K.animate((dt, t) => { if (rope) rope.rotation.x = Math.sin(t * 0.9) * 0.012; });
-      K.examine(33.5, 1.3, 4.0, ['The flagpole. No flag. [beat] The rope still knocks against it.', 'Tink. Tink. Like somebody tapping to be let in.'], { id: 'c3fc:flag', r: 1.4 });
+      const halyard = C3_wire(K, [34.06, 9.3, 3.6], [34.12, 1.1, 3.65], -0.05, 0.006, '#c9c2a8', { static: false, name: 'c3fc_halyard' });
+      K.animate((dt, t) => { if (halyard) halyard.rotation.x = Math.sin(t * 0.9) * 0.012; });
+      K.examine(33.5, 1.3, 4.0, ['The flagpole. No flag. [beat] The clip on the halyard still taps against it.', 'Tink. Tink. Like somebody tapping to be let in.'], { id: 'c3fc:flag', r: 1.4 });
       K.box(30.2, 0, 19.1, 3.2, 0.9, 0.5, { tex: 'brick', color: '#735c4b' }, { collide: true });
       K.sign('SIGNAL HILL\nTRUNK EXCHANGE\n— TELECOMMUNICATIONS —', 30.2, 1.55, 18.83, 2.8, 0.9, { style: 'council', rotY: 180 });
       K.prop('planter', 7, 6.4, 0, { variant: 'box', dead: true });
@@ -516,15 +539,19 @@
       K.trigger([29.5, 5.5, 36, 17], async (G) => {
         if (S.chapter !== 3 || (S.calls && S.calls.luka3) || C3.luka3) return;
         C3.luka3 = true;
-        try { await G.wait(0.8); await G.call('luka3'); } finally { C3.luka3 = false; }
+        // (after his first thought on the forecourt, so the ring and the call never talk over it)
+        try { await G.wait(0.8); await G.until(() => !C3.fcThought); await G.wait(0.6); await G.call('luka3'); } finally { C3.luka3 = false; }
       }, { id: 'c3_forecourt:luka3', once: false, when: () => S.chapter === 3 && !(S.calls && S.calls.luka3) });
       K.exit({ id: 'c3_forecourt:road', box: [36.2, 6.1, 37, 16.1], to: 'c3_exchangerd', entry: 'top' });
     },
     async onEnter(G, from) {
       if (from === 'c3_exchangerd' && G.once('c3:forecourt')) {
-        note(G, 'Wai. Inside the exchange.', 'c3_goal');
-        await G.wait(1.0);
-        await G.think('The old exchange. [beat] There\'s a hum coming off it.');
+        C3.fcThought = true;
+        try {
+          note(G, 'Wai. Inside the exchange.', 'c3_goal');
+          await G.wait(1.0);
+          await G.think('The old exchange. [beat] There\'s a hum coming off it.');
+        } finally { C3.fcThought = false; }
       }
     },
   });
@@ -727,6 +754,14 @@
   }
   // the pendant lamps on the HALL circuit (enamel shades on rods); five hold real pool lights over the centre aisle
   const HL_PEND = [[10.4, 6.63, 1], [16.6, 6.63, 1], [22.8, 6.63, 1], [29, 6.63, 1], [35.2, 6.63, 1], [13.5, 1.3, 0], [25.5, 1.3, 0], [19.5, 11.7, 0], [31.5, 11.7, 0], [3.2, 6.63, 1]];
+  // (spec §1: nothing around necks. The wai rig preset hangs his reading glasses on a retainer cord behind the neck;
+  // every Wai in this chapter wears them without it)
+  function C3_noCord(a) {
+    const g = a && a.glassesObj;
+    if (g) g.traverse((m) => { if (m.name === 'glassesCord') m.visible = false; });
+  }
+  // his hands free in the quiet scenes: the equipped weapon leaves his left hand until the scene ends
+  function C3_emptyHands(A) { try { A.hold('L', new THREE.Group(), { pose: null }); } catch (e) { /* actor */ } }
   function C3_waiTalkLine(G) {
     const L = (typeof DIALOGUE !== 'undefined' && Array.isArray(DIALOGUE.wai_talk) && DIALOGUE.wai_talk.length) ? DIALOGUE.wai_talk
       : ["Got an email Tuesday. 'Your role has been identified as impacted.' [beat] Impacted. Like a tooth.", "Eighteen years. You'd think they'd at least call.", 'Go on. Basement.'];
@@ -769,20 +804,21 @@
     return flag('waiSaved') ? 'board' : 'lost';
   };
   const hallCams = [
-    // the long symmetrical shot from the east end, down the centre aisle to Wai's lit board and the frame doors
-    { id: 'c3_hall:long', vol: [11, 4.66, 34.5, 8.6], type: 'static', pos: [39.35, 3.25, HL.mid], target: [4.0, 1.25, HL.mid], fov: 'fit' },
-    // the east end: foyer door, stairs, payphone, the supervisor's desk — from high over the centre aisle (high enough to
-    // see over the boards into the ends of the side aisles)
-    { id: 'c3_hall:east', vol: [34.5, 0, 40, 14], type: 'static', pos: [28.9, 4.45, HL.mid], target: [39.1, 0.8, 6.5], fov: 'fit' },
-    // a rail along the rows: the north side aisle, seen from the east end down its length (the records door, a Tethered)
-    { id: 'c3_hall:north', vol: [6.4, 0, 34.5, 2.98], type: 'pan', pos: [39.3, 2.75, 1.55], target: [20, 0.9, 1.3], fov: 36, pan: { lag: 0.35, yaw: 12, pitch: 14 } },
-    // the south side aisle from the frame-doors end, looking east (the other Tethered at the boards)
-    { id: 'c3_hall:south', vol: [6.4, 10.28, 34.5, 14], type: 'pan', pos: [0.9, 2.75, 11.85], target: [20, 0.9, 11.7], fov: 36, pan: { lag: 0.35, yaw: 12, pitch: 14 } },
-    // the west end from over the centre aisle: Wai's board, the lamp panel, the frame doors
-    { id: 'c3_hall:west', vol: [0, 0, 11, 14], type: 'pan', pos: [16.2, 4.2, HL.mid], target: [2.0, 0.9, HL.mid], fov: 50, pan: { lag: 0.35, yaw: 58, pitch: 26 } },
-    // the west ends of the side aisles (the boards hide them from over the centre aisle): down each aisle from inside it
-    { id: 'c3_hall:westN', vol: [0, 0, 11, 3.0], pri: 1, type: 'static', pos: [15.8, 2.7, 1.45], target: [2.0, 0.9, 1.6], fov: 'fit' },
-    { id: 'c3_hall:westS', vol: [0, 10.28, 11, 14], pri: 1, type: 'static', pos: [15.8, 2.7, 12.0], target: [2.0, 0.9, 11.8], fov: 'fit' },
+    // the long symmetrical shot from the east end, down the centre aisle to Wai's lit board and the frame doors (it tilts
+    // down to Aidan only when he is right under it, at the end of the aisle)
+    { id: 'c3_hall:long', vol: [9.6, 4.66, 37, 8.6], type: 'pan', pos: [39.35, 3.25, HL.mid], target: [4.0, 1.25, HL.mid], fov: 34, pan: { lag: 0.45, yaw: 10, pitch: 46 } },
+    // the east end (the cross aisle: foyer door, stairs, payphone, the supervisor's desk), from high over the ends of
+    // the rows, looking back down on it — from anywhere further into the hall the ends of the boards hide its corners
+    { id: 'c3_hall:east', vol: [37, 0, 40, 14], type: 'pan', pos: [36.5, 4.7, HL.mid], target: [39.0, 0.8, HL.mid], fov: 52, pan: { lag: 0.35, yaw: 78, pitch: 55 } },
+    // the side aisles (the boards hide them from anywhere else), each shot down its length from both ends: the east
+    // halves from the cross aisle (the records door, a Tethered at the boards) …
+    { id: 'c3_hall:north', vol: [20, 0, 37, 2.98], pri: 1, type: 'pan', pos: [38.3, 2.9, 1.55], target: [20, 0.9, 1.45], fov: 40, pan: { lag: 0.35, yaw: 36, pitch: 44 } },
+    { id: 'c3_hall:south', vol: [20, 10.28, 37, 14], pri: 1, type: 'pan', pos: [38.3, 2.9, 11.6], target: [20, 0.9, 11.6], fov: 40, pan: { lag: 0.35, yaw: 36, pitch: 44 } },
+    // the west end from high over Wai's end of the centre aisle: the lamp panel, the frame doors, the ends of the rows
+    { id: 'c3_hall:west', vol: [0, 0, 9.6, 14], type: 'pan', pos: [9.5, 4.6, HL.mid], target: [1.0, 0.9, HL.mid], fov: 52, pan: { lag: 0.35, yaw: 80, pitch: 55 } },
+    // … and the west halves from the frame-doors end, looking back east along them
+    { id: 'c3_hall:westN', vol: [3, 0, 20, 2.98], pri: 1, type: 'pan', pos: [0.5, 3.0, 1.45], target: [20, 0.9, 1.45], fov: 40, pan: { lag: 0.35, yaw: 36, pitch: 46 } },
+    { id: 'c3_hall:westS', vol: [3, 10.28, 20, 14], pri: 1, type: 'pan', pos: [0.5, 3.0, 11.8], target: [20, 0.9, 11.6], fov: 40, pan: { lag: 0.35, yaw: 36, pitch: 46 } },
     // close static at Wai's board
     { id: 'c3_hall:wai', vol: [5.8, 4.66, 9.6, 7.8], pri: 1, type: 'static', pos: [13.9, 2.2, 7.95], target: [6.9, 1.05, 5.1], fov: 'fit' },
   ];
@@ -842,10 +878,10 @@
       const wa = waiAt();
       if (wa === 'board') {
         const W = K.npc('wai', 'wai', HL.wai[0], HL.wai[1] - 0.02, 180, { talk: (G) => C3_waiTalk(G), r: 1.8 });
-        if (W) { W.setAnim('work', { seated: true, seat: 0.64, blend: 0 }); try { W.wear('headset', true); } catch (e) { /* rig */ } }
+        if (W) { W.setAnim('work', { seated: true, seat: 0.64, blend: 0 }); try { W.wear('headset', true); } catch (e) { /* rig */ } C3_noCord(W); }
       } else if (wa === 'doors') {
         const W = K.npc('wai', 'wai', HL.doorsW[0], HL.doorsW[1], 125, { talk: (G) => C3_waiTalk(G), r: 1.8 });
-        if (W) { W.setAnim('idle', { blend: 0 }); try { W.hold('R', 'candybar'); W.armPose('R', 'phone_look'); } catch (e) { /* rig */ } }
+        if (W) { W.setAnim('idle', { blend: 0 }); try { W.hold('R', 'candybar'); W.armPose('R', 'phone_look'); } catch (e) { /* rig */ } C3_noCord(W); }
       }
       // ---- the west wall: the frame-hall doors (a maglock on HALL), the circuit lamp panel, a big stopped clock ----------
       // (rot 90: the door's local +x is world −z, so the outer hinges are 'right' on the north leaf and 'left' on the south)
@@ -910,6 +946,10 @@
       K.box(39.9, 2.3, HL.mid, 0.04, 0.34, 1.0, { color: '#9fb0ac', roughness: 0.2, emissive: '#3a4a47', emissiveIntensity: 0.6 });
       K.light('point', 39.3, 2.75, HL.mid, { color: '#93aaa6', intensity: 2.4, distance: 8, bank: 3, name: 'c3h:fanlight', world: 'fog' });
       K.light('led', 39.8, 2.66, HL.mid, { color: '#2aff5a', size: 0.02, intensity: 1.5 });
+      // the STAIRS exit sign's green on the stairs door; the grey through the canteen's fanlight on the payphone corner
+      K.light('point', 39.35, 2.45, 1.6, { color: '#3aff8a', intensity: 1.4, distance: 4.8, name: 'c3h:stairsGlow' });
+      K.box(38.6, 2.3, 13.9, 1.0, 0.34, 0.04, { color: '#9fb0ac', roughness: 0.2, emissive: '#3a4a47', emissiveIntensity: 0.6 });
+      K.light('point', 38.6, 2.6, 13.3, { color: '#93aaa6', intensity: 2.0, distance: 7, bank: 3, name: 'c3h:canteenFan', world: 'fog' });
       // ---- the Outage (3-2, briefly): receipt paper hanging down the centre aisle, tethers, red lamps ---------------------------
       K.outageOnly(() => {
         for (let i = 0; i < 9; i++) K.prop('receipt_strip', 3 + i * 3.6, HL.mid + (i % 2 ? 0.9 : -0.8), i * 20, { ceil: H, len: 2.2 + (i % 3) * 0.8 });
@@ -1049,6 +1089,8 @@
       K.examine(4.4, 1.0, 3.6, 'A microfiche reader. Screen dark. There\'s still a card in it.', { id: 'c3r:fiche', r: 1.1 });
       K.examine(2.1, 0.5, 7.0, '"DO NOT DESTROY." [beat] Somebody cared about this, once.', { id: 'c3r:boxes', r: 1.2 });
       K.examine(9.2, 1.2, 2.6, 'Cabinet after cabinet of account records. A lot of them aren\'t even from here.', { id: 'c3r:cabinets', r: 1.2 });
+      K.examine(8.8, 1.0, 1.55, 'A step ladder folded against the shelves. For the top row of binders. [beat] Nobody\'s needed the top row in a long time.', { id: 'c3r:ladder', r: 1.1 });
+      K.examine(9.5, 2.0, 6.6, 'A vent. Cold air comes through it, and the hum from the hall.', { id: 'c3r:vent', r: 1.4 });
     },
     onUpdate() { C3_ambient(['#5f6b69', 0.4], ['#2a8a84', 0.28]); },
     onLeave() { C3_ambientOff(); },
@@ -1343,6 +1385,7 @@
         A.look([x - 0.1, y, z]);
       };
       const label = () => { const c = CIRC[i]; try { UI.message(lvl() === 'hard' ? c : `${c} — ${AMPS[c]} A`, 1.4); } catch (e) { /* ui */ } };
+      await G.until(() => !C3.fuseThought);                // (his first look at the board finishes before the labels)
       show(); label();
       for (;;) {
         let act = null;
@@ -1482,12 +1525,17 @@
       K.examine(0.5, 1.5, 4.1, 'A wall phone. Dead. [beat] Somebody wrote "HALL — 214" on the wall beside it.', { id: 'c3f:phone', r: 1.1 });
       K.examine(5.7, 2.35, 3.3, 'DANGER. Four hundred and fifteen volts. [beat] Okay.', { id: 'c3f:danger', r: 1.1 });
       K.examine(4.3, 0.6, 3.8, 'A kitchen stool. For sitting and staring at the board, working it out.', { id: 'c3f:stool', r: 1.0 });
+      K.examine(FU.bx - 0.5, 0.3, FU.bz + 0.45, 'A rubber mat in front of the board. Worn right through where people stood.', { id: 'c3f:mat', r: 0.9 });
+      K.examine(FU.bx - 0.2, 2.4, FU.bz - 0.3, 'Four fat conduits out of the top of the board and up into the ceiling. [beat] The whole building runs through this one box.', { id: 'c3f:conduits', r: 1.1 });
     },
     async onEnter(G, from) {
       if (from === 'c3_stairs' && !flag('c3_fused') && G.once('c3:fuseIn')) {
-        await G.wait(0.7);
-        await G.think('The fuse board. [beat] Nineteen sixty-one.');
-        note(G, 'The fuse board. The frame room needs power.', 'c3_fuse');
+        C3.fuseThought = true;
+        try {
+          await G.wait(0.7);
+          await G.think('The fuse board. [beat] Nineteen sixty-one.');
+          note(G, 'The fuse board. The frame room needs power.', 'c3_fuse');
+        } finally { C3.fuseThought = false; }
       }
     },
     onUpdate() { C3_ambient(['#5a6664', 0.38], ['#2a8a84', 0.28]); },
@@ -1550,7 +1598,7 @@
       // the jointers' bench at the far end: Operator's Log 5, the energy drink, a kettle and two cups, a dead lamp
       K.box(0.6, 0, 5.0, 0.9, 0.85, 2.4, { tex: 'wood', color: '#5a4632' }, { collide: true });
       K.doc('oplog5', 0.7, 0.86, 4.6, { id: 'c3_vault:oplog5', model: 'binder', r: 1.2, glint: 0.12 });
-      K.pickup('energy_drink', 0.75, 0.86, 5.55, { id: 'c3_vault:energy', rot: 30 });
+      K.pickup('energy_drink', 0.75, 0.86, 5.55, { id: 'c3_vault:energy', rot: 30, extraOnEasy: true });   // (spec 3-2's pickups: the canteen coffee)
       K.cyl(0.55, 0.86, 6.0, 0.08, 0.2, { tex: 'metal', color: '#b8bdb8', metalness: 0.6, roughness: 0.3 });
       K.prop('mug', 0.8, 6.1, 20, { y: 0.86, color: '#d8c9a0' }); K.prop('mug', 0.95, 5.95, 80, { y: 0.86 });
       K.prop('desk_lamp', 0.4, 4.1, 60, { y: 0.86, lit: false });
@@ -2180,7 +2228,7 @@
       K.prop('cable_drum', 11.6, 2.6, -10, { variant: 'standing' });
       K.prop('pallet', 14.2, 1.4, 12, { n: 4, load: 'wrapped' });
       K.prop('dumpster', 17.8, 2.0, -90, {});
-      K.prop('car', 9.4, 4.0, 90, { color: '#d8d6cc', variant: 'wagon', plate: 'LINES-7' });
+      K.prop('car', 8.2, 8.5, 90, { color: '#d8d6cc', variant: 'wagon', plate: 'LINES-7' });   // (against the building: from the roofline camera it hid the yard)
       K.prop('bench', 13.2, 9.5, 180, { len: 1.6 });
       K.cyl(12.4, 0, 9.55, 0.12, 0.28, { tex: 'metal', color: '#8a6a3a' });
       K.prop('floodlight', 3.0, 9.2, 30, { variant: 'pole', lit: false, light: false });
@@ -2196,7 +2244,7 @@
       K.trigger([0.3, YD.gateZ - 1.9, 1.3, YD.gateZ + 1.9], (G) => C3_toWireLane(G), { id: 'c3_yard:out', once: false, when: () => flag('c3_bossDone') && S.chapter === 3 });
       K.exit({ id: 'c3_yard:lane', box: [-1.2, YD.gateZ - 1.9, 0.25, YD.gateZ + 1.9], to: 'c4_wirelane', entry: 'yard', when: () => S.chapter >= 4 && !!ROOMS.c4_wirelane, blockedMsg: null, mapMark: false });
       // ---- examine --------------------------------------------------------------------------------------------------
-      K.examine(9.4, 1.2, 4.0, ['The old lines truck. "LINES 7" stencilled on the door.', 'Ladders on the roof rack, a flask on the dash. [beat] Somebody\'s whole day, parked.'], { id: 'c3yd:truck', r: 2.2 });
+      K.examine(8.2, 1.2, 7.4, ['The old lines truck. "LINES 7" stencilled on the door.', 'Ladders on the roof rack, a flask on the dash. [beat] Somebody\'s whole day, parked.'], { id: 'c3yd:truck', r: 2.2 });
       K.examine(5.2, 1.0, 2.2, 'Cable drums. Hundreds of metres of copper nobody\'s ever going to lay now.', { id: 'c3yd:drums', r: 1.5 });
       K.examine(13.2, 0.8, 9.3, 'The smokers\' bench. A coffee tin full of butts. [beat] Somebody took their breaks out here in the cold.', { id: 'c3yd:bench', r: 1.4 });
       K.examine(17.8, 1.0, 2.0, 'A skip full of old handsets. Hundreds of them, cords all knotted together.', { id: 'c3yd:skip', r: 1.6 });
@@ -2240,6 +2288,7 @@
   function C3_wai(G, o = {}) {
     const W = G.actor('wai', 'wai', o);
     if (W.raw) W.raw.idleLife = false;
+    C3_noCord(W.raw);
     return W;
   }
   defineCutscene('3-1', async (G) => {
@@ -2256,13 +2305,16 @@
     G.addLight('point', { pos: [7.25, 1.42, 4.66], color: '#ffc47e', intensity: 1.15, distance: 1.9 });
     // 1. SHOT — a long symmetrical shot down the hall: rows of dark boards; at the far end one board lit, a man at it.
     await G.fade(1, 0);
-    A.place(38.7, HL.mid, -90);
+    C3_emptyHands(A);
+    A.place(37.6, HL.mid, -90);
     A.pose('idle');
-    G.cam({ pos: [39.35, 2.95, HL.mid], target: [5.0, 1.25, HL.mid], fov: 28, to: { pos: [38.2, 2.9, HL.mid], target: [5.0, 1.25, HL.mid], fov: 26 }, dur: 11, ease: 'linear' });
+    // (Aidan walks into the bottom of the frame, his light going down the aisle ahead of him toward the lit board)
+    // (the letterbox crops the frame: the lens tilts down enough to find him under it, the lit board still at the top)
+    G.cam({ pos: [39.35, 3.2, HL.mid], target: [5.0, -2.9, HL.mid], fov: 40, to: { pos: [38.7, 3.15, HL.mid], target: [5.0, -2.7, HL.mid], fov: 38 }, dur: 11, ease: 'linear' });
     G.music('line', { vol: 0.55 });
     await G.fade(0, 1.4);
     await G.wait(1.6);
-    const walk1 = q(A.walkTo(33.5, HL.mid - 0.1, { speed: 0.95 }));
+    const walk1 = q(A.walkTo(31.4, HL.mid - 0.1, { speed: 0.95 }));
     await G.wait(4.2);
     if (board && board.userData.setLamp) board.userData.setLamp('27', 'blink');
     await G.wait(1.2);
@@ -2442,6 +2494,7 @@
     const A = G.aidan, W = C3_wai(G);
     const panel = G.obj('c3h_panel');
     if (A.raw) A.raw.idleLife = false;
+    C3_emptyHands(A);
     // 1. SHOT — the frame hall doors. Wai stands reading his old candy-bar phone.
     await G.fade(1, 0.35);
     W.place(HL.doorsW[0], HL.doorsW[1], 125);
@@ -2566,6 +2619,7 @@
   defineCutscene('3-3', async (G) => {
     const A = G.aidan, W = C3_wai(G);
     if (A.raw) A.raw.idleLife = false;
+    C3_emptyHands(A);
     W.look(null);
     await C3_frameDies(G, true);
     // state first (plain statements: a skip lands here the same way)
@@ -2586,7 +2640,7 @@
     { const L = [WB.lampWai[0] + FR.replica.dx, WB.lampWai[1], WB.lampWai[2] + FR.replica.dz]; G.cam({ pos: [L[0] + 0.3, L[1] - 0.08, L[2] + 0.62], target: L, fov: 26, to: { pos: [L[0] + 0.26, L[1] - 0.08, L[2] + 0.52], fov: 24 }, dur: 3 }); }
     await G.wait(2.4);
     // 2. SHOT — Wai sits on the floor against the frame, glasses off.
-    if (W.raw) { try { W.raw.glassesState('hang'); } catch (e) { /* rig */ } W.raw.eyes('down'); W.raw.expr('tired'); }
+    if (W.raw) { try { W.raw.glassesState('off'); } catch (e) { /* rig */ } W.raw.eyes('down'); W.raw.expr('tired'); }
     { const l = G.light('c3fr:work'); if (l) l.on(true); }
     A.place(3.1, 6.75, -47); A.pose('idle');
     G.cam({ pos: [5.6, 1.1, 9.6], target: [2.5, 0.85, 7.5], fov: 40, to: { pos: [5.45, 1.09, 9.5], fov: 38 }, dur: 30 });
@@ -2618,6 +2672,7 @@
   defineCutscene('3-3alt', async (G) => {
     const A = G.aidan, W = C3_wai(G);
     if (A.raw) A.raw.idleLife = false;
+    C3_emptyHands(A);
     // Wai turns from the frame and walks off into the dark between the rows, and is gone
     q(W.walkTo([[5.5, 8.6], [8.2, 12.6]], { speed: 0.7 }));
     q(W.fade(0, 4.5));

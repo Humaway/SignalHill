@@ -59,7 +59,7 @@
     let t = TEXC.get(key);
     if (t) return t;
     const c = document.createElement('canvas'); c.width = w; c.height = h;
-    const ctx = c.getContext('2d');
+    const ctx = c.getContext('2d', { willReadFrequently: true });
     draw(ctx, w, h, U.rng(U.hash('c6:' + key)));
     t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
@@ -178,7 +178,7 @@
     x.fillStyle = '#b3261e'; x.fillRect(0, 0, w, 26);
     for (let y = 60; y < h; y += 24) { x.fillStyle = 'rgba(60,110,170,0.35)'; x.fillRect(0, y, w, 1); }
     x.fillStyle = 'rgba(179,38,30,0.4)'; x.fillRect(38, 26, 1.5, h);
-    const L = ['Team meeting — Monday', '(didn\'t run it)', '1. Tell them they matter', '   more than the number.', '2. Ask Aidan how he\'s', '   actually going.', '3. Stop writing the', '   number first.', '4. Ring him again.'];
+    const L = ['Team meeting — Monday', '(didn\'t run it)', '1. Tell them they matter', '   more than the number.', '2. Ask Aidan how he\'s', '   actually going. Not', '   "good?" Actually.', '3. Stop writing the', '   number first.', '4. Ring him again.'];
     L.forEach((s, i) => hand(x, s, 46, 56 + i * 24 + (i > 1 ? 14 : 0), { size: 17, color: '#1f2c6e' }));
     age(x, w, h, r, 0.35);
   });
@@ -248,7 +248,7 @@
   function smat(key, make) { let m = MATS[key]; if (!m) { m = make(); m.userData.shared = true; MATS[key] = m; } return m; }
   const GEOS = {};
   function sgeo(key, make) { let g = GEOS[key]; if (!g) { g = make(); g.userData.shared = true; GEOS[key] = g; } return g; }
-  const skinMat = () => smat('skin', () => new THREE.MeshStandardMaterial({ color: '#dcd3c8', roughness: 0.6, emissive: '#2a221d', emissiveIntensity: 0.7 }));
+  const skinMat = () => smat('skin', () => new THREE.MeshStandardMaterial({ color: '#dcd3c8', roughness: 0.6, emissive: '#5a544e', emissiveIntensity: 0.85 }));   // (pale out of the dark: a faint cold glow)
   const nailMat = () => smat('nail', () => new THREE.MeshStandardMaterial({ color: '#e6dcd0', roughness: 0.3 }));
   const cuffMat = () => smat('cuff', () => new THREE.MeshStandardMaterial({ color: '#e9e7e0', roughness: 0.55 }));
   const suitMat = () => smat('suit', () => new THREE.MeshStandardMaterial({ color: '#1d2433', roughness: 0.8 }));
@@ -350,11 +350,14 @@
     const dx = b[0] - a[0], dz = b[1] - a[1], len = Math.hypot(dx, dz);
     K.box((a[0] + b[0]) / 2, y - 0.04, (a[1] + b[1]) / 2, Math.abs(dx) > Math.abs(dz) ? len : 0.008, 0.008, Math.abs(dx) > Math.abs(dz) ? 0.008 : len, { color: '#151515', roughness: 0.6 }, { shadow: false });
   }
+  const C6_CURTAIN_OPACITY = 0.4;
   // A dust barrier across a corridor: two overlapping plastic panels hanging from a batten. They lean away from whatever
   // pushes through (Aidan, the Standard) with a crinkle — and anything behind them shows as a silhouette first.
   function C6_curtain(K, x, z, rot, w, h, id) {
     const g = new THREE.Group(); g.name = 'c6:curtain:' + id; g.position.set(x, 0, z); g.rotation.y = rot * D2R;
-    const mat = K.mat({ tex: 'plastic_sheet' });
+    // (thinner than the bays' sheeting: the cameras look down the legs through these, and Aidan has to read through them
+    // even when his torch lights the plastic in front of him)
+    const mat = K.mat({ tex: 'plastic_sheet', opacity: C6_CURTAIN_OPACITY });
     const pw = w / 2 + 0.3;
     const geo = sgeo(`curtain${w}|${h}`, () => {
       const gg = new THREE.PlaneGeometry(pw, h - 0.05, 8, 6), p = gg.attributes.position, rr = U.rng(17);
@@ -628,7 +631,7 @@
       K.prop('clock', 5.92, 4.3, -90, { mount: 2.25, time: [9, 14] });
       K.prop('framed_photo', 5.93, 0.55, -90, { subject: 'blank', mount: 1.75, w: 0.4, h: 0.32 });
       K.plane(5.92, 1.55, 4.45, 0.5, 0.7, Tex.poster('OUR PROMISE\nWE\'LL CALL\nYOU BACK', { kind: 'notice', seed: 61 }), { rotY: -90 });
-      K.prop('plant_pot', 0.45, 0.45, 0, { variant: 'dead' });
+      K.prop('plant_pot', 0.45, 0.45, 0, { variant: 'dead', collide: false }); K.collider(0.2, 0.2, 0.7, 0.7, { h: 0.6 });
       K.prop('water_stain', 1.5, 1.2, 0, { surface: 'ceiling', ceil: H });
       K.prop('fluoro_tube', 3.0, 2.5, 90, { h: H - 0.02, variant: 'troffer', lit: false });
       K.light('point', 3.1, 1.4, -1.2, { color: '#8fa6a4', intensity: 1.6, distance: 6 });   // the fog's grey through the blinds
@@ -680,8 +683,9 @@
     // the lamp and the file, before he's close (the empty desk)
     G.cam({ pos: [1.2, 1.55, 3.5], target: [fx + 0.1, 0.8, fz - 0.1], fov: 34, to: { pos: [1.45, 1.45, 3.1], target: [fx + 0.1, 0.78, fz - 0.1], fov: 31 }, dur: 7 });
     await G.wait(0.4);
-    await A.walkTo([[ES.door[0] + 0.35, 3.5], [fx - 0.05, 2.62]], { speed: 0.8 });
-    await A.turn(180, 0.5);
+    // (to the desk's corner beside the visitor's chair — the chair takes the middle)
+    await A.walkTo([[ES.door[0] + 0.35, 3.5], [2.15, 3.1], [2.1, 2.6]], { speed: 0.8 });
+    await A.turn(145, 0.5);                                                       // (toward the file)
     A.look([fx, fy, fz]);
     if (A.raw) A.raw.eyes('down');
     await G.wait(0.5);
@@ -691,8 +695,15 @@
     await G.wait(1.4);
     G.set('c6_file', true);
     await G.doc('case_file', { id: 'c6_escalations:case' });
-    // after reading it: close on him, the lamp from below
-    G.cam({ pos: [fx - 0.62, 1.25, fz - 0.35], target: [fx - 0.02, 1.52, 2.6], fov: 34, to: { pos: [fx - 0.58, 1.26, fz - 0.25], fov: 31 }, dur: 12 });
+    // after reading it: close on him, the lamp from below (placed from where his head is: in front of his face, low,
+    // over the desk's edge)
+    {
+      const hp = V3(2.1, 1.62, 2.6);
+      try { A.raw.bones.head.getWorldPosition(hp); } catch (e) { /* rig */ }
+      const fwx = Math.sin(145 * D2R), fwz = Math.cos(145 * D2R), rx = -fwz, rz = fwx;
+      const cp = (d, s, dy) => [hp.x + fwx * d + rx * s, hp.y + dy, hp.z + fwz * d + rz * s];
+      G.cam({ pos: cp(0.78, 0.22, -0.4), target: [hp.x, hp.y - 0.02, hp.z], fov: 34, to: { pos: cp(0.7, 0.2, -0.38), fov: 31 }, dur: 12 });
+    }
     A.look(null);
     if (A.raw) { A.raw.eyes('down'); A.raw.expr('sad'); }
     G.music('tomorrow');
@@ -709,6 +720,12 @@
     note(G, 'The terminal. The case is still open.', 'c6_goal');
   }, { letterbox: false, skippable: true });
 
+  // (his reaction at the terminal: from over the desk, low and to his left — his face, not the back of his head)
+  function C6_faceCam(A) {
+    const hp = V3(ES.term[0] - 0.05, 1.6, 1.08);
+    try { A.raw.bones.head.getWorldPosition(hp); } catch (e) { /* rig */ }
+    return { pos: [hp.x + 0.55, hp.y - 0.28, hp.z + 0.66], target: [hp.x, hp.y - 0.02, hp.z], fov: 34 };
+  }
   // ---- 6-terminal (in-engine): "Close case (no further action)" → A+5 / "Leave it open" → F+2 ------------------------
   defineCutscene('6-terminal', async (G) => {
     const A = G.aidan;
@@ -741,7 +758,7 @@
       G.music('tomorrow', { clipped: true });
       await G.wait(2.4);
       await G.screen(null);
-      G.cam({ pos: [ES.term[0] + 0.7, 1.35, 0.35], target: [ES.term[0] - 0.05, 1.5, 1.05], fov: 34 });
+      G.cam(C6_faceCam(A));
       if (A.raw) { A.raw.expr('scared'); A.raw.eyes('down'); }
       await G.say('AIDAN', 'No. No, I didn\'t mean—');
       await G.wait(0.6);
@@ -752,7 +769,7 @@
       G.sfx('click', { vol: 0.6 });
       await G.wait(0.8);
       await G.screen(null);
-      G.cam({ pos: [ES.term[0] + 0.7, 1.35, 0.35], target: [ES.term[0] - 0.05, 1.5, 1.05], fov: 34 });
+      G.cam(C6_faceCam(A));
       if (A.raw) { A.raw.expr('sad'); A.raw.eyes('down'); }
       await G.say('AIDAN', 'No. [beat] It stays open.');
       await G.wait(0.4);
@@ -779,7 +796,9 @@
     entries: { l4: [FS.l4, 5.05, 180], l5: [FS.l5, 5.1, 180], l6: [FS.l6, 5.1, 180], start: [FS.l4, 5.05, 180] },
     cameras: [
       // straight down the stair void from above
-      { id: 'c6_firestairs:well', vol: [0, 0, 2.85, FS.D], y: [-1, 3.3], type: 'static', pos: [1.42, 9.9, 2.7], target: [1.4, 0, 3.15], fov: 'fit' },
+      { id: 'c6_firestairs:well', vol: [0, 0, 2.85, FS.D], y: [-1, 3.3], type: 'static', pos: [1.42, 7.5, 2.4], target: [1.4, 0, 2.9], fov: 'fit' },
+      // the Level 4 landing (the arrival), from up the first flight: the door he came through, the stairs going up
+      { id: 'c6_firestairs:l4', vol: [0, 4.15, 1.65, FS.D], y: [-0.5, 0.6], pri: 2, type: 'static', pos: [1.35, 4.3, 0.3], target: [0.75, 0.85, 5.2], fov: 'fit' },
       // high in the north-west corner, following him round the upper flights
       { id: 'c6_firestairs:upper', vol: [1.6, 0, FS.W, FS.D], y: [3.2, 8], type: 'pan', pos: [0.45, 9.85, 0.45], target: [3.6, 5.0, 3.6], fov: 50, pan: { lag: 0.3, yaw: 52, pitch: 30 } },
       // the Level 5 door (the plan taped to it), from over the half landing
@@ -834,7 +853,7 @@
       K.plane(FS.l4 + 0.1, 2.9, FS.D - 0.08, 0.5, 0.62, levelTex(4), { rotY: 180, transparent: true });
       K.plane(FS.l5 + 0.85, 5.35, FS.D - 0.08, 0.6, 0.75, levelTex(5), { rotY: 180, transparent: true });
       K.plane(FS.l6 - 0.62, 8.95, FS.D - 0.08, 0.6, 0.75, levelTex(6), { rotY: 180, transparent: true });
-      K.sign('FIRE STAIRS B\nLEVELS 4 — 6', 1.4, 1.55, 0.08, 0.6, 0.3, { style: 'shop', bg: '#1f4a38', fg: '#e8ece6' });
+      K.sign('FIRE STAIRS B\nLEVELS 4 — 6', 1.4, 1.8 + 1.55, 0.08, 0.6, 0.3, { style: 'shop', bg: '#1f4a38', fg: '#e8ece6' });
       for (const [x, y] of [[FS.l4, 0], [FS.l5, 3.6], [FS.l6, 7.2]]) K.prop('exit_sign', x, FS.D - 0.08, 180, { mount: y + 2.45 });
       const bulk = (x, y, z, rot, o = {}) => { K.box(x, y, z, 0.32, 0.12, 0.1, { color: '#dcdad2', roughness: 0.5 }, { rot }); return K.light('point', x, y - 0.1, z + (rot === 180 ? -0.25 : 0.25), { color: '#dfeae6', intensity: o.i ?? 2.6, distance: 5.5, flicker: !!o.flicker, bank: o.bank }); };
       bulk(0.8, 3.1, FS.D - 0.08, 180, { bank: 1 });
@@ -860,17 +879,21 @@
       // not up before the terminal
       if (!fv('c6_case')) K.blocker(0, 3.55, 1.15, 4.3, 'Escalations first. I have to see it.');
       // ---- examine lines ----
-      K.examine(1.4, 1.55, 0.3, ['"Fire stairs B. Levels four to six."', 'It doesn\'t go down from here. Only up.'], { id: 'c6fs:sign', r: 1.3 });
+      K.examine(1.4, 1.8 + 1.5, 0.3, ['"Fire stairs B. Levels four to six."', 'It doesn\'t go down from here. Only up.'], { id: 'c6fs:sign', r: 1.3 });
       K.examine(1.4, 0.6, 3.0, ['The well goes down a long way past four floors.', 'I dropped my keys down one of these once. I never heard them land.'], { id: 'c6fs:well', r: 1.2 });
       K.examine(0.9, 2.3, 0.6, ['A plastic chair and a tin of cigarette butts.', 'Somebody used to come out here to breathe.'], { id: 'c6fs:chair', r: 1.2 });
       K.examine(3.75, 4.9, FS.D - 0.3, 'Fire hose. Inspected in March. [beat] Everything in this building gets inspected.', { id: 'c6fs:hose', r: 1.1 });
       K.examine(1.7, 2.6, 2.9, 'The handrail\'s warm. [beat] Like somebody just let go of it.', { id: 'c6fs:rail', r: 1.1 });
-      K.examine(2.85, 6.7, FS.D - 0.3, 'The emergency light\'s on its battery. It\'ll go eventually.', { id: 'c6fs:bulk', r: 1.6 });
+      K.examine(2.85, 3.6 + 1.7, FS.D - 0.3, 'The emergency light\'s on its battery. It\'ll go eventually.', { id: 'c6fs:bulk', r: 1.3 });   // (the light is high over the Level 5 door: looked at from the landing)
       K.examine(3.8, 7.0, 0.35, ['"DID YOU CHECK." [beat] In marker, on the concrete.', 'It\'s old. It\'s been painted over and it came back through.'], { id: 'c6fs:writing', r: 1.4 });
+      // the taped note (only while the power's off — it isn't there once the maglock is green); read before the door is
+      // tried: with the kinds' default priorities the door always won the E press and the note could not be read
       K.examine(FS.l6 + 0.02, 8.55, FS.D - 0.4, async (G) => {
-        if (flag('c6_power')) await G.think('The maglock\'s green now.');
-        else { S.done['c6:noteRead'] = true; await G.think('"No site power. Level 6 access control on the temp board — Level 5 core."'); await G.think('So the power\'s on Level 5.'); note(G, 'Level 6 won\'t open. The site power board — Level 5, the core.', 'c6_power'); }
-      }, { id: 'c6fs:note', r: 1.0, when: () => !done('c6:noteRead') });
+        S.done['c6:noteRead'] = true;
+        await G.think('"No site power. Level 6 access control on the temp board — Level 5 core."');
+        await G.think('So the power\'s on Level 5.');
+        note(G, 'Level 6 won\'t open. The site power board — Level 5, the core.', 'c6_power');
+      }, { id: 'c6fs:note', r: 1.0, prio: -0.1, when: () => !done('c6:noteRead') && !flag('c6_power') });
     },
     onUpdate() { C6_ambient(['#58625e', 0.2], ['#1f6f6a', 0.06]); },
     onLeave() { C6_ambientOff(); },
@@ -902,7 +925,8 @@
     entries: { stairs: [2, 22.9, 180], start: [2, 22.9, 180] },
     cameras: [
       // the arrival: from along the south corridor, back at the stair door and the west leg going north into the dark
-      { id: 'c6_level5:door', vol: [0, 19.6, 6.2, 24], type: 'static', pos: [2.6, 2.95, 13.2], target: [2.6, 0.6, 22.6], fov: 'fit' },
+      // (from the east: a camera up the west leg lost him behind the bays' sheeting as soon as he turned the corner)
+      { id: 'c6_level5:door', vol: [0, 19.6, 7.2, 24], type: 'static', pos: [12.2, 2.9, 22.7], target: [2.4, 0.7, 21.6], fov: 'fit' },
       // the west leg, from its north end: the dust barrier halfway, whatever's behind it
       { id: 'c6_level5:west', vol: [0, 3.7, 4, 19.6], type: 'pan', pos: [2.0, 2.7, 0.45], target: [2.0, 0.9, 9.5], fov: 50, pan: { lag: 0.3, yaw: 26, pitch: 30 } },
       // the north leg, west half: from the far end, back toward the corner
@@ -914,7 +938,7 @@
       // the lifts: from the south corridor's west half, through the dust barrier at x 14
       { id: 'c6_level5:lifts', vol: [16, 19.8, 32, 24], type: 'static', pos: [9.8, 2.7, 23.4], target: [24.5, 0.9, 21.4], fov: 'fit' },
       // the south corridor, west half: from the east end looking back through the barrier toward the door
-      { id: 'c6_level5:south', vol: [6.2, 19.8, 16, 24], type: 'pan', pos: [21.8, 2.95, 23.2], target: [9, 0.9, 22], fov: 46, pan: { lag: 0.3, yaw: 26, pitch: 22 } },
+      { id: 'c6_level5:south', vol: [7.2, 19.8, 16, 24], type: 'pan', pos: [21.8, 2.95, 23.2], target: [9, 0.9, 22], fov: 46, pan: { lag: 0.3, yaw: 26, pitch: 22 } },
     ],
     spawns: [
       { id: 'c6_level5:teth', type: 'tethered', pos: [17.2, 1.25], rot: 160, anchor: [17.2, 1.25] },
@@ -1003,13 +1027,15 @@
       K.light('led', bx + 0.38, 1.1, bz + 0.3, { color: power ? '#2aff5a' : '#ff2a1c', name: 'c6l5:led', blink: !power });
       K.cyl(bx + 0.5, 0.02, bz - 0.4, 0.03, 0.03, { color: '#141414' }, { rz: 90 });
       K.dress('cables', [28.4, 7.6, 31.6, 11.2], 4, { seed: 514 });
-      K.plane(29.0, 1.55, 3.92, 1.5, 1.0, siteBoardTex(), { rotY: 180 });
-      K.box(29.0, 0.95, 3.93, 1.56, 0.04, 0.06, { tex: 'metal', color: '#c3c8c6' });
+      // (screwed to the core's east face between the riser door and the power board)
+      K.box(28.095, 0.98, 7.55, 0.03, 1.1, 1.58, { color: '#dcdcd6', roughness: 0.4 });
+      K.plane(28.115, 1.55, 7.55, 1.5, 1.0, siteBoardTex(), { rotY: 90 });
+      K.box(28.14, 0.95, 7.55, 0.06, 0.04, 1.56, { tex: 'metal', color: '#c3c8c6' });
       C6_scaffold(K, 31.1, 17.3, 90, {});
       // ---- light: two battery work lights; the festoons (dead until the site power's back) ----
       C6_workLight(K, 3.4, 21.3, -40, { intensity: 5.5, distance: 9, bank: 1 });
       C6_workLight(K, 31.3, 7.4, -135, { intensity: 5.0, distance: 8, bank: 2 });
-      C6_workLight(K, 14.2, 3.3, -80, { intensity: 4.6, distance: 9, bank: 2 });
+      C6_workLight(K, 14.2, 3.6, -80, { intensity: 4.6, distance: 9, bank: 2 });
       C6_festoon(K, [2, 1.2], [2, 22.5], H); C6_festoon(K, [2.5, 2], [29.5, 2], H); C6_festoon(K, [30, 2.5], [30, 22.5], H); C6_festoon(K, [2.5, 22], [29.5, 22], H);
       C6_festoonOn(power);
       L5_FEST.forEach(([x, z], i) => K.light('point', x, H - 0.4, z, { color: '#ffd49a', intensity: 3.6, distance: 8.5, name: 'c6l5:fest' + i, on: power, bank: 3 }));
@@ -1026,7 +1052,7 @@
       K.examine(12, 1.6, 4.1, ['Somebody cut a slit in the plastic here. Then taped it shut again.', 'From the inside.'], { id: 'c6l5:slit', r: 1.4 });
       K.examine(L5.lifts[1], 1.4, 20.4, async (G) => { G.sfx('lift_groan', { pos: [L5.lifts[1], 2.4, 19.8], vol: 0.7 }); await G.think('There\'s light at the top of the doors. [beat] The car\'s stuck just above this floor.'); await G.think('Something in there is holding a lot of weight.'); }, { id: 'c6l5:liftB', r: 1.3 });
       K.examine(L5.lifts[0], 1.4, 20.4, '"Out of service." [beat] They\'ve been out of service since I came in.', { id: 'c6l5:liftA', r: 1.3 });
-      K.examine(29.0, 1.5, 4.2, ['The builders\' programme. "L6 carpet — week 3. Lift B — do not use."', '"Who keeps leaving the lights on?" [beat] Nobody. Nobody\'s been here.'], { id: 'c6l5:programme', r: 1.4 });
+      K.examine(28.3, 1.5, 7.55, ['The builders\' programme. "L6 carpet — week 3. Lift B — do not use."', '"Who keeps leaving the lights on?" [beat] Nobody. Nobody\'s been here.'], { id: 'c6l5:programme', r: 1.4 });
       K.examine(31.4, 1.2, 12, ['Glass all the way down. Out there it\'s fog, and under the fog the town.', 'A few streetlights, very far down. Orange, like bruises.'], { id: 'c6l5:window', r: 1.6 });
       K.examine(24, 1.5, 3.7, ['"IT\'LL BE FINE." Written in marker, then sanded, then painted over.', 'It came back through the paint.'], { id: 'c6l5:writing', r: 1.5 });
       K.examine(16, 1.2, 4.1, 'A scaffold tower behind the plastic. Somebody\'s left a coffee cup up on the top boards.', { id: 'c6l5:scaffold', r: 1.3 });
@@ -1088,7 +1114,7 @@
   // feature wall, lift A dead, lift B ajar (the car stuck just below), the payphone. Cutscene 6-2 plays in the lobby.
   // In the Outage (after lift B is forced) the lobby dissolves and the doorway leads down into the shaft.
   // =================================================================================================================
-  const L6 = { W: 32, D: 24, H: 2.9, liftA: 22, liftB: 26, office: 9, column: [25.4, 18.4] };
+  const L6 = { W: 32, D: 24, H: 2.9, liftA: 22, liftB: 26, office: 9, planter: [25.4, 18.4] };
   defineRoom({
     id: 'c6_level6', name: 'LEVEL 6', area: 'REGIONAL OFFICE', chapter: 6, outdoor: false, surface: 'concrete', ambient: 'office',
     fog: { density: 0.032, color: '#3b4543' },
@@ -1105,7 +1131,7 @@
       // the north leg, east half: low from the west, through the barrier
       { id: 'c6_level6:northe', vol: [16.3, 0, 32, 3.7], type: 'pan', pos: [11.6, 0.45, 1.1], target: [25, 1.8, 2.2], fov: 46, pan: { lag: 0.35, yaw: 22, pitch: 16 } },
       // the east leg, from its north end, down into the lobby
-      { id: 'c6_level6:east', vol: [28, 3.7, 32, 13.8], type: 'pan', pos: [30.5, 2.4, 0.45], target: [30, 0.9, 9], fov: 48, pan: { lag: 0.3, yaw: 26, pitch: 30 } },
+      { id: 'c6_level6:east', vol: [28, 3.7, 32, 14.4], pri: 1, type: 'pan', pos: [30.5, 2.4, 0.45], target: [30, 0.9, 9], fov: 48, pan: { lag: 0.3, yaw: 26, pitch: 30 } },
       // the spine, from the lobby end: Luka's door on the left, the barrier at the far end
       { id: 'c6_level6:spine', vol: [4.3, 15.8, 20, 20], type: 'pan', pos: [22.4, 2.45, 17.2], target: [9, 0.9, 18], fov: 44, pan: { lag: 0.3, yaw: 20, pitch: 18 } },
       // the lift lobby: a static from the corner by the payphone, the lifts and the feature wall
@@ -1166,10 +1192,18 @@
       K.payphone(29.4, L6.D - 0.08, 180, { wall: true, id: 'c6_level6:payphone' });
       K.sign('LEVEL 6\nREGIONAL LEADERSHIP — RELOCATING', 31.9, 1.7, 18.2, 1.1, 0.42, { style: 'office', rotY: -90 });
       for (let i = 0; i < 3; i++) { K.prop('chair', 25.3 + i * 0.62, 23.35, 180, { variant: 'waiting', color: '#3d5160' }); K.box(25.3 + i * 0.62, 0.35, 23.35, 0.52, 0.72, 0.5, { color: '#dfe4e2', roughness: 0.2, transparent: true, opacity: 0.25 }, { shadow: false }); }
-      K.prop('plant_pot', 31.3, 14.6, 0, { variant: 'dead' });
-      // a structural column in the lobby (Aidan sits against it in 6-2)
-      K.box(L6.column[0], 0, L6.column[1], 0.6, H, 0.6, { tex: 'plaster', color: '#b7b3a8' }, { collide: true });
-      K.box(L6.column[0], 0, L6.column[1], 0.64, 0.1, 0.64, { color: '#2a2c2c' });
+      K.prop('plant_pot', 31.3, 14.6, 0, { variant: 'dead', collide: false }); K.collider(31.05, 14.35, 31.55, 14.85, { h: 0.6 });
+      // a long, low planter in the lobby (Aidan sits against it in 6-2) — low, so the lobby's two cameras see over it
+      // (a floor-to-ceiling column here hid Aidan from both of them)
+      {
+        const [px, pz] = L6.planter;
+        K.box(px, 0, pz, 1.64, 0.08, 0.54, { color: '#2a2c2c' });
+        K.box(px, 0.08, pz, 1.6, 0.52, 0.5, { tex: 'plaster', color: '#b7b3a8' }, { collide: true });
+        K.box(px, 0.6, pz, 1.66, 0.04, 0.56, { color: '#2e3232', roughness: 0.55 });
+        K.box(px, 0.6, pz, 1.5, 0.05, 0.42, { tex: 'dirt', color: '#5a4a3a' });
+        for (let i = 0; i < 11; i++) { const x = px - 0.66 + i * 0.132, z = pz - 0.12 + ((i * 7) % 5) * 0.06; K.cyl(x, 0.64, z, 0.006, 0.18 + ((i * 5) % 4) * 0.07, { color: '#6a5236', roughness: 0.9 }, { rx: ((i * 13) % 9) - 4, rz: ((i * 11) % 13) - 6 }); }
+        for (let i = 0; i < 5; i++) K.box(px - 0.5 + i * 0.26, 0.655, pz + 0.05 - (i % 2) * 0.12, 0.08, 0.004, 0.035, { color: '#8a6a44', roughness: 0.9 }, { rot: i * 37 });
+      }
       // the far end of the spine: a tube that flickers on in 6-2
       K.light('point', 6.7, 2.5, 18.2, { color: '#d7ece6', intensity: 5, distance: 6.5, name: 'c6l6:farlight', on: false, world: 'fog' });
       K.box(23.2, 0, 23.3, 0.9, 0.45, 0.5, { tex: 'wood', color: '#4a3a2c' }, { collide: true });
@@ -1185,7 +1219,7 @@
       // ---- dust barriers ----
       C6_curtain(K, 2, 9, 0, 4, H + 0.5, 'l6w'); C6_curtain(K, 16.5, 2, 90, 4, H + 0.5, 'l6n'); C6_curtain(K, 5.5, 18, 90, 4, H, 'l6s');
       // ---- leftovers on the legs ----
-      board(K, 0.8, 12.5, 0, 7); C6_stepLadder(K, 30.9, 6.6, -90); K.prop('paint_tins', 3.2, 2.2, 20, {}); K.prop('drop_sheet', 23, 1.9, 8, { w: 2.4, d: 1.4 });
+      board(K, 0.8, 12.5, 0, 7); C6_stepLadder(K, 31.5, 2.6, -90); K.prop('paint_tins', 3.2, 2.2, 20, {}); K.prop('drop_sheet', 23, 1.9, 8, { w: 2.4, d: 1.4 });
       K.prop('box_stack', 31.2, 1.2, 0, { n: 3 }); K.dress('cables', [0.5, 0.5, 3.5, 16], 4, { seed: 611 }); K.dress('papers', [4.5, 16.5, 19.5, 19.5], 6, { seed: 612 });
       for (const [x, z, w, d, r] of [[2, 14, 2.4, 3, 6], [12, 2.1, 3.2, 2.6, -6], [30, 9, 2.2, 3.2, 0]]) glueScar(K, x, z, w, d, r);
       K.prop('cardigan_chair', 16.9, 19.35, 200, {});
@@ -1219,13 +1253,14 @@
       K.examine(31.5, 1.7, 18.2, '"Level 6. Regional leadership — relocating." [beat] Relocating where?', { id: 'c6l6:directory', r: 1.4 });
       K.trigger([L6.office - 1.4, 17.6, L6.office + 1.4, 20], async (G) => { await G.think('That\'s— [beat] that\'s our door. The back office door, from the store. The chime box over it.'); await G.think('It can\'t be up here.'); }, { id: 'c6_level6:officedoor', when: () => !flag('c6_office') });
       K.examine(31.2, 0.8, 22.6, 'Carpet tiles, stacked for the rest of the floor. Nobody laid them.', { id: 'c6l6:tiles', r: 1.2 });
+      K.examine(L6.planter[0], 0.7, L6.planter[1], 'A planter. Everything in it died standing up.', { id: 'c6l6:planter', r: 1.2 });
       K.examine(12, 1.5, 16.1, ['Desks under dust sheets, on the other side of the plastic.', 'They look like people sitting very still.'], { id: 'c6l6:bays', r: 1.5 });
       K.examine(16.9, 1.0, 19.3, 'A cardigan on a chair against the wall. Like someone stood up to answer a phone.', { id: 'c6l6:cardigan', r: 1.2 });
       K.examine(31.4, 1.4, 8, ['Six floors up. The fog\'s the same up here.', 'You can see the ring road, if you know where to look. Two lines of orange going nowhere.'], { id: 'c6l6:window', r: 1.6 });
       K.examine(20.3, 1.6, 15.2, '"ASK THEM." [beat] Somebody wrote it where the lift doors would see it.', { id: 'c6l6:askthem', r: 1.3, world: 'fog' });
       K.examine(24, 1.5, 14.6, ['"WHO ARE YOU TRYING TO REACH." [beat] Printed. Over and over.', 'Him. I\'m trying to reach him.'], { id: 'c6l6:reach', r: 2.0, world: 'outage' });
     },
-    onUpdate() { C6_ambient(['#5a6566', 0.3], ['#1f6f6a', 0.1]); },
+    onUpdate() { C6_ambient(['#5a6566', 0.3], ['#1f6f6a', 0.3]); },
     onLeave() { C6_ambientOff(); },
     async onEnter(G, from) {
       G.bars(null);
@@ -1387,7 +1422,7 @@
       K.examine(2.15, 1.5, 0.3, ['The spare keys. Luka\'s always got the big ring on him.', 'These are just the spares. Nobody\'s touched them.'], { id: 'c6lo:keys', r: 0.9 });
       K.examine(5.1, 1.0, LO.D - 0.4, ['His mug says LUKA. We got it printed. He pretended he hated it.', 'He uses it every day.'], { id: 'c6lo:mug', r: 1.0 });
       K.examine(0.2, 1.6, 2.9, '"Have you offered the bundle?" [beat] Every day. Every sale.', { id: 'c6lo:poster', r: 1.2 });
-      K.examine(LO.desk[0] + 0.12, 0.8, LO.desk[1] - 0.2, 'His tablet, face down. The number\'s on it. He turned it over.', { id: 'c6lo:tablet', r: 0.6 });
+      K.examine(LO.desk[0] + 0.12, 0.8, LO.desk[1] - 0.2, 'His tablet, face down. The number\'s on it. He turned it over.', { id: 'c6lo:tablet', r: 1.2, prio: 0.2 });   // (it sits beside his notes pad, which always won the E press)
       K.examine(6.93, 2.2, 4.8, 'Eight fifty-two. [beat] Eight minutes before we open.', { id: 'c6lo:clock', r: 1.5 });
     },
     onUpdate() { C6_ambient(['#5a605c', 0.26], ['#1f6f6a', 0.06]); },
@@ -1483,10 +1518,11 @@
     cameras: [
       // the sill, from out over the shaft: the lobby's red behind him
       { id: 'c6_shaft:sill', vol: [-1.6, 1.45, 1.6, 3.6], y: [-0.6, 1], type: 'static', pos: [0.9, 3.1, -1.25], target: [0, 0.85, 2.6], fov: 'fit' },
-      // straight down from the Level 6 doors (the upper ladder)
-      { id: 'c6_shaft:down', vol: [-1.5, -1.5, 1.5, 1.45], y: [-3.9, 0.6], type: 'static', pos: [0.55, 2.6, -0.35], target: [0.05, -8, 0.75], fov: 'fit' },
-      // side-on from the far corner (the lower ladder)
-      { id: 'c6_shaft:side', vol: [-1.5, -1.5, 1.5, 1.45], y: [-7.7, -3.9], type: 'static', pos: [1.3, -2.6, -1.35], target: [0, -5.8, 1.0], fov: 'fit' },
+      // straight down from above the Level 6 doors (the upper ladder) — it tilts to keep him in frame: a fixed shot
+      // straight down lost him at the top of the ladder, right under the lens
+      { id: 'c6_shaft:down', vol: [-1.5, -1.5, 1.5, 1.45], y: [-3.9, 1.0], type: 'pan', pos: [0.45, 3.4, -1.1], target: [0.05, -6, 1.0], fov: 55, pan: { lag: 0.2, yaw: 40, pitch: 48 } },
+      // side-on from the far corner (the lower ladder), tilting with him
+      { id: 'c6_shaft:side', vol: [-1.5, -1.5, 1.5, 1.45], y: [-7.7, -3.9], type: 'pan', pos: [1.3, -1.6, -1.35], target: [0, -5.8, 1.0], fov: 52, pan: { lag: 0.2, yaw: 30, pitch: 45 } },
       // the car roof, from above in the corner
       { id: 'c6_shaft:roof', vol: [-1.3, -1.35, 1.3, 1.3], y: [-8.5, -7.6], pri: 1, type: 'pan', pos: [-1.25, -4.3, -1.3], target: [0.3, -7.4, 0.4], fov: 52, pan: { lag: 0.25, yaw: 40, pitch: 30 } },
       // inside the car, low (from beyond its back wall)
@@ -1536,6 +1572,7 @@
       for (let i = 0; i < 4; i++) K.cyl(-0.15 + i * 0.1, SHF.roof + 0.28, -0.95, 0.012, 16, { color: '#2a2c2b', metalness: 0.6 });
       K.box(0, SHF.roof, -1.22, 2.5, 1.0, 0.04, steel); K.box(-1.22, SHF.roof, 0, 0.04, 1.0, 2.5, steel);
       K.box(-1.22, SHF.roof + 1.0, 0, 0.06, 0.05, 2.5, steel); K.box(0, SHF.roof + 1.0, -1.22, 2.5, 0.05, 0.06, steel);
+      K.sign('MAX LOAD 1000 kg\n13 PERSONS', -1.195, SHF.roof + 0.8, 0.55, 0.26, 0.11, { style: 'office', rotY: 90 });
       const [hx, hz] = SHF.hatch;
       K.plane(hx, SHF.roof + 0.012, hz, 0.62, 0.62, { color: '#e8f4ef', emissive: '#dff2ec', emissiveIntensity: 1.8 }, { rot: [-90, 0, 0] });
       K.box(hx, SHF.roof, hz - 0.33, 0.64, 0.03, 0.04, steel); K.box(hx, SHF.roof, hz + 0.33, 0.64, 0.03, 0.04, steel);
@@ -1583,7 +1620,7 @@
       K.wall(10.8, -1.2, 13.2, -1.2, 2.45, skin, { both: false });
       K.wall(13.2, -1.2, 13.2, 1.2, 2.45, skin, { both: false });
       K.wall(10.8, 1.2, 10.8, -1.2, 2.45, skin, { both: false });
-      K.box(12, 0.92, -1.14, 2.3, 0.04, 0.05, { tex: 'metal', color: '#d9dcdc', metalness: 0.8, roughness: 0.25 });
+      // (the handrail runs along the east wall only: one on the north wall crossed the low camera's frame at hip height)
       K.box(13.14, 0.92, 0, 0.05, 0.04, 2.3, { tex: 'metal', color: '#d9dcdc', metalness: 0.8, roughness: 0.25 });
       K.box(13.15, 0.95, 0.85, 0.03, 0.55, 0.22, { tex: 'metal', color: '#b8bdbb', metalness: 0.6 });
       for (let i = 0; i < 6; i++) K.cyl(13.13, 1.02 + (i % 3) * 0.12, 0.8 + Math.floor(i / 3) * 0.1, 0.014, 0.01, { color: i === 4 ? '#ffcc66' : '#dcdcd6', emissive: i === 4 ? '#ffaa33' : undefined, emissiveIntensity: 1 }, { rz: 90 });
@@ -1619,6 +1656,9 @@
       // ---- the hatch: drop through (the set piece opens it) ----
       K.interact(hx, SHF.roof + 0.5, hz, async (G) => { if (C6.mid) C6.mid.drop = true; }, { id: 'c6_shaft:hatch', r: 1.1, when: () => !!(C6.mid && C6.mid.part === 'roof') });
       K.examine(0, SHF.roof + 0.9, -1.1, 'The ropes are stretched like they\'re holding twice what they\'re meant to.', { id: 'c6sh:ropes', r: 1.0 });
+      K.examine(1.0, SHF.roof + 1.2, -1.15, ['The counterweight\'s up there in the dark.', 'Every time the car goes down, it comes up.'], { id: 'c6sh:counterweight', r: 0.9 });
+      K.examine(-1.1, SHF.roof + 0.9, 0.55, ['A plate on the car\'s railing. "Max load 1000 kg. 13 persons."', 'There\'s one person in there. [beat] It\'s holding more than that.'], { id: 'c6sh:plate', r: 0.9 });
+      K.examine(-0.55, SHF.roof + 0.4, -0.3, ['A hand the size of a car door. Shirt cuff. A cufflink.', 'Somebody\'s boss. [beat] Somebody\'s boss\'s boss.'], { id: 'c6sh:hand', r: 0.9, when: () => !!(C6.mid && C6.mid.part === 'roof') });
       K.examine(-1.3, 0.9, 2.4, 'Behind me the lobby\'s printing itself. Ahead of me it\'s just down.', { id: 'c6sh:sill', r: 1.2 });
     },
     onUpdate() { C6_ambient(['#56605e', 0.26], ['#34463f', 0.3]); },
@@ -1682,8 +1722,8 @@
     await G.wait(1.0);
     await G.say('LUKA', 'Don\'t let go. [beat] I\'ve got you. I\'ve got you. Don\'t let go.');
     await G.wait(0.8);
-    // back to the sill: he gets onto the ladder
-    G.cam({ pos: [1.2, 1.9, 3.3], target: [0, 0.6, 1.3], fov: 44 });
+    // back to the sill: he gets onto the ladder (from out over the shaft: his face, the lobby's red behind him)
+    G.cam({ pos: [0.8, 2.55, -0.95], target: [0, 1.05, 2.0], fov: 46 });
     A.look(null);
     if (A.raw) { A.raw.idleLife = true; A.raw.eyes('ahead'); A.raw.expr('scared'); }
     await G.wait(0.8);
@@ -1883,7 +1923,7 @@
     await G.goto('c6_level6', 'lifts', { sound: 'none', fade: false });
     await G.fade(1, 0);
     const A = G.aidan, L = G.actor('luka', 'luka');
-    const [cx, cz] = L6.column;
+    const [cx, cz] = L6.planter;
     const liftB = G.obj('c6l6:liftB'); if (liftB && liftB.userData.setOpen) liftB.userData.setOpen(0.5);
     const glow = G.light('c6l6:liftglow'); if (glow) glow.on(false);
     const far = G.light('c6l6:farlight'); if (far) far.on(false);
@@ -2048,7 +2088,7 @@
         c5_pass: true, c5_chase: true, c5_l4: true, c5_chloe: true, c5_bossDone: true, c5_done: true, chloeSaved: s.flags.chloeSaved ?? true,
       });
       if (!s.flags.waiSaved) s.flags.waiLost = true;
-      Object.assign(s.done, { 'c4:gateOpen': true, 'unlocked:c5_level4:escalations': true });
+      Object.assign(s.done, { 'c4:gateOpen': true });                             // (the escalations door: the keycard opens it)
       const lv = (s.difficulty && s.difficulty.riddle) || 'normal';
       const pick = (b) => (DOCUMENTS[`${b}_${lv}`] ? `${b}_${lv}` : b);
       for (const d of ['timetable', pick('pin_note'), pick('cert'), 'acct1', 'acct2', 'acct3', 'acct4', 'acct5', 'huddle1', 'huddle2', 'huddle3', 'returns1', 'returns2', 'returns3', 'returns4', 'noticeboard', 'fridge_list', pick('lockbox_note'), 'plaque', 'wai_email', 'oplog1', 'oplog2', 'oplog3', 'oplog4', 'oplog6', pick('fuse_note'), 'call_logs', 'chase_notes', 'rotary_card', 'chloe_pin']) if (DOCUMENTS[d]) s.docs[d] = { read: true };
@@ -2068,7 +2108,7 @@
       if (G.once('c6:begin')) {
         note(G, 'Escalations. Chloe\'s keycard.', 'c6_goal');
         await G.wait(1.4);
-        if (G.inRoom('c5_level4')) await G.think('Escalations. [beat] Keycard only.');
+        if (G.inRoom('c5_level4')) await G.think('Escalations. [beat] Her keycard.');
       }
     },
   });

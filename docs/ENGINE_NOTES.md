@@ -31,7 +31,8 @@ from it.
    tubes, red LEDs, screen glow). The real-light pool is **8 point + 2 spot**, but handles are virtual: every frame the
    lit lights nearest Aidan whose range reaches into view hold the real slots (a slot changing hands fades over
    0.3 s; switching a light off / on is instant), so a 200 m street can have a lamp every 10 m. Aidan's phone glow
-   takes one slot. More than 8 lit point lights within ~14 m of each other still means some are dark at once — pass
+   takes one slot, and while the torch is on its **bounce fill** takes another (see §4). More than 8 lit point lights
+   within ~14 m of each other still means some are dark at once — pass
    `light:false` to props there (glow only; the tube / lamp still switches with `lightsOut` and the Outage banks). The
    build warning counts only lights that take a pool slot (not `real:false` / `light:false` ones). A key light far
    from Aidan: `K.light(…, {prio: metres})` ranks it as if that much closer, `{pin:true}` keeps a slot always.
@@ -68,6 +69,8 @@ entries, cameras, spawns, build(K), onEnter(G, fromRoomId), onUpdate(dt), onLeav
   the highest one no more than a step (0.5 m) above its feet. Without the flag the last registered floor wins (as
   before). `Cam.check` samples every layer of such a room. Pair it with `yBand`s on exits / triggers / interactables.
 * `cutsceneOnly: true` — a set the player never walks (a flashback): `Cam.check` skips it.
+* `fogAt(x, y, z, outage) → density` — a room whose `onUpdate` moves the fog with Aidan (the summit road thins as he
+  climbs) gives `Cam.check`'s fog test the same rule (share one function between the two, like `c8_summit`).
 * `far` — the camera far plane (m, default 200) in this room; also per camera def and `G.cam({far})`.
 
 * `chapter` enables the chapter lock: a door says "It won't open. Not anymore." when this room's chapter **and** the
@@ -145,7 +148,14 @@ italic, slanted fallback so it still reads as written (`Tex.handFontPresent(stac
 * **Which interactable E uses** — score = distance + 0.9 × angle off his facing (rad) + the kind's priority (m):
   doors, pickups, payphones, ladders 0 · docs, stickers 0.1 · interacts 0.15 · people (`npc`, the Borrowed) 0.35 ·
   examines 0.6 — an examine beside a door or a pickup no longer takes its E press. Override per interactable with
-  `{prio}`. `{crawl:true}` makes an interactable usable in crawl mode (only those are).
+  `{prio}`. `{crawl:true}` makes an interactable usable in crawl mode (only those are). Two traps remain, and the
+  build warns about both (below): an examine **on** a door (a note taped to it) never wins, and one ~0.5 m **in front
+  of** a door out-scores it when he faces both — keep examines ≥ 0.6 m off a door's line, or give one `{prio}`.
+* **Build-time warnings** (`[Kit] room …`, once per session): an interactable no floor lets him use (more than 2.6 m
+  above every floor layer within its radius — `World.nearestInteractable` drops it as "another level" — or more than
+  1 m below); an examine within 0.6 m of a door / payphone / ladder (both live at build time); an unwalkable seam
+  (0.02–0.5 m) between two floors of about the same height with nothing walkable or solid in it (`K.floor` beside
+  `K.road` that don't quite meet); more than 8 real point lights within 14 m.
 * `K.interact(x,y,z, fn, {id, r, hold, holdText, when})`, `K.examine(…)`, `K.pickup(item, x,y,z, {id, n, msg,
   extraOnEasy, rot, glint})` (heal pickups obey `DIFF.pickup`; Hard removes ~30% deterministically by id), `K.doc(docId,
   x,y,z, {id, model:'paper'|'sticky'|'binder'|'board'|'none', wall, glint})` — no markers: `glint` is opt-in
@@ -162,6 +172,7 @@ italic, slanted fallback so it still reads as written (`Tex.handFontPresent(stac
   still switches with `lightsOut` and the Outage banks. `bank` orders the Outage blackout (banks die toward the
   camera). `G.light(name)` → handle `{on(bool), isOn, set(o), setWorld}`. Fluoro tubes and LEDs switch properly even
   inside static props (their emissive parts never merge).
+* `K.collider` / `K.colliderRot` records are marked `bare` (no geometry of their own).
 * `K.fogOnly(fn) / K.outageOnly(fn) / K.world(w, fn)` — tag everything inside (meshes, colliders, lights, floors,
   interactables, triggers). `K.animate(fn(dt,t))` for per-frame behaviour; `K.mark / K.region / K.obj`; `K.dress(kind,
   box, n, {seed, world})` kinds `papers leaves boxes receipts cables contracts cups`.
@@ -174,6 +185,9 @@ yaw-only boxes). Recent opts: `counter {monitor:false | x}` (no staff monitor �
 `lift_doors {back:false, call:false}` (no dark box behind the leaves — seen / forced from the shaft), `bedside_phone
 {display:'large'}` (a raised, lit, readable LCD), `mast {halo (14), haloColor, haloFog (0.3)}` (the aircraft light
 reads through fog), `traffic_light {glow}` (every lit lens has a halo; 0 = none).
+
+`plant_pot` collides as the pot only (r 0.22 m, 0.42 m high): its fronds never block a corner, an examine or a camera.
+Notice-board flyers shrink their titles to fit.
 
 Origin on the floor at the prop's centre, facing +Z. **Wall props** stand at the wall surface with the wall behind them
 (−Z local): rotate so they face into the room; `mount` sets the centre height. **Ceiling props** hang from `ceil`
@@ -224,9 +238,18 @@ name); `switchboard/lamp_panel.setLamp`;
   at once; cards jump to black; `G.outage` swaps instantly; `G.goto` has no black hold; one-shot sounds are dropped —
   but **choices, keypads, `G.hold` and calls still wait**, and every state change still happens. Write scenes so that
   all state changes are plain statements (never inside `if (!G.skipping)`). A skip covers the chain of skippable
-  scenes running at that moment (and their `G.bg` children); **a `G.boss` ends it** — whatever the scene does after
-  the fight (`await G.cutscene('4-3')`) plays normally and can be skipped on its own. A skipping script that keeps
-  waiting in a loop (a `G.bg` cheer loop) yields a frame every 24 instant waits, so it can never freeze the page.
+  scenes running at that moment (and their `G.bg` children); **a `G.boss` ends it when the fight starts** (so
+  `Script.skipping` is false during the fight) — whatever the scene does after the fight (`await G.cutscene('4-3')`)
+  plays normally and can be skipped on its own. **`G.ending` ends it too**, and every ending scene runs with
+  `inheritSkip:false`: a scene started with `inheritSkip:false` is its own skip chain (skipping it never climbs to the
+  scene that started it, and a skip of that scene never swallows it). A skipping script that keeps waiting in a loop
+  (a `G.bg` cheer loop) yields a frame every 24 instant waits, so it can never freeze the page.
+* **Aidan's body in scenes:** while a letterboxed scene owns him (`Script.cutscene` and no control) the equipped weapon
+  is put away — it comes back when the scene ends, hands control back (`G.control(true)`) or suspends for a `G.boss`;
+  `A.hold('L', 'bar')` shows it on purpose. Each letterboxed scene snapshots his arm carry poses when it starts and
+  restores them when it ends (a `phone_ear` left by one scene never carries into the next; a hand whose prop the scene
+  changed keeps the new prop's pose; `{keepPose:true}` on the run keeps what the scene left). A `G.boss` starts the
+  fight from the scene's snapshot.
 * **Cleanup:** `G.finally(fn(how))` runs when the script ends however it ends (`'done'|'skipped'|'aborted'`);
   `G.addLight(kind, {pos, color, intensity, distance, target, angle, prio})` → a pinned pool light freed when the
   script ends. Un-awaited actor walks / turns / gestures / fades that die with an aborted scene are not errors
@@ -256,7 +279,11 @@ name); `switchboard/lamp_panel.setLamp`;
   laugh peer sigh clench flinch look_around smooth_uniform touch_pendant grip earbud_out earbud_in glasses_off
   glasses_on`. Expressions: `neutral smile grin sad cry wide tired smile_huge flat angry scared pain shout`.
   Hand props: `phone tablet bar coffee clipboard candybar flip headset keys box_cutter extinguisher pen box jumper_tool
-  pendant handset card`. Idle "habit" gestures fire on their own — set `A.raw.idleLife = false` for long still beats.
+  pendant handset card`. `offer` takes `target` (an actor — the hand goes a hand's width short of his chest, at his
+  hand height — or a point), clamped to the arm's reach; without it the hand goes out at chest height. `phone_ear`
+  keeps the elbow down in front of the chest (the arm never crosses his face from the far side); `phone_look` keeps
+  the fingers on the phone's back. Wai's reading glasses have no cord; `glassesState('hang')` hooks them into the shirt
+  placket. Chase's earbud cords run down each side of the neck and chest to a splitter at the waist. Idle "habit" gestures fire on their own — set `A.raw.idleLife = false` for long still beats.
 * Camera: `G.cam({pos, target, fov, roll, far, to:{…}, dur, ease, follow, keys:[{t,pos,target,fov,roll}]})` — pos/target
   may be `[x,y,z]`, a mark name, an Object3D or an actor (its head). Returns at once; `await G.camDone()`; the camera
   holds its last frame until `G.camRelease()` (automatic when the scene ends).
@@ -307,12 +334,32 @@ name); `switchboard/lamp_panel.setLamp`;
   - Each point is checked against the highest-`pri` unconditional camera containing it (and any `when` camera);
     volumes may overlap freely. Doorways of closed in-room doors aren't sampled — overlap volumes by ~0.3 m there.
   - Rooms with Outage-tagged content are checked in both worlds.
-  - `SH.camCheck('room')` → `[{cam, x, z, y, h, why:'uncovered'|'offscreen'|'behind', world}]`; the debug panel's
-    CAMERA VOLUMES draws volumes (current = yellow) and the problem points (red).
-  - **Line of sight** (optional, slow): `SH.mod.Cam.check('room', {occlusion:true})` also casts a ray from each camera
-    to Aidan's chest at every sample (1 m grid) against the room's visible opaque meshes and reports
-    `why:'occluded', hit:'<object name>'` — door leaves, walls seen from the wrong side, sign backs, ducts. Cutaway
-    (`both:false`) faces seen from behind and glass don't block. Not part of the default check.
+  - `SH.camCheck('room'|'*', o)` → `[{cam, x, z, y, h, why, world, …}]`; the debug panel's CAMERA VOLUMES draws volumes
+    (current = yellow) and the problem points (red). `why`:
+    `'uncovered' | 'offscreen' | 'behind'` as above;
+    `'fogged'` (`dist`, `max`) — the lens is more than 1.6 / density from his chest (FogExp2 ≈ 92 %: a faint ghost;
+    21 m in 0.075 street fog, 32 m at 0.05). The density is the room's (fog / outageFog / env, else Render's preset),
+    the room's `fogAt(x, y, z, outage)`, or the camera def's `fog: density | false | (x, y, z, outage) => density`;
+    `'lens-inside'` (`hit`, `frame`) — the lens sits inside a closed shell (most rays from it first meet back faces)
+    and the shot shows the shell's insides (≥ 2 of 25 rays through the frame meet a drawn surface inside it: a camera
+    in a parked car), or clutter covers 65 % of the frame within 1.2 m of the lens (opaque surfaces, foliage and
+    sheeting by their opacity: a camera buried in a shrub, behind a curtain). A lens inside a plain single-sided box
+    looking out through its culled side passes (the stair-core / cutaway tricks), and so does foreground dressing;
+    ladder samples (`ladder: id`) — Aidan on every `K.ladder` (where `Player.climb` holds him, every 0.5 m) against the
+    camera whose volume and `y` band hold his feet there (a height no camera contains keeps the camera he climbed in
+    with, so it isn't checked).
+    `o.fog:false`, `o.lens:false`, `o.ladders:false` turn those parts off.
+  - **Line of sight** (optional, slow): `{occlusion:true}` also casts rays from each camera to Aidan's hips, chest and
+    head at every sample (1 m grid) against the room's visible opaque meshes: `why:'occluded', hit:'<object name>'`
+    when two of the three are blocked (a rail across his chest alone doesn't hide him) — door leaves, walls seen from
+    the wrong side, sign backs, ducts, counters; `why:'veiled'` (`t` = transmittance) when transparent layers (plastic
+    sheeting, curtains, glass, cut-out foliage — material opacity × the texture's average alpha) let less than 45 %
+    through. Cutaway (`both:false`) faces seen from behind don't block.
+    `{occlusion:'summary'}` reports one problem per camera whose occluded + veiled share of its samples is over
+    `o.occlusionMax` (default 0.05): `{cam, why:'occluded', frac, n, of, hit}` — the acceptance pass for line of sight:
+    `node tools/run.mjs --file … --eval "return SH.camCheck('*', {occlusion:'summary'})"`. Not part of the default
+    check (it takes ~2 min for every room). The debug panel's LINE OF SIGHT button runs it for the current room and
+    draws the occluded / veiled samples.
   - Rooms with `cutsceneOnly:true` are skipped; `stackedFloors` rooms are sampled on every layer.
 * Composition helpers: `Cam.shake(a, dur)` (respects Options), `Cam.basis()` for camera-relative input.
 
@@ -326,6 +373,9 @@ name); `switchboard/lamp_panel.setLamp`;
   (1.2–4.0 s, all dark before the swap hides the Fog world's fixtures), environment/grade cross-fade from 1.4 s, surfaces dissolve 2.4–5.6 s, tagged objects/colliders/spawns
   swap at 4.0 s, siren cut + the world's lights at 6.0 s, phone bars climb 0→3 then automatic at 8.7 s. Leaving: 4.6 s,
   exhale of static, the swap at 2.0 s. `World.outageBusy` while it runs. `Bus 'outage:begin'(on)`, `'outage'(on)`.
+* `World.move` resolves dynamic colliders (enemy bodies, `c.dynamic`) first and caps their push-out at 0.4 × the
+  radius per pass, statics right after: a body that walked into Aidan eases him away but can never shove him through a
+  thin wall.
 * `World.move/heightAt(x, z, refY?)/los/raycast/pointFree/surfaceAt`, `World.lightsOut/lightsOn({dur, filter})`,
   `World.mark(name)`, `World.mapXform(xform, x, z)`. `room.map.xform` / `rxform` may be the array, a function
   `(x, z) → array`, or a list `[{box:[x0,z0,x1,z1], xform}, …]` (set pieces whose parts sit apart; an entry without a
@@ -342,6 +392,10 @@ name); `switchboard/lamp_panel.setLamp`;
   heal / kill / status() / setGaze / crawl(on) / pin(on) / grab({mash, damage, source}) / setTorch / noclip`.
   Damage from an enemy (the enemy object, `'enemy:…'`, `'boss:…'` or a type name) gets `DIFF.dmg`; anything else is
   taken as given. Walk 1.6, run 3.5 m/s (6 s stamina). An E pressed in the last 0.5 s of a swing is buffered.
+  **"Hold E" while the player has control** (Ch 4's "Hold him back"): read `Input.held('interact')`, not
+  `Input.down('interact')` — the E press that starts the hold also goes to any interactable in reach (or dismisses a
+  message) and is *consumed*, so `down()` stays false for the rest of that hold; `held()` sees the key physically down.
+  Disable examines near such a mechanic while it runs (`when: () => !fightOn`).
   E with a message up: it goes to the interactable he faces (a door during a boss objective); it only dismisses the
   message when E has nothing else to do, or when the target is the thing he just used (dismissing "It's locked."
   never re-tries the door). In crawl mode only `{crawl:true}` interactables work. `Player.restoreBody()` puts his
@@ -350,6 +404,10 @@ name); `switchboard/lamp_panel.setLamp`;
   Direction hold (spec §3) keeps the previous camera's axes after a cut; across a room change or teleport a direction
   held through the transition keeps him walking along his entry facing instead (the old axes mean nothing in the new
   room) until it is released or changed. The phone lights his face (a weak pool light at the screen, off when dead).
+  **Torch bounce:** while the torch is on, one pool light (prio 20, range 3.4 m) hangs 0.55 m ahead of him and 0.6 m
+  toward the lens, 1.3 m up — 0.8 in the Fog world, 2.3 in the Outage, scaled down where room lights already reach
+  him — so a fixed camera 6–15 m away keeps him readable in a dark interior. (Ch 1's own `C1_bounce` is gone.)
+  `Player.poseSnapshot()` / `poseRestore(snap)` (Script uses them per letterboxed scene).
 * Weapons: `ITEMS[id].weapon = {dmg, speed:'fast'|'slow', range, arc, knock, spray}`; defaults exist for
   box_cutter / steel_bar / extinguisher. Extinguisher: ready + attack sprays (`S.ammo.extinguisher`), attack alone bashes.
   Every extinguisher picked up adds its `ITEMS.extinguisher.ammo` (6) sprays (the first one sets the count); the
@@ -369,6 +427,12 @@ other dead enemies aren't spawned again.
   distance; the Reach takes it too). `e.alert()` starts its turn; `e.alert({voice:true})` also plays the muffled
   "I only came in to..." whatever the 25 s voice throttle says (reset each chapter). Cut free = hold E 2 s with the
   box cutter on a downed or unaware one (F+1); stomp = A+1.
+* `e.pinned` — hits never push it back and other bodies never shove it; default `def.pinned ?? def.static ??
+  T.static ?? (T.body === false)`: hitbox-only stand-ins for set pieces stay on their prop. `hitTest`'s line of sight
+  aims 5 cm inside the rim and ignores any collider containing the hitbox centre (a stand-in's own `K.collider`), so a
+  diagonal swing at a boxed plinth lands. Enemy fx groups (`enemyfx:<id>`: tethers, held boxes) are fog-culled with
+  their body (`actor.cullWith`). Monster voice lines (`Enemies.say`) sit above whatever subtitle or message is up
+  (`UI.textTop()`), never over one of Aidan's thoughts.
 * `reach` — rage 20/s × DIFF.rage in sight, lunge at 100 (20 dmg), can't pass closed doors (pounds on them).
 * `borrowed` — `disguise:'wai'|'chloe'|'luka'`, `line`, `lineWhen`, `examine`, `badge`, `hands`, `wristband`, `anim`,
   `autoRange` (4), `interactR` (2.6), `auto:false`. Within autoRange (or E): Talk / Examine / Step back; Examine then
@@ -383,7 +447,8 @@ other dead enemies aren't spawned again.
   not saved. It opens only doors its way actually passes through (a patrol pausing in front of a meeting-room door
   leaves it shut; `e.data.noOpen = true` opens none). `def.puppet` / `e.puppet = true`: the body, name card, keys,
   form and mirror keep working but it never thinks or moves (a script drives it); `e.scripted = true`: with its AI off
-  it keeps the animation the script set. `e.clipboard(up)` / `e.straighten(k, dur)` work on any Standard-bodied enemy
+  it keeps the animation the script set. The engine's own contact ("Got a sec?") state lives in `e.data._stdContact`, so
+  a custom type that reuses `Enemies.types.standard.update` for the look can keep its own `data.contact`. `e.clipboard(up)` / `e.straighten(k, dur)` work on any Standard-bodied enemy
   (a custom type built with `Enemies.types.standard.create`).
 * Bosses / custom: `Enemies.defineType(name, {create(e, def), update(e, dt), onHit(e, dmg, weapon) → false to consume,
   hp, radius, hitbox(e), downs:false, invincible, threat, tell})`; `defineBoss(id, {async run(G, o)})` →
@@ -421,7 +486,9 @@ other dead enemies aren't spawned again.
   tokens become key labels), `UI.card`, `UI.titleText`, `UI.textOnBlack`, `UI.keypad`, `UI.screen` (+ `UI.crmHtml`),
   `UI.bars`, `UI.sting`, `UI.stamp`, `UI.letterbox`, `UI.fade`, `UI.noSignal`. Keypads keep digits typed while they
   are locked (opening, the wrong-code shake) and replay them; the press that opened one never counts; `check()`
-  messages may use `[beat]` / `[long beat]`.
+  messages may use `[beat]` / `[long beat]`. UI acts on each press / typed character once per `Input.update`
+  (`Input.frame`): when the game loop stalls for > 0.25 s (a slow SwiftShader frame) UI ticks itself, and a keypad used
+  to read the same typed digits twice — a doubled digit made a correct code fail (the Ch 4 rotary flake).
 * Sound: `Snd.define(name, build(ctx, dest, o, t, own) → seconds|Infinity, {vol, bus, loops})` registers a content
   voice played like any other (`G.sfx`, `Snd.loop`, positional, ducked with the rest); wrap every node in `own(node)`.
 * Phone: `Phone.ring(id, {until, cancelOnLeave})`, `Phone.cancel(id?)`, `Phone.bars(override)`, `Phone.note(text, {id, done})`, `Phone.display({title, big, lines,
@@ -452,7 +519,9 @@ defineChapter({ n: 1, id: 'ch1', title: 'THE PLAZA', card: 'SIGNAL HILL PLAZA', 
 * **Endings.** Ch 8 decides with `Game.endingFor(S)` (`'yes'` when `S.playthrough ≥ 2` and all of `sticker01`–`12`
   are in `META.stickers ∪ S.stickers`; then deal / A ≥ F → `'tomorrow'`; F ≥ 35 and ≥ 3 of Wai/Chase/Chloe/Luke →
   `'connected'`; else `'coverage'`), plays its in-room part, then `await G.ending(name)`. `Game.ending` plays the
-  registered cutscenes nested in the caller: connected `E-C1`* → `E-C2` → credits → fate cards → `E-C3` → results;
+  registered cutscenes nested in the caller (each with `inheritSkip:false`: a skip of the Ch 8 scene never swallows
+  them): connected `E-C1`* → `E-C2` → credits → `E-C3` (the post-credits scene, right after the roll) → fate cards →
+  results;
   coverage `E-OC0`* → `E-OC` → credits → fates → results; tomorrow `E-FT0`* (not after the accepted deal) → `E-FT` →
   credits → results; yes `E-YES` → credits (hold music) → results. (*skipped if `S.done['cs:<id>']` — Ch 8 already
   played it.) Missing cutscenes are skipped (a name card shows if none exist). Results are recorded
@@ -499,6 +568,11 @@ Tips:
   `await page.keyboard.down('d'); await h.eval('return SH.advance(1.5)'); await page.keyboard.up('d');`
   (`SH.press` injects actions such as `interact`, `attack`, `ready`, `pause`, and `up/down/left/right` walk too; a
   press injected while the previous one is still held gets a fresh press edge).
+* **Hold times follow game time under `SH.advance`.** Input keeps its own clock: real time in the live loop, the fixed
+  1/30 s tick while `Game.manual` is on. `SH.press('ready', 1)` then holds for one GAME second whatever the machine's
+  speed, and a real key held across `SH.advance(1.2)` counts as held 1.2 s (the 1 s Esc skip, E holds, menu repeat).
+* `SH.goto` closes an open menu screen first (a document's reading view an interaction opened) — it used to hang.
+* Fog culling runs on `SH.advance`'s manual ticks too, so `Render.render(0)` afterwards counts what a real frame draws.
 * `--newgame --chapter N` (and `SH.newGame()` then `SH.chapter(n)`) lands in chapter N's start: the Prologue's room
   changes in flight are cancelled by the chapter select. `SH.goto(room, entry)` in play cancels a transition in
   flight and aborts running blocking scripts (a cutscene still moving Aidan between sets) before it jumps.
@@ -522,3 +596,23 @@ tomorrow, yes: `SH.preset(name)`, `SH.ending(name)`, then `SH.skip()` + `SH.nav(
 `SH.mode === 'title'` (`META.endingsSeen` lists all four). `SH.errors` must stay empty.
 * The debug panel (backtick) shows room/camera ids, F/A, flags, fps and draw calls, chapter select, noclip, camera
   volumes with the check, Outage toggles and the ending presets.
+
+**The whole game in one session** — `tools/tests/chain.mjs` (the chapter tests `tools/tests/ch0.mjs … ch8.mjs` export
+`play(h, {path, riddle, saveLoad})`; the chain runs them back to back from a real NEW GAME on the title, checks every
+hand-off, the ending, credits → fates → results → title, then LOAD GAME on the payphone saves and CONTINUE from every
+chapter-start autosave, and prints a per-chapter timeline):
+```
+node tools/build.mjs --out .build/chain.html
+SH_PATH=connected SH_RIDDLE=normal node tools/run.mjs --file .build/chain.html --size 640x360 --script tools/tests/chain.mjs
+```
+`SH_PATH` connected | coverage | tomorrow | deal; `SH_RESUME=1` continues every chapter from its autosave before playing
+it; `SH_FROM_AUTO=.build/chainlogs/<path>_<riddle>_chN.auto.json` replays from a chapter-start autosave a run wrote.
+The chain turns `renderer.render` into a no-op (`SH_RENDER=1` keeps drawing): headless SwiftShader rendering between the
+test's steps is what made long runs crawl. Tests drive time with `SH.advance`; nothing in the game depends on frames
+being drawn. `tools/run.mjs` starts Chromium with `--disable-accelerated-2d-canvas` (`SH_GPU_CANVAS=1` turns it off):
+with SwiftShader as the "GPU", accelerated-canvas draws (the Level 4 rankings screen's blurred list at 10 Hz) and
+readbacks queued behind each other and could stall a run for many minutes (Chapter 5 went from 700–2700 s to ~40 s).
+* **Canvas textures that are read back** (`Tex.util.age`, `pix`, any `getImageData`) must be created with
+  `getContext('2d', { willReadFrequently: true })` (every chapter's `ctex` helper does now; Tex / Kit / props always did).
+  A GPU-backed canvas makes each readback wait for the GPU process: entering Stairwell A stalled for 10 s to minutes in
+  headless runs on one aged 128 × 160 level-number texture.

@@ -66,8 +66,8 @@ export async function skipScenes(h, maxSec = 20) {
     n++;
     await advance(h, 0.5);
   }
-  // (a skipped scene that has started a G.boss stays `skipping` — suspended — for the whole fight: stop waiting once no
-  // letterboxed scene is running, or the fight would play out unattended here)
+  // (a G.boss ends the skip when the fight starts, so Script.skipping is false during it; the `!cutscene` half also keeps
+  // older builds, where the suspended scene stayed `skipping` for the whole fight, from waiting out the fight here)
   await advanceUntil(h, '!SH.mod.Script.skipping || !SH.mod.Script.cutscene', maxSec);
   return n;
 }
@@ -203,4 +203,86 @@ export async function loadSlot(h, slot = 0, maxSec = 20) {
   await advance(h, 0.2);
   await mustReach(h, "SH.mode === 'play' && !!SH.mod.World.room && !SH.mod.World.transitioning && !SH.mod.Menus.isOpen()", maxSec, `continueFrom(${slot})`);
   await advance(h, 1.0);
+}
+
+// ---- the title screen and the in-game menus as a player uses them (added for chain.mjs; generic) ---------------------
+// a page predicate: the menu screen `name` is on top and accepting input
+export const menuReady = (name) => `SH.mod.Menus.current === ${JSON.stringify(name)} && !!(SH.mod.Menus._top && SH.mod.Menus._top.ready)`;
+// one injected menu action (SH.nav: up/down/left/right/confirm/cancel/any), then a few ticks so the screen reads it
+export async function nav(h, a, after = 0.2) {
+  await ev(h, `SH.nav(${JSON.stringify(a)}); return 1`);
+  await advance(h, after);
+}
+// from anywhere on the title screen to its menu: wait for "PRESS ANY KEY" as a player would (o.wait:false presses at
+// once), press a key, wait for the menu to fade in → the visible labels
+export async function titleMenu(h, o = {}) {
+  await mustReach(h, menuReady('title'), o.maxSec ?? 40, 'the title screen', { step: 0.2 });
+  const stage = () => ev(h, 'return SH.mod.Menus._top.st.stage');
+  if (o.wait !== false && (await stage()) !== 'menu') await mustReach(h, "['press', 'menu'].includes(SH.mod.Menus._top.st.stage)", 20, 'PRESS ANY KEY', { step: 0.2 });
+  if ((await stage()) !== 'menu') await nav(h, 'any', 0.3);
+  await mustReach(h, "SH.mod.Menus.current === 'title' && SH.mod.Menus._top.st.stage === 'menu' && !SH.mod.Menus._top.st.attract && +getComputedStyle(SH.mod.Menus._top.st.menuBox).opacity > 0.9", 10, 'the title menu', { step: 0.2 });
+  return ev(h, 'return SH.mod.Menus._top.st.list.items.map((x) => x.label + (x.off ? " (off)" : ""))');
+}
+// move a menu list (`list` = the page expression of a makeList, default the top screen's st.list) onto `label` with
+// up/down presses, then confirm it
+export async function menuPick(h, label, list = 'SH.mod.Menus._top.st.list') {
+  for (let k = 0; k < 12; k++) {
+    const cur = await ev(h, `const L = ${list}; return L && L.items[L.i] ? L.items[L.i].label : null`);
+    if (cur === label) { await nav(h, 'confirm', 0.3); return true; }
+    await nav(h, 'down', 0.15);
+  }
+  throw new Error(`menuPick: no "${label}" in ${JSON.stringify(await ev(h, `return (${list}).items.map((x) => x.label)`))}`);
+}
+// the title → NEW GAME → ACTION / RIDDLE LEVEL (left/right on each row, BEGIN) → the brightness calibration (a first-time
+// player: nudge the bar, confirm) → the game starting. → { action, riddle } as the setup screen showed them
+export async function titleNewGame(h, o = {}) {
+  const LV = ['easy', 'normal', 'hard'];
+  await titleMenu(h, o);
+  await menuPick(h, 'NEW GAME');
+  await mustReach(h, menuReady('newgame'), 10, 'the NEW GAME setup screen', { step: 0.1 });
+  const row = async (r, want) => {
+    for (let k = 0; k < 4 && (await ev(h, 'return SH.mod.Menus._top.st.row')) !== r; k++) await nav(h, 'down', 0.15);
+    const key = r === 0 ? 'action' : 'riddle';
+    for (let k = 0; k < 4; k++) {
+      const v = await ev(h, `return SH.mod.Menus._top.st.v.${key}`);
+      if (v === LV.indexOf(want)) break;
+      await nav(h, v < LV.indexOf(want) ? 'right' : 'left', 0.15);
+    }
+  };
+  await row(0, o.action || 'normal');
+  await row(1, o.riddle || 'normal');
+  const shown = await ev(h, `const t = SH.mod.Menus._top.st; return { action: ${JSON.stringify(LV)}[t.v.action], riddle: ${JSON.stringify(LV)}[t.v.riddle], desc: [...document.querySelectorAll('#ui .ng-d')].map((e) => e.textContent) }`);
+  for (let k = 0; k < 4 && (await ev(h, 'return SH.mod.Menus._top.st.row')) !== 2; k++) await nav(h, 'down', 0.15);
+  await nav(h, 'confirm', 0.4);
+  if (await ev(h, "return SH.mod.Menus.current === 'calibrate'")) {
+    await mustReach(h, menuReady('calibrate'), 10, 'the brightness calibration', { step: 0.1 });
+    shown.calibrated = true;
+    await nav(h, 'right', 0.2); await nav(h, 'left', 0.2);
+    await nav(h, 'confirm', 0.4);
+  }
+  await mustReach(h, "SH.mode === 'play' || SH.mode === 'cutscene'", 30, 'the new game starting', { step: 0.2 });
+  return shown;
+}
+// Esc → the pause menu → QUIT TO TITLE → "Quit to the title?" YES → the title screen
+export async function quitToTitle(h) {
+  await mustReach(h, "SH.mode === 'play' && !SH.mod.World.transitioning", 20, 'play (to pause)', { step: 0.2 });
+  await ev(h, "SH.press('pause'); return 1");
+  await mustReach(h, menuReady('pause'), 10, 'the pause menu', { step: 0.1 });
+  await menuPick(h, 'QUIT TO TITLE');
+  await mustReach(h, '!!SH.mod.Menus._top.st.ask', 5, 'the quit question', { step: 0.1 });
+  await nav(h, 'left', 0.15);                                           // the question starts on NO
+  await nav(h, 'confirm', 0.3);
+  await mustReach(h, menuReady('title'), 30, 'the title after QUIT TO TITLE', { step: 0.25 });
+}
+// the title → LOAD GAME → slot (0–2 or 'auto') → play resumes in a loaded room
+export async function titleLoad(h, slot, o = {}) {
+  await titleMenu(h, { wait: false, ...o });
+  await menuPick(h, 'LOAD GAME');
+  await mustReach(h, menuReady('load'), 10, 'the LOAD GAME screen', { step: 0.1 });
+  const want = slot === 'auto' ? 3 : Number(slot);
+  for (let k = 0; k < 6 && (await ev(h, 'return SH.mod.Menus._top.st.i')) !== want; k++) await nav(h, 'down', 0.15);
+  if ((await ev(h, 'return SH.mod.Menus._top.st.i')) !== want) throw new Error('titleLoad: could not select slot ' + slot);
+  await nav(h, 'confirm', 0.4);
+  // (a chapter-start autosave re-runs the chapter's begin(): the Prologue's opens on a cutscene)
+  await mustReach(h, "(SH.mode === 'play' || SH.mode === 'cutscene') && !!SH.mod.World.room && !SH.mod.World.transitioning && !SH.mod.Menus.isOpen()", o.maxSec ?? 30, `LOAD GAME ${slot}`);
 }

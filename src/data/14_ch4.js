@@ -57,7 +57,7 @@
     let t = TEXC.get(key);
     if (t) return t;
     const c = document.createElement('canvas'); c.width = w; c.height = h;
-    const ctx = c.getContext('2d');
+    const ctx = c.getContext('2d', { willReadFrequently: true });
     draw(ctx, w, h, U.rng(U.hash('c4:' + key)));
     t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
@@ -138,8 +138,9 @@
     x.strokeStyle = 'rgba(80,80,70,0.25)'; x.setLineDash([4, 5]); x.beginPath(); x.moveTo(40, 0); x.lineTo(40, h); x.moveTo(w - 40, 0); x.lineTo(w - 40, h); x.stroke(); x.setLineDash([]);
     LOG_LINES.forEach(([s, hl], i) => {
       const y = 70 + i * 40;
-      if (hl) { x.fillStyle = hl === 2 ? 'rgba(255,214,40,0.72)' : 'rgba(255,230,60,0.55)'; x.fillRect(52 + (r() - 0.5) * 4, y - 26, (s.length * 15.2) + 12, 34); }
-      tx(x, s, 56, y, 25, hl === 2 ? '#141414' : '#2f302b', { font: FN.mono, weight: hl ? 'bold' : '' });
+      // (21 px mono: the longest line, 42 characters, fits the 640 px sheet inside the tractor holes)
+      if (hl) { x.fillStyle = hl === 2 ? 'rgba(255,214,40,0.72)' : 'rgba(255,230,60,0.55)'; x.fillRect(52 + (r() - 0.5) * 4, y - 23, (s.length * 12.7) + 12, 30); }
+      tx(x, s, 56, y, 21, hl === 2 ? '#141414' : '#2f302b', { font: FN.mono, weight: hl ? 'bold' : '' });
     });
     hand(x, 'Luke x3 — ?', w - 250, h - 60, { size: 26, color: '#b3261e' });
     tx(x, 'PAGE 1', w / 2, h - 18, 16, '#555', { font: FN.mono, align: 'center' });
@@ -328,8 +329,9 @@
     cameras: [
       // the empty lane first: from down the hill looking back up at the yard gate he comes out of
       { id: 'c4_wirelane:east', vol: [74, -4.3, 91, 4.3], type: 'static', pos: [66.5, wlY(66.5) + 3.6, 3.2], target: [84.5, wlY(84.5) + 0.7, -0.6], fov: 'fit' },
-      // outside the lines depot: the payphone booth, the stacked drums behind the chain-link
-      { id: 'c4_wirelane:phone', vol: [44, -4.3, 74, 4.3], type: 'pan', pos: [40.5, wlY(40.5) + 2.4, 3.8], target: [60, wlY(60) + 0.8, -1.2], fov: 44, pan: { lag: 0.3, yaw: 55, pitch: 25 } },
+      // outside the lines depot: a rail along the south verge, him side-on against the chain-link, the stacked drums and
+      // the payphone booth (a far pan lost him in the fog past 25 m)
+      { id: 'c4_wirelane:phone', vol: [44, -4.3, 74, 4.3], type: 'rail', pos: [59, wlY(59) + 3.0, 7.0], fov: 50, rail: { a: [44, wlY(44) + 3.0, 7.0], b: [74, wlY(74) + 3.0, 7.0], look: [0, 0.9, -1.6], lag: 0.4 } },
       // through two chain-link fences and past the transformer: the substation hums in the foreground
       { id: 'c4_wirelane:sub', vol: [34, -4.3, 44, 4.3], type: 'pan', pos: [40.6, wlY(40.6) + 3.9, 9.4], target: [38, wlY(38) + 0.6, 0], fov: 50, pan: { lag: 0.25, yaw: 60, pitch: 30 } },
       // along the despatch wall: a rail out over the embankment, looking back at him and the bricks
@@ -466,11 +468,11 @@
       { id: 'c4_park:roadW', vol: [3, 14.4, 35, 24.6], type: 'rail', pos: [18, 2.3, 27.25], fov: 50, rail: { a: [3.5, 2.3, 27.25], b: [34.5, 2.3, 27.25], look: [0, 1.0, -1.5], lag: 0.4 } },
       // along the road, east: from the car park, the warehouses and the stem behind him
       { id: 'c4_park:roadE', vol: [35, 14.4, 53, 27.6], type: 'rail', pos: [44, 3.4, 11.2], fov: 48, rail: { a: [35.5, 3.4, 11.2], b: [52.5, 3.4, 11.2], look: [0, 1.0, 1.5], lag: 0.4 } },
-      // high over the west car park (the Reach among the cars)
-      { id: 'c4_park:carW', vol: [3, 3.6, 22, 14.4], type: 'static', pos: [27.5, 5.4, 17], target: [12, 0.4, 8.4], fov: 'fit' },
+      // high over the west car park from the road (the Reach among the cars): a rail, so the fog never swallows him
+      { id: 'c4_park:carW', vol: [3, 3.6, 22, 14.4], type: 'rail', pos: [12, 4.2, 16.6], fov: 50, rail: { a: [3, 4.2, 16.6], b: [22, 4.2, 16.6], look: [0, 0.9, -1.2], lag: 0.4 } },
       // low from the road, up at the canopy and the sign
       { id: 'c4_park:entrance', vol: [22, 3.6, 38, 14.4], type: 'pan', pos: [30.2, 0.45, 19.2], target: [30.2, 2.4, 4.5], fov: 54, pan: { lag: 0.3, yaw: 66, pitch: 34 } },
-      { id: 'c4_park:carE', vol: [38, 3.6, 53.2, 14.4], type: 'static', pos: [34.5, 4.8, 18.6], target: [46, 0.4, 8.4], fov: 'fit' },
+      { id: 'c4_park:carE', vol: [38, 3.6, 53.2, 14.4], type: 'rail', pos: [45, 4.2, 16.6], fov: 50, rail: { a: [38, 4.2, 16.6], b: [53.2, 4.2, 16.6], look: [0, 0.9, -1.2], lag: 0.4 } },
       // the security gate: the boom, the gatehouse, the ring road lost in the fog beyond
       { id: 'c4_park:gate', vol: [53, 14.4, 60.6, 27.6], type: 'static', pos: [46.2, 3.6, 12.2], target: [56.5, 0.8, 19.6], fov: 'fit' },
     ],
@@ -804,7 +806,13 @@
     bounds: [0, 0, 5, 4],
     entries: { door: [0.75, 2.0, 90], start: [0.75, 2.0, 90] },
     cameras: [
-      { id: 'c4_secoffice:corner', vol: [0, 0, 5, 4], type: 'static', pos: [9.0, 2.4, 3.1], target: [1.6, 0.8, 1.7], fov: 'fit' },
+      // static from the corner: from the east (the east wall is a cutaway) onto the door and the corner where Chase sits,
+      // framed inside the room (no void past its walls)
+      { id: 'c4_secoffice:corner', vol: [0, 0, 3.4, 4], type: 'static', pos: [7.6, 2.45, 2.0], target: [1.2, 0.6, 2.0], fov: 40 },
+      // high in the north-west corner, down past the desk to the key board, the first aid box and the lockers
+      { id: 'c4_secoffice:desk', vol: [3.4, 0, 5, 4], type: 'static', pos: [0.35, 2.5, 0.35], target: [4.0, 0.6, 2.7], fov: 'fit' },
+      // from above the lockers: him just inside the door, the wired glass behind him
+      { id: 'c4_secoffice:door', vol: [0, 0.9, 1.3, 3.1], pri: 1, type: 'static', pos: [4.65, 2.45, 3.65], target: [0.3, 0.95, 1.9], fov: 'fit' },
       // from the lobby side, through the wired glass in the door
       { id: 'c4_secoffice:window', vol: [2.4, 1.3, 4.6, 2.7], pri: 1, type: 'static', pos: [-1.8, 1.5, 2.0], target: [3.6, 1.0, 2.0], fov: 40 },
     ],
@@ -829,6 +837,7 @@
       K.box(3.28, 0.865, 0.45, 0.05, 0.22, 0.05, { color: '#1c1e1f', roughness: 0.5 });
       K.box(1.7, 0.745, 0.6, 0.3, 0.03, 0.22, { color: '#2a3a6a', roughness: 0.8 }, { rot: 12 });
       K.prop('mug', 3.0, 0.72, 0, { y: 0.745, text: 'NIGHT SHIFT' });
+      K.prop('desk_lamp', 1.8, 0.22, 25, { y: 0.745, lit: true });
       // the duress-alarm panel, the key board (gate key), first aid, lockers, a hi-vis vest on a hook
       K.plane(4.3, 1.5, 0.085, 0.5, 0.62, duressPanelTex(), {});
       K.light('led', 4.1, 1.72, 0.1, { color: '#ff2a1c', blink: true, world: 'outage' });
@@ -939,9 +948,12 @@
     bounds: [0, 0, 50, 28],
     entries: { lobby: [25, 27.1, 180], westwall: [0.85, 26.3, 90], break: [49.1, 7.0, -90], records: [7.0, 0.85, 0], start: [25, 27.1, 180] },
     cameras: [
-      // along the rows at head height from the centre aisle, looking west (Fog: over the partitions; Outage: down the
-      // corridors of the maze — the contract wall at x 18 is one-sided, the corridors beside his hidden until he turns)
-      { id: 'c4_floor:west', vol: [0, 0, 18, 28], type: 'rail', pos: [20.4, 2.95, 14], fov: 50, rail: { a: [20.4, 2.95, -0.6], b: [20.4, 2.95, 28.6], look: [0, 0.7, 0], lag: 0.35 } },
+      // along the rows from the centre aisle, looking west down the row he's in (Fog: over the partitions; Outage: down
+      // the corridors of the maze — the contract wall at x 18 is one-sided, the corridors beside his hidden until he turns)
+      { id: 'c4_floor:west', vol: [9, 0, 18, 28], type: 'rail', pos: [20.4, 2.95, 14], fov: 50, rail: { a: [20.4, 2.95, -0.6], b: [20.4, 2.95, 28.6], look: [0, 0.7, 0], lag: 0.35 } },
+      // the far half of the west block: hanging over the middle of the rows, down his row to the west wall (Outage: down
+      // the maze's corridors to the walkway, the SW door at the end of the last one)
+      { id: 'c4_floor:westfar', vol: [0, 0, 9, 28], type: 'rail', pos: [10.6, 2.7, 14], fov: 50, rail: { a: [10.6, 2.7, -0.2], b: [10.6, 2.7, 28.2], look: [0, 0.75, 0], lag: 0.35 } },
       // the rail at head height along the south aisle, looking north across the rows (the draped arm, for one pass)
       { id: 'c4_floor:rail', vol: [0, 19.3, 18, 28], pri: 1, world: 'fog', type: 'rail', pos: [9, 1.75, 30.6], fov: 50, rail: { a: [0.5, 1.75, 30.6], b: [18, 1.75, 30.6], look: [0, 0.9, -2.5], lag: 0.4 } },
       // high, looking down over the partitions: the centre north (the pods, the wallboard and what's on it)
@@ -949,13 +961,16 @@
       { id: 'c4_floor:centreS', vol: [18, 12.5, 32.3, 28], type: 'static', pos: [25.1, 3.75, 4.4], target: [25.1, 0.4, 21], fov: 'fit' },
       // low from the aisle, up at the Team 3 pod
       { id: 'c4_floor:pod3', vol: [18.4, 14.3, 25.2, 21.2], pri: 1, world: 'fog', type: 'static', pos: [28.6, 0.45, 23.6], target: [22, 1.45, 17.6], fov: 'fit' },
-      { id: 'c4_floor:eastN', vol: [32.3, 0, 50, 14], type: 'static', pos: [29.0, 3.75, 17.6], target: [42, 0.4, 6], fov: 'fit' },
-      { id: 'c4_floor:eastS', vol: [32.3, 14, 50, 28], type: 'static', pos: [29.0, 3.75, 9.6], target: [42, 0.4, 22], fov: 'fit' },
+      // the east block: two rails under the cable trays, each looking east down the row he's in (the far one ends on the
+      // STAFF ROOM door at the end of its aisle)
+      { id: 'c4_floor:eastW', vol: [32.3, 0, 41, 28], type: 'rail', pos: [29.9, 2.75, 14], fov: 50, rail: { a: [29.9, 2.75, -0.2], b: [29.9, 2.75, 28.2], look: [0, 0.75, 0], lag: 0.35 } },
+      { id: 'c4_floor:eastE', vol: [41, 0, 50, 28], type: 'rail', pos: [38.2, 2.75, 14], fov: 50, rail: { a: [38.2, 2.75, -0.2], b: [38.2, 2.75, 28.2], look: [0, 0.75, 0], lag: 0.35 } },
     ],
     spawns: [
       // Fog: two Reaches in the rows (their arms come over the partitions), the Unread on the wallboard
-      { id: 'c4_floor:reach1', type: 'reach', pos: [12.5, 6.85], rot: -90, world: 'fog' },
-      { id: 'c4_floor:reach2', type: 'reach', pos: [40.5, 13.05], rot: 90, world: 'fog' },
+      // (each stands in a cubicle's mouth, back to the aisle — out of the rail cameras' line down the aisles)
+      { id: 'c4_floor:reach1', type: 'reach', pos: [13.2, 5.75], rot: 175, world: 'fog' },
+      { id: 'c4_floor:reach2', type: 'reach', pos: [40.4, 11.95], rot: 185, world: 'fog' },
       { id: 'c4_floor:unread', type: 'unread', pos: [25, 1.2], count: 40, world: 'fog', cluster: [[22.9, 2.3, 0.16], [24.1, 2.75, 0.16], [25.3, 2.25, 0.16], [26.5, 2.7, 0.16], [27.2, 1.95, 0.16], [23.6, 1.55, 0.16], [25.9, 1.5, 0.16]] },
       // Outage: three Reaches in the maze, the Unread on the west-wall wallboard in C3
       { id: 'c4_floor:oreach1', type: 'reach', pos: [9.5, 5.3], rot: 180, world: 'outage' },
@@ -1009,7 +1024,7 @@
       cp.position.set(CHASE_CUB.x + 0.22, 0.752, CHASE_CUB.z - 0.42); cp.rotation.y = 0.35;
       K.mesh(cp, { name: 'c4:chasephone', world: 'fog' });
       K.animate(() => { cp.visible = done('cs:4-1') && !S.outage; });
-      K.doc('chase_notes', CHASE_CUB.x + 0.22, 0.76, CHASE_CUB.z - 0.42, { id: 'c4_floor:chasenotes', model: 'none', r: 1.1, world: 'fog', when: () => done('cs:4-1') });
+      K.doc('chase_notes', CHASE_CUB.x + 0.22, 0.76, CHASE_CUB.z - 0.42, { id: 'c4_floor:chasenotes', model: 'none', r: 1.45, world: 'fog', when: () => done('cs:4-1') });
       const npc = K.npc('chase', 'chase', CHASE_CUB.chair[0], CHASE_CUB.chair[1] - 0.05, 180, { anim: 'sit', when: () => !done('cs:4-1') && !S.outage && !flag('c4_outage'), world: 'fog' });
       if (npc) { try { npc.wear('headset', true); npc.hold('R', null); npc.idleLife = false; } catch (e) { /* rig */ } }
       if (!done('cs:4-1') && !flag('c4_outage')) {
@@ -1072,16 +1087,17 @@
       K.door({ id: 'c4_floor:break', x: 50, z: 7.1, rot: -90, w: 0.95, style: 'wood', to: 'c4_break', entry: 'door', sign: 'STAFF ROOM', world: 'fog' });
       K.door({ id: 'c4_floor:breakO', x: 50, z: 7.1, rot: -90, w: 0.95, style: 'wood', world: 'outage', locked: true, lockMsg: 'The handle won\'t turn.' });
       K.prop('exit_sign', 49.92, 7.1, -90, { mount: 2.45 });
+      K.light('lamp', 49.55, 2.3, 7.1, { color: '#e8d8b0', intensity: 2.0, distance: 4.5, world: 'fog', name: 'c4fl:breaklamp' });
       K.door({ id: 'c4_floor:lobby', x: 25.1, z: 28, rot: 180, w: 1.0, h: 2.15, style: 'glass', to: 'c4_lobby', entry: 'floor', world: 'fog', sign: 'LOBBY' });
       K.door({ id: 'c4_floor:fire', x: 0, z: 26.3, rot: 90, w: 0.95, style: 'fire', world: 'fog', locked: true, lockMsg: 'A fire door. Alarmed, and locked.' });
       K.door({ id: 'c4_floor:side', x: 0, z: 26.3, rot: 90, w: 0.95, style: 'glass', world: 'outage', to: 'c4_oldstore', entry: 'side', sign: 'LOBBY' });
       K.prop('exit_sign', 0.08, 26.3, 90, { mount: 2.45 });
 
-      // ---- lights (Fog): mostly dead tubes; one flickers over the pods, one burns in the east rows -------------------------------
+      // ---- lights (Fog): half the tubes dead; a few burn over the rows (some flickering), enough to read him by --------------
       for (let x = 5; x < 50; x += 10) for (const z of [5, 14, 23]) {
         if (x === 25 && z !== 14) continue;
-        const lit = (x === 25 && z === 14) || (x === 45 && z === 14) || (x === 5 && z === 23) || (x === 15 && z === 5);
-        K.prop('fluoro_tube', x, z, 90, { h: 3.2, lit, flicker: x === 25 || x === 5, bank: lit ? (x === 25 ? 1 : 2) : undefined, world: 'fog', light: lit ? undefined : false });
+        const lit = (x === 25 && z === 14) || (x === 45 && z === 14) || (x === 5 && z === 23) || (x === 15 && z === 5) || (x === 35 && z === 23) || (x === 45 && z === 5) || (x === 5 && z === 14) || (x === 5 && z === 5);
+        K.prop('fluoro_tube', x, z, 90, { h: 3.2, lit, flicker: x === 25 || x === 5 || (x === 35 && z === 23), bank: lit ? (x === 25 ? 1 : 2) : undefined, world: 'fog', light: lit ? undefined : false });
       }
       K.light('led', 0.08, 2.3, 26.3, { color: '#2aff5a', world: 'fog' });
       K.writing('FOLLOW UP TOMORROW', 49.92, 1.7, 18.5, 2.0, { rotY: -90, world: 'fog' });
@@ -1099,8 +1115,11 @@
         // the walkway blocked beside rows 3 and 7
         K.box(0.75, 0, FL.rows[2] + 0.8, 1.5, 2.5, 1.9, CT, { collide: true });
         K.box(0.75, 0, FL.rows[6] + 0.8, 1.5, 2.5, 1.9, CT, { collide: true });
-        // the centre sealed off (seen only from the west)
+        // the centre sealed off (seen only from the west). Its collider is a metre thick: a Reach walking into Aidan
+        // while he stands against a thin wall shoves him through it (engine), and the sealed centre is a dead end
         K.wall(18.1, 0, 18.1, 28, 2.6, CT, { both: false });
+        const seal = K.collider(18.02, -0.1, 19.3, 28.1, { h: 2.6 });
+        if (seal) seal.oneSided = [-1, 0];                       // (like the cutaway: the cameras in the centre see through it)
         // the lobby door behind a wall of paper
         K.box(25.1, 0, 27.4, 3.0, 2.6, 0.8, CT, { collide: true });
         for (const [x, z, t] of [[9, 7.35, 'FOLLOW UP TOMORROW'], [6, 13.55, 'WHO ARE YOU TRYING TO REACH'], [12, 19.75, 'DID YOU CHECK']]) K.writing(t, x, 1.6, z, 2.6, { rotY: 180, style: 'marker' });
@@ -1118,7 +1137,7 @@
         K.prop('receipt_curtain', 17.0, 20.8, 0, { ceil: H, w: 1.6, len: 2.0 });
         K.dress('receipts', [0.2, 0.2, 17.6, 27.8], 60, { seed: 73 });
         // flickering tubes along the corridors, red LEDs, a red wash by the lobby doors
-        for (const [x, z, real] of [[9, 2.2, true], [8, 5.3, false], [9, 11.5, true], [8, 17.7, false], [9, 25.5, true], [25, 14, false], [42, 14, false]]) K.prop('fluoro_tube', x, z, 0, { h: 3.2, flicker: true, light: real ? undefined : false, bank: real ? 3 : undefined });
+        for (const [x, z, real] of [[9, 2.2, true], [8, 5.3, true], [9, 11.5, true], [8, 17.7, true], [9, 25.5, true], [25, 14, false], [42, 14, false]]) K.prop('fluoro_tube', x, z, 0, { h: 3.2, flicker: true, light: real ? undefined : false, bank: real ? 3 : undefined });
         K.light('point', 1.2, 2.4, 26.2, { color: '#ff3b2a', intensity: 3, distance: 6, name: 'c4fl:redwash' });
         for (const [x, z] of [[1.5, 3.1], [17.3, 9.3], [1.5, 13.9], [17.3, 21.7]]) K.light('led', x, 1.2, z, { color: '#ff2a1c', blink: true });
         K.pickup('coffee', 6.6, 0.02, 0.7, { id: 'c4_floor:ocoffee', rot: 20 });
@@ -1142,9 +1161,15 @@
       K.examine(41.4, 1.0, 21.4, ['A sandwich in cling wrap, one bite gone.', 'They didn\'t even get to finish lunch.'], { id: 'c4fl:sandwich', r: 1.3 });
       K.examine(49.2, 1.5, 5.0, ['Row 1. [beat] The row signs go all the way back.', 'Eight rows. Nine desks a row, both sides. That\'s a hundred and forty-four phones.'], { id: 'c4fl:rows', r: 1.6, world: 'fog' });
       K.examine(28.2, 1.4, 19.2, ['Team 4\'s pod. Four monitors, one chair.', 'Somebody sat up here and watched everyone else be on hold.'], { id: 'c4fl:pod4', r: 1.8 });
+      // the Outage maze (every one of these stands on its route)
+      K.examine(8.85, 1.3, 7.2, ['The partitions are gone. It\'s paper now. Contracts, stacked higher than me.', 'Every one of them\'s signed.'], { id: 'c4fl:owall', r: 1.5, world: 'outage' });
+      K.examine(9.6, 1.9, 12.1, ['Headsets, hanging off the ceiling on their cords.', 'Every one of them\'s got someone on hold.'], { id: 'c4fl:oheadsets', r: 1.5, world: 'outage' });
+      K.examine(12.4, 1.5, 12.9, ['Receipt paper, hanging in strips.', 'Callback. Callback. Callback. [beat] Every one of them says tomorrow.'], { id: 'c4fl:oreceipts', r: 1.3, world: 'outage' });
+      K.examine(0.4, 1.9, 17.5, ['"Who are you trying to reach."', 'It used to count the calls waiting. Now it just asks.'], { id: 'c4fl:owallboard', r: 1.6, world: 'outage' });
+      K.examine(6.6, 0.95, 21.5, ['A desk. The phone on it\'s ringing like all the rest.', 'The chair\'s pushed back, like they just stood up and walked out.'], { id: 'c4fl:odesk', r: 1.2, world: 'outage' });
     },
     onUpdate() {
-      C4_ambient(['#5a6664', 0.32], ['#1f6f6a', 0.1]);
+      C4_ambient(['#5a6664', 0.32], ['#1f6f6a', 0.15]);
       // the far bed of phones follows the world
       const w = S.outage ? 'o' : 'f';
       if (C4.floorBed !== w) { C4.floorBed = w; if (S.outage) C4_farRing(3, 0.34, 1900); else C4_farRing(2, 0.2, 1300); }
@@ -1189,7 +1214,7 @@
     await G.wait(1.5);
     G.prompt('{interact}: hang up.', { id: 'c4_hangup' });
     const per = fast ? 0.07 : 0.1, gapD = fast ? 0.55 : 0.95, gapR = fast ? 1.5 : 2.4;
-    let hung = false, heard = 0;
+    let hung = false;
     const led = G.light('c4fl:podled');
     const waitOr = async (sec) => {
       let t = 0;
@@ -1208,9 +1233,9 @@
         if (hung) break;
       }
       if (hung) break;
-      heard++;
       S.done['c4:listens'] = (S.done['c4:listens'] | 0) + 1;
-      if (heard >= need) {
+      // (listens add up across pick-ups: hanging up after the first one and listening again later still counts twice)
+      if (S.done['c4:listens'] >= need) {
         // the digits are logged
         G.set('c4_clicks', true);
         note(G, 'Clicks: 2... 2... 3... 1.', 'c4_clicks');
@@ -1259,6 +1284,10 @@
     cameras: [
       { id: 'c4_break:door', vol: [3.6, 0, 10, 8], type: 'static', pos: [-1.7, 2.5, 7.3], target: [6.4, 0.6, 3.3], fov: 'fit' },
       { id: 'c4_break:corner', vol: [0, 0, 3.6, 8], type: 'static', pos: [9.4, 2.55, 7.4], target: [1.6, 0.7, 3.2], fov: 'fit' },
+      // over the couch, up at the payphone and the noticeboard wall
+      { id: 'c4_break:payphone', vol: [0.8, 0, 6.6, 2.2], pri: 1, type: 'static', pos: [5.2, 2.45, 7.7], target: [3.4, 0.9, 0.6], fov: 'fit' },
+      // low from beside the door, across the table to the kitchenette
+      { id: 'c4_break:kitchen', vol: [7.6, 1.4, 10, 6.6], pri: 1, type: 'static', pos: [3.0, 1.35, 1.0], target: [9.4, 1.0, 4.2], fov: 'fit' },
     ],
     build(K) {
       const H = 2.8;
@@ -1334,6 +1363,9 @@
       // high over the table under the lamp
       { id: 'c4_records:table', vol: [0, 0, 10, 4.4], type: 'static', pos: [5, 2.86, 9.6], target: [5, 0.5, 2.4], fov: 'fit' },
       { id: 'c4_records:door', vol: [0, 4.4, 10, 8], type: 'static', pos: [5, 2.86, -1.5], target: [5.6, 0.4, 6.4], fov: 'fit' },
+      // down the two aisles between the shelves, at eye level from their south ends
+      { id: 'c4_records:aisleW', vol: [0.4, 0.4, 1.75, 3.6], pri: 1, type: 'static', pos: [1.15, 1.7, 7.5], target: [1.1, 1.0, 0.8], fov: 'fit' },
+      { id: 'c4_records:aisleE', vol: [8.25, 0.4, 9.4, 3.6], pri: 1, type: 'static', pos: [8.85, 1.7, 7.55], target: [8.85, 1.0, 0.8], fov: 'fit' },
     ],
     build(K) {
       const H = 3.0;
@@ -1347,7 +1379,7 @@
       // floor-to-ceiling shelves of dot-matrix printouts
       K.fogOnly(() => {
         for (const z of [1.3, 3.5, 5.7]) { K.prop('binders_shelf', 0.2, z, 90, { len: 2.1, h: 2.9 }); K.prop('binders_shelf', 9.8, z, -90, { len: 2.1, h: 2.9 }); }
-        for (const x of [2.1, 7.9]) { K.prop('binders_shelf', x - 0.19, 2.1, 90, { len: 2.4, h: 2.6 }); K.prop('binders_shelf', x + 0.19, 2.1, -90, { len: 2.4, h: 2.6 }); }
+        for (const x of [2.1, 7.9]) { K.prop('binders_shelf', x - 0.19, 2.1, -90, { len: 2.4, h: 2.6 }); K.prop('binders_shelf', x + 0.19, 2.1, 90, { len: 2.4, h: 2.6 }); }
         K.dress('papers', [0.6, 0.5, 9.4, 7.6], 16, { seed: 81 });
         for (const [x, z, r] of [[3.2, 6.9, 10], [3.8, 7.2, 40], [1.2, 6.8, 80]]) K.prop('box', x, z, r, {});
       });
@@ -1392,6 +1424,9 @@
       K.examine(3.4, 1.5, 0.3, ['Retention schedule. Call logs: seven years.', 'Everything anyone ever asked for. Kept.'], { id: 'c4rc:retention', r: 1.3, world: 'fog' });
       K.examine(5.6, 0.85, 4.0, ['A box of highlighters. All yellow. All dried out.', 'Except one.'], { id: 'c4rc:box', r: 1.1 });
       K.examine(0.5, 1.5, 3.5, ['Contracts. All the way up.', 'Every one of them signed. Every one of them mine.'], { id: 'c4rc:contracts', r: 1.4, world: 'outage' });
+      K.examine(8.55, 1.0, 6.0, ['The printer\'s still going. Receipt paper now.', 'It printed the building. [beat] A map of the way out.'], { id: 'c4rc:oprinter', r: 1.2, world: 'outage' });
+      K.examine(4.2, 1.5, 6.3, ['Strips of receipt paper from the ceiling.', 'Call logs. Every one of them.'], { id: 'c4rc:ostrips', r: 1.2, world: 'outage' });
+      K.examine(0.3, 1.7, 7.0, ['"Follow up tomorrow."', 'It\'s my handwriting.'], { id: 'c4rc:owriting', r: 1.4, world: 'outage' });
       K.examine(RC.table[0], 0.9, RC.table[1], async (G) => {
         if (fv('c4_logs') === 'read') await G.think('Callback assigned: Aidan. [beat] I\'ve read it.');
         else await G.think('I tore it up. [beat] It\'s still up there. All of it.');
@@ -1439,16 +1474,19 @@
       { id: 'c4_oldstore:counter', vol: [9.4, 0, 17.8, 3.12], pri: 1, type: 'static', pos: [13.3, 3.0, 9.9], target: [13.4, 0.8, 1.7], fov: 'fit' },
     ],
     spawns: [
-      { id: 'c4_oldstore:esc', type: 'c4_escalation', pos: [13.2, 4.75], rot: 0, when: (s) => !(s.flags && s.flags.c4_bossDone) },
+      { id: 'c4_oldstore:esc', type: 'c4_escalation', pos: [13.2, 4.25], rot: 0, when: (s) => !(s.flags && s.flags.c4_bossDone) },
     ],
     build(K) {
       const H = OS.H;
-      K.floor(0, 0, 20, 12, { tex: 'vinyl_retail', color: '#b7b3a6' });
-      K.ceiling(0, 0, 20, 12, H, 'ceiling_tile');
-      K.wall(-0.1, 0, 20.1, 0, H, { tex: 'plaster', color: '#2a7c78' }, { skirting: true });
-      K.wall(20, -0.1, 20, 12.1, H, 'plaster', { openings: [{ at: OS.office[1] + 0.1, w: 1.0, h: 2.15 }], skirting: true });
-      K.wall(20.1, 12, -0.1, 12, H, 'plaster', { openings: [{ at: 10.1, w: 6.1, h: 2.9 }], skirting: true });
-      K.wall(0, 12.1, 0, -0.1, H, 'plaster', { openings: [{ at: 12.1 - OS.side[1], w: 1.0, h: 2.15 }], skirting: true });
+      // (the shell keeps its shop finish in the Outage — a store lit for trade at ten to nine — while the receipts, the
+      // strips and the marker are the Outage's own)
+      const SW = { tex: 'plaster', color: '#dcd8cc', outage: false };
+      K.floor(0, 0, 20, 12, { tex: 'vinyl_retail', color: '#b7b3a6', outage: false });
+      K.ceiling(0, 0, 20, 12, H, { tex: 'ceiling_tile', outage: false });
+      K.wall(-0.1, 0, 20.1, 0, H, { tex: 'plaster', color: '#2a7c78', outage: false }, { skirting: true });
+      K.wall(20, -0.1, 20, 12.1, H, SW, { openings: [{ at: OS.office[1] + 0.1, w: 1.0, h: 2.15 }], skirting: true });
+      K.wall(20.1, 12, -0.1, 12, H, SW, { openings: [{ at: 10.1, w: 6.1, h: 2.9 }], skirting: true });
+      K.wall(0, 12.1, 0, -0.1, H, SW, { openings: [{ at: 12.1 - OS.side[1], w: 1.0, h: 2.15 }], skirting: true });
       // the store: wordmark, counter, duress button, demo tables, accessory walls, posters, the clock at 8:50
       K.plane(13.2, 3.35, 0.09, 3.0, 1.1, Tex.wordmark({ w: 3.0, h: 1.1, bg: BR.teal }), { emissive: true, emissiveIntensity: 0.45 });
       K.prop('counter', OS.counter[0], OS.counter[1], 0, { len: 6, variant: 'store', printer: true, clutter: true });
@@ -1480,7 +1518,8 @@
       K.interact(OS.office[0] - 0.55, 1.1, OS.office[1], (G) => C4_officeDoor(G), { id: 'c4_oldstore:officedoor', r: 1.4 });
       K.prop('alarm_lamp', 19.92, OS.office[1], -90, { mount: 2.45, name: 'c4_alarmlamp', lit: done('c4:duress') });
       K.light('point', 19.2, 2.3, OS.office[1], { color: '#ff2a1c', intensity: 2.6, distance: 6, name: 'c4os:red', on: done('c4:duress') });
-      K.interact(OS.duress[0], 0.74, OS.duress[1] - 0.25, (G) => C4_duress(G), { id: 'c4_oldstore:duress', r: 1.05 });
+      // (once pressed, it stops taking E during the fight: Aidan re-grabs Chase right beside it)
+      K.interact(OS.duress[0], 0.74, OS.duress[1] - 0.25, (G) => C4_duress(G), { id: 'c4_oldstore:duress', r: 1.05, when: () => !(C4.fight && done('c4:duress')) });
       // light: the store's tubes, bright; one flickers
       // (the troffers glow; the store's light is four strong pools under them — a shop lit for trade at ten to nine)
       K.prop('fluoro_tube', 7, 4, 90, { h: H - 0.05, variant: 'troffer', light: false });
@@ -1497,15 +1536,18 @@
       K.prop('receipt_strip', 3.5, 6.5, 0, { ceil: H, len: 2.2 }); K.prop('receipt_strip', 16.5, 10.5, 40, { ceil: H, len: 1.8 });
       K.prop('headset_hanging', 8.2, 3.2, 10, { ceil: H, len: 1.9 });
       // Chase behind the counter, the bar raised
-      const ch = K.npc('chase', 'chase', OS.counter[0], 2.6, 0, { anim: 'idle', when: () => !flag('c4_bossDone') });
+      const ch = K.npc('chase', 'chase', OS.counter[0], 2.85, 0, { anim: 'idle', when: () => !flag('c4_bossDone') });
       if (ch) { try { ch.idleLife = false; ch.hold('R', 'bar', { pose: 'bar_ready' }); ch.expr('angry'); } catch (e) { /* rig */ } }
       // ---- examine lines (Aidan) ----------------------------------------------------------------------------------------
-      K.examine(17.6, 2.6, 0.4, ['Ten to nine. [beat] Ten minutes before close.', 'It\'s not moving.'], { id: 'c4os:clock', r: 2.4 });
-      K.examine(5.8, 1.1, 5.2, ['Demo phones on their security cables. Every lock screen says 8:50.', 'One of the cables is snapped. The phone that was on it isn\'t here.'], { id: 'c4os:demo', r: 1.4 });
-      K.examine(19.6, 1.7, 3.4, ['"Please be patient with our staff. Abuse will not be tolerated."', 'It\'s a laminated sign. That\'s all it ever was.'], { id: 'c4os:sign', r: 1.4 });
-      K.examine(9.6, 1.6, 0.4, ['The roster. Thursday: CHASE — CLOSE.', 'Just his name. Nobody else on.'], { id: 'c4os:roster', r: 1.3 });
-      K.examine(10.1, 1.5, 11.6, ['The shutter\'s half down. Like closing time.', 'Past it there\'s no mall. Just dark.'], { id: 'c4os:shutter', r: 2.0 });
-      K.examine(4.4, 1.4, 0.5, 'Cases, chargers, screen protectors. Every one still in its packet.', { id: 'c4os:acc', r: 1.5 });
+      // (not during the fight: there E is "Hold him back" — an examine in reach would take the press and stop him for a
+      // thought while Chase swings)
+      const calm = () => !C4.fight;
+      K.examine(17.6, 2.6, 0.4, ['Ten to nine. [beat] Ten minutes before close.', 'It\'s not moving.'], { id: 'c4os:clock', r: 2.4, when: calm });
+      K.examine(5.8, 1.1, 5.2, ['Demo phones on their security cables. Every lock screen says 8:50.', 'One of the cables is snapped. The phone that was on it isn\'t here.'], { id: 'c4os:demo', r: 1.4, when: calm });
+      K.examine(19.6, 1.7, 3.4, ['"Please be patient with our staff. Abuse will not be tolerated."', 'It\'s a laminated sign. That\'s all it ever was.'], { id: 'c4os:sign', r: 1.4, when: calm });
+      K.examine(9.6, 1.6, 0.4, ['The roster. Thursday: CHASE — CLOSE.', 'Just his name. Nobody else on.'], { id: 'c4os:roster', r: 1.3, when: calm });
+      K.examine(10.1, 1.5, 11.6, ['The shutter\'s half down. Like closing time.', 'Past it there\'s no mall. Just dark.'], { id: 'c4os:shutter', r: 2.0, when: calm });
+      K.examine(4.4, 1.4, 0.5, 'Cases, chargers, screen protectors. Every one still in its packet.', { id: 'c4os:acc', r: 1.5, when: calm });
     },
     onUpdate() { C4_ambient(['#6a7472', 0.3], ['#5d807a', 0.36]); },
     onLeave() { C4_ambientOff(); C4_stopRing(); if (C4.fight) C4_fightEnd(); },
@@ -1799,11 +1841,16 @@
     const raw = F.ch.raw, cp = raw.root.position, e = F.e, P = Player.pos;
     const dA = fdist(cp, P);
     // hold him back
-    const holding = !!(Input.down && Input.down('interact'));
+    // (physically held: the E press that started the hold may also have used the duress button or dismissed the
+    // objective message — that press is consumed, but the key is still down)
+    const holding = !!(Input.held ? Input.held('interact') : Input.down && Input.down('interact'));
     const canHold = F.state !== 'grabbed' && F.state !== 'down';
     if (canHold && holding && dA < (F.held ? 2.7 : 2.0)) { if (!F.held && F.said < CHASE_HELD.length && Math.random() < 0.6) { const l = CHASE_HELD[F.said++]; G.bg(async (G2) => { await G2.say('CHASE', l); }); } F.held = true; F.relT = 0; }
     else if (F.held) { F.relT += dt; if (F.relT > 0.8 || dA > 3.4) F.held = false; }
     try { UI.holdPrompt(dA < 2.3 && canHold ? 'Hold {interact}: Hold him back' : null, F.held ? 1 : 0); } catch (err) { /* ui */ }
+    // (held, he slips past the Escalation's body: its dynamic collider stands between the counter and the back office,
+    // and walking straight into it left him stuck behind it — out of Aidan's reach — while Aidan walked on to the door)
+    const mo = F.held ? { ignore: (c) => !!c.dynamic } : {};
     const moveTo = (x, z, sp, stop) => {
       const d = Math.hypot(x - cp.x, z - cp.z);
       if (d <= stop) return false;
@@ -1812,7 +1859,7 @@
       let gx = x, gz = z;
       if (F.path) { while (F.path.length > 1 && Math.hypot(F.path[0][0] - cp.x, F.path[0][1] - cp.z) < 0.4) F.path.shift(); gx = F.path[0][0]; gz = F.path[0][1]; }
       const dx = gx - cp.x, dz = gz - cp.z, l = Math.hypot(dx, dz) || 1, st = Math.min(l, sp * dt);
-      const r = World.move(cp, (dx / l) * st, (dz / l) * st, 0.3, {});
+      const r = World.move(cp, (dx / l) * st, (dz / l) * st, 0.3, mo);
       cp.set(r.x, r.y, r.z);
       raw.root.rotation.y = raw.root.rotation.y + clamp(U.angleDiff(raw.root.rotation.y, Math.atan2(dx, dz)), -6 * dt, 6 * dt);
       return true;
@@ -2043,14 +2090,20 @@
     //    DOC Call Logs opens by itself on the first page: Luke's three calls highlighted, CALLBACK ASSIGNED: AIDAN in view
     await G.doc('call_logs', { id: 'c4_records:logs', page: 0, highlight: ['Caller: Luke', 'CALLBACK ASSIGNED: AIDAN'] });
     await G.wait(0.4);
-    // 3. the choice
+    // 3. the choice — low across the table, up at his face bent over the binder (the page's print would fight the
+    //    choice's text); the lamp's light comes back up off the white pages onto his face
+    const bounce = G.addLight('point', { pos: [tx + 0.12, 0.95, tz + 0.25], color: '#ffe2b0', intensity: 1.4, distance: 1.7 });
+    //    (him in the left third: the choice sits over the dark wall beside him)
+    G.cam({ pos: [tx - 0.6, 1.0, tz - 1.15], target: [tx + 0.72, 1.4, tz + 0.72], fov: 38, to: { pos: [tx - 0.55, 1.02, tz - 1.05], fov: 36 }, dur: 12 });
+    if (A.raw) A.raw.expr('scared', { k: 0.5 });
+    await G.wait(0.8);
     const i = await G.choice(['Read on', 'Tear it up']);
     if (i === 0) {
       G.set('c4_logs', 'read');
       G.track('F', 3, 'Ch 4: read the call logs');
       //  → the full document (the status history to the end: Follow up tomorrow, three times)
       await G.doc('call_logs', { id: 'c4_records:logs' });
-      G.cam({ pos: [tx - 1.6, 1.9, tz + 1.9], target: [tx, 1.0, tz + 0.4], fov: 40 });
+      G.cam({ pos: [tx - 0.6, 1.0, tz - 1.15], target: [tx + 0.1, 1.5, tz + 0.72], fov: 32, to: { pos: [tx - 0.5, 1.02, tz - 1.0], fov: 29 }, dur: 14 });
       if (A.raw) A.raw.expr('sad');
       await G.think('\'Assigned: Aidan.\' [beat] They assign those all over the place. That\'s not— [beat] I\'d remember.');
     } else {
@@ -2071,6 +2124,7 @@
       for (const it of pc.items) it.m.position.copy(it.base);
       await G.wait(1.4);
     }
+    if (bounce && bounce.free) bounce.free();
     // 4. either way: the siren, and the Outage takes the building (he keeps control)
     if (A.raw) { A.raw.idleLife = true; A.raw.eyes('ahead'); A.raw.expr('scared'); }
     A.look(null);
@@ -2097,8 +2151,9 @@
     const [kx, kz] = OS.counter;
     if (A.raw) A.raw.idleLife = false;
     if (C.raw) { C.raw.idleLife = false; C.hold('R', 'bar', { pose: 'bar_ready' }); }
-    C.place(kx, 2.6, 0); C.pose('idle'); C.expr('angry'); C.look(null);
-    if (e) { e.pos.set(kx, 0, 4.78); e.yaw = 0; e.data.level = 0; e.data.vis = 0; }
+    // (Chase close behind the counter, the man right up against its front: the bar reaches across it)
+    C.place(kx, 2.85, 0); C.pose('idle'); C.expr('angry'); C.look(null);
+    if (e) { e.pos.set(kx, 0, 4.25); e.yaw = 0; e.data.level = 0; e.data.vis = 0; }
     if (man) { man.setAnim('idle', { blend: 0 }); man.expr('tired'); man.eyes('down'); }
     // 1. SHOT — wide from the side door: the store at 8:50 pm. Chase behind the counter with the bar raised, alone.
     try { if (e) Enemies.visible(e, false); } catch (err) { /* enemies */ }
@@ -2108,7 +2163,7 @@
     await G.wait(3.6);
     // 2. SHOT — over Chase's shoulder: a man at the counter with his back to us, holding up a phone
     try { if (e) Enemies.visible(e, true); } catch (err) { /* enemies */ }
-    G.cam({ pos: [kx + 0.55, 1.78, 1.55], target: [kx - 0.1, 1.45, 5.2], fov: 42, to: { pos: [kx + 0.5, 1.76, 1.75], fov: 40 }, dur: 16 });
+    G.cam({ pos: [kx + 0.55, 1.8, 1.8], target: [kx - 0.1, 1.45, 5.2], fov: 42, to: { pos: [kx + 0.5, 1.78, 2.0], fov: 40 }, dur: 16 });
     await G.wait(1.4);
     // MAN (normal voice, tired)
     await G.say('MAN', 'I just need a new SIM. [beat] I don\'t have ID. I just need it.');
@@ -2116,7 +2171,7 @@
     q(C.gesture('tremor', { amount: 1 }));
     await G.say('CHASE', 'Can\'t do it without ID, mate.');
     // MAN (his voice begins to double)
-    G.sfx('murmur_reach', { pos: [kx, 1.7, 4.8], vol: 0.35, line: 'waiting' });
+    G.sfx('murmur_reach', { pos: [kx, 1.7, 4.25], vol: 0.35, line: 'waiting' });
     await G.say('MAN', 'Do it anyway.');
     // 3. SHOT — Aidan in the side doorway
     G.cam({ pos: [4.6, 1.5, 8.1], target: [0.5, 1.35, OS.side[1]], fov: 42 });
@@ -2131,10 +2186,10 @@
     G.cam({ pos: [16.5, 0.72, 6.3], target: [kx + 0.1, 1.55, 3.7], fov: 48, to: { pos: [16.75, 0.66, 6.5], target: [kx + 0.1, 1.95, 3.9], fov: 54 }, dur: 5 });
     if (hold && hold.stop) hold.stop(0.3);
     C.expr('angry');
-    await C.gesture('swing', { dur: 0.8, onStrike: () => { try { Snd.play('hit_heavy', { pos: [kx, 1.5, 4.7] }); } catch (err) { /* audio */ } } });
+    await C.gesture('swing', { dur: 0.8, onStrike: () => { try { Snd.play('hit_heavy', { pos: [kx, 1.5, 4.2] }); } catch (err) { /* audio */ } } });
     if (e) { e.data.level = 1; e.data.growT = 1.3; }
     G.shake(0.35, 0.5);
-    G.sfx('murmur_reach', { pos: [kx, 1.8, 4.8], vol: 1.0 });
+    G.sfx('murmur_reach', { pos: [kx, 1.8, 4.25], vol: 1.0 });
     await G.wait(0.9);
     if (e) { let t = 0; await G.loop((dt) => { t += dt; e.yaw = Math.PI * U.ease.inOut(Math.min(1, t / 1.4)); return t >= 1.4; }); e.yaw = Math.PI; }
     if (man) { man.expr('shout'); man.eyes('closed'); }
@@ -2235,9 +2290,11 @@
       C.expr('tired');
       await G.say('CHASE', 'I\'ll catch up. Gonna sit here a sec.');
     }
-    // he sits back down against the wall by the door
+    // he sits back down against the wall by the door (wide, from the corner: the close framing would hold on the empty
+    // door while he moved)
+    G.cam({ pos: [4.4, 2.3, 3.45], target: [0.9, 0.7, 2.6], fov: 46, to: { pos: [4.3, 2.28, 3.4], fov: 45 }, dur: 6 });
     C.place(0.45, 3.35, 90); C.pose(hurt ? 'sit_floor' : 'sit_knees', { blend: 0.6 });
-    await G.wait(1.2);
+    await G.wait(1.6);
     // state (plain statements)
     C4.manShake = false;
     { const wf = G.light('c4so:winfill'); if (wf) wf.on(false); }

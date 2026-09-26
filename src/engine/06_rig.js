@@ -17,7 +17,7 @@
 // Gestures (gesture(name, opts) → Promise, resolves when done or replaced): the contract list + CONTRACT+ peer, sigh,
 //   clench, flinch, look_around, smooth_uniform, touch_pendant, grip, earbud_out, earbud_in, glasses_off, glasses_on.
 //   opts: {hand:'L'|'R', hold (stay until replaced / finishGestures; resolves at mid-way), dur, speed, target (reach /
-//   hand_on_shoulder: Vector3|Actor|[x,y,z]), to (sit_down / stand_up end loop), onStrike (swing), instant, amount
+//   hand_on_shoulder / offer: Vector3|Actor|[x,y,z]), to (sit_down / stand_up end loop), onStrike (swing), instant, amount
 //   (tremor)}. pen_click plays Snd 'penclick' at each click (Bus 'sfx' if Snd is absent); Chloe's pins play 'pins'.
 // Expressions: the contract list + CONTRACT+ angry, scared, pain, shout. eyes(): 'ahead' (follows lookAt) | 'down' |
 //   'at' (target) | 'away' (averted from target) | 'closed'. Blinks every 3–7 s, saccades, lids follow the gaze.
@@ -48,7 +48,8 @@
 //        'dress'|'flat'|'sock'|'slipper', color, sole}
 //   lanyard {color, card:'TEXT' (Tex.label card), role, keys:false, pins:0, badge:'TEXT'} — rests on the chest in a V
 //   badge 'TEXT' (pinned name badge)   visitor 'TEXT' (hospital visitor sticker)   pendant {color, cord} (on the chest)
-//   glasses {style:'reading'|'round'|'square', color, low:false (on the nose tip), cord:false, state:'on'|'hang'}
+//   glasses {style:'reading'|'round'|'square', color, low:false (on the nose tip), cord:false (don't: spec §1),
+//            state:'on'|'hang' ('hang' = hooked into the shirt placket)}
 //   earbuds 'in'|'out'|null   toolroll true   beltPhone true (candy-bar phone in a belt pouch)   hands {scraped, rings, wristband, extraKnuckles}   face {…canvas params}
 //   face: {eyes (iris), brows, browThick, lips, bags 0..1, redRim 0..1, stubble 0..1, wrinkles 0..1, blush, scar
 //          'left_brow', makeup, freckles}
@@ -1767,6 +1768,7 @@ const Rig = (() => {
       const lm = this._mat('lens', () => new THREE.MeshStandardMaterial({ color: '#d6e0e2', roughness: 0.05, metalness: 0.4, transparent: true, opacity: 0.16, depthWrite: false }));
       for (const sx of [1, -1]) this._mesh(grp, geo('lens_' + (gl.style || 'square'), () => new THREE.CircleGeometry(1, 20)), lm, { s: [rx * 0.98, ry * 0.98, 1], p: [sx * EYE.x, y, z + 0.002], shadow: false, name: 'lens' });
       this.glassesObj = grp;
+      // (a retainer cord round the back of the neck: opt-in only, never on a preset — spec §1, nothing around necks)
       if (gl.cord) {
         const pts = [];
         for (let k = 0; k <= 12; k++) { const t = k / 12, a = lerp(-1, 1, t); pts.push(new THREE.Vector3(0.335 * Math.sign(a) * Math.pow(Math.abs(a), 0.35) * 0.98, 0.44 - 0.42 * (1 - a * a) - 0.05, -0.12 - 0.22 * (1 - a * a))); }
@@ -1778,12 +1780,15 @@ const Rig = (() => {
       this._glassesState = 'on';
       if (gl.state === 'hang') this.glassesState('hang');
     }
-    // CONTRACT+: glassesState('on'|'hang'|'off') — on the face, hanging on the chest (on the cord), or pocketed
+    // CONTRACT+: glassesState('on'|'hang'|'off') — on the face, hooked into the shirt's placket below the collar (one
+    // temple tucked in; nothing round the neck — spec §1), or pocketed
     glassesState(s) {
       const g = this.glassesObj; if (!g) return;
       if (!this._glassHang) {
         const H = this.H;
-        this._glassHang = this._dangle(this.bones.chest, [0, 0.098 * H, 0], { limit: [-1.2, 0, -0.5, 0.5], stiff: 16, damp: 3.4, hang: this._chestPt(0, 0.0).p.sub(new THREE.Vector3(0, 0.098 * H, 0)) });
+        this._glassHang = new THREE.Group(); this._glassHang.name = 'glassesClip';
+        this._glassHang.position.set(0, 0.098 * H, 0);
+        this.bones.chest.add(this._glassHang);
       }
       this._glassesState = s;
       if (s === 'on') { this.headSpace.add(g); g.position.set(0, 0, 0); g.rotation.set(0, 0, 0); g.scale.setScalar(1); g.visible = true; }
@@ -1842,12 +1847,21 @@ const Rig = (() => {
         for (let i = 0; i < 14; i++) { const p = c.getPoint(i / 13); a.setXYZ(i, p.x, p.y, p.z); }
         a.needsUpdate = true; line.geometry.computeBoundingSphere();
       };
+      // In the ears, each cord runs down the side of the neck, over the front of its shoulder and down its own side of
+      // the chest; the two meet at the waist (the splitter) — never across the front of the neck (spec §1: nothing
+      // around necks; two cords converging under the chin read as a loop there). Out of the ears the buds hang on the
+      // chest from the splitter.
+      const o2 = this.outerOff || 0, waist = P(hp, 0.05 * H, 0.09 * H, (T.waistD + 0.02) * H);
       for (let k = 0; k < 2; k++) {
         const sx = k === 0 ? 1 : -1;
-        const mid = P(ch, sx * 0.05 * H, 0.085 * H, (T.chestD * 0.5 + 0.02) * H);
-        curve(this.budLines[k], this.budsIn ? [ends[k], mid, junction] : [ends[k], junction]);
+        if (this.budsIn) {
+          const neck = P(ch, sx * (T.neckR + 0.012) * H, 0.15 * H, -0.006 * H);
+          const shoulder = P(ch, sx * (T.chestW * 0.62) * H, 0.108 * H, (T.chestD * 0.8 + o2 + 0.008) * H);
+          const side = P(ch, sx * (T.chestW * 0.6) * H, 0.0, (T.chestD + o2 + 0.012) * H);
+          curve(this.budLines[k], [ends[k], neck, shoulder, side, waist]);
+        } else curve(this.budLines[k], [ends[k], junction]);
       }
-      curve(this.budLines[2], [junction, P(hp, 0.05 * H, 0.09 * H, (T.waistD + 0.02) * H), pocket]);
+      curve(this.budLines[2], this.budsIn ? [waist, pocket] : [junction, waist, pocket]);
     }
     // ---- dangles: hanging things that swing with the body and follow gravity ---------------------------------------
     // opts: limit [xMin, xMax, zMin, zMax] (radians relative to rest; −x swings the bottom forward/out), stiff, damp,
@@ -2364,11 +2378,14 @@ const Rig = (() => {
   const AP = (w, pole, fing, palm, curl = 0.55, thumb = 0.4, extra) => ({ w, pole, fing, palm, curl, thumb, ...extra });
   const ARM_POSES = {
     phone: (T) => AP([0.07, -0.19, T.chestD + 0.1], [1, -0.7, -0.5], [-0.35, 0.3, 1], [-0.15, 1, -0.45], 0.4, 0.45),
-    phone_look: (T) => AP([0.04, -0.07, T.chestD + 0.16], [1, -1, -0.2], [-0.35, 0.6, 0.75], [-0.15, 0.5, -0.9], 0.42, 0.45),
+    // (fingers nearly straight: they lie along the phone's back and sides; only the thumb reaches the screen's edge —
+    // curl 0.42 laid four blocky fingers across the screen in every insert)
+    phone_look: (T) => AP([0.04, -0.07, T.chestD + 0.16], [1, -1, -0.2], [-0.35, 0.6, 0.75], [-0.15, 0.5, -0.9], 0.12, 0.3),
     phone_up: (T) => AP([0.075, 0.17, T.chestD + 0.22], [1, -1, 0], [0, 1, 0.1], [0.05, 0.05, 1], 0.6, 0.45),
-    // (the elbow out to the side and a little forward — it no longer swings in front of the face; straight out and
-    // back, [1,-1,-0.3], lifts it above the shoulder)
-    phone_ear: (T) => AP([0.075, 0.125, 0.03], [0.8, -1, 0.3], [-0.2, 1, 0.1], [-1, 0, 0.15], 0.6, 0.45),
+    // (the elbow down in front of the chest, the forearm up beside the jaw, the phone's screen to the ear: seen from the
+    // far side the arm stays behind his face, seen from the front it doesn't cover his mouth. The old pole [0.8,-1,0.3]
+    // held the elbow out at shoulder height, 45° forward — the upper arm crossed his face in every close side shot)
+    phone_ear: (T) => AP([0.08, 0.12, -0.01], [0.6, -1.5, 0.2], [-0.2, 1, 0.1], [-1, 0, 0.15], 0.6, 0.45),
     cup: (T) => AP([0.08, -0.15, T.chestD + 0.09], [1, -0.8, -0.3], [-0.6, 0, 0.8], [-1, 0.1, -0.2], 0.75, 0.5),
     bar: (T) => AP([0.125, -0.35, 0.035], [0.3, 0, -1], [0, -1, 0.12], [-1, 0, 0], 0.95, 0.7),
     bar_ready: (T) => AP([0.1, 0.02, T.chestD + 0.07], [1, -0.8, -0.2], [0, 0.1, 1], [-1, 0, 0], 0.95, 0.7),
@@ -2489,10 +2506,31 @@ const Rig = (() => {
       o[CH['curl' + s]] += (0.18 + 0.06 * n) * k;
     }
   } });
+  // offer: the held thing out, palm up. opts.target (an Actor, a point [x,y,z] / Vector3 or [x,z]) aims the hand at it —
+  // at another actor: a hand's width short of his chest, at his hand height (a seated Chloe handing something up to a
+  // standing Aidan reaches up toward his hand, not out at her own shoulder height) — clamped to the arm's reach
   defGesture('offer', { dur: 2.3, hand: 'held', fn(o, a, g) {
     const s = g.side, sx = sgn(s), T = a.D.T;
     add(o, 'spine', 0.05, 0, 0); add(o, 'chest', 0.04, 0, 0); add(o, 'head', 0.04, 0, 0);
-    armIK(a, o, s, chestPt(a, o, sx * 0.035, -0.06, T.chestD + 0.25, _V[8]), cd(a, o, sx, -1, -0.2, 9), { fing: cd(a, o, 0, 0.15, 1, 10), palm: cd(a, o, 0, 1, 0, 11) });
+    let wp = null;
+    const t = g.opts.target;
+    if (t) {
+      const act = t instanceof Actor ? t : t.raw instanceof Actor ? t.raw : null;
+      if (act && act !== a) {
+        act.bones.chest.getWorldPosition(_V[15]); a.bones.chest.getWorldPosition(_V[3]);
+        const dx = _V[3].x - _V[15].x, dz = _V[3].z - _V[15].z, d = Math.hypot(dx, dz) || 1;
+        wp = _V[15].set(_V[15].x + (dx / d) * 0.3, _V[15].y - 0.2 * (act.H || 1.75) / 1.75, _V[15].z + (dz / d) * 0.3);
+      } else if (!act) wp = a._targetPos(t, _V[15]);
+    }
+    if (wp) {
+      a.body.updateWorldMatrix(true, false); _M.inv.copy(a.body.matrixWorld).invert();
+      const tg = _V[8].copy(wp).applyMatrix4(_M.inv);
+      const sh = _V[4].copy(a.rest['upperArm' + s]).applyMatrix4(fkTo(a, o, CH_ARM[s]));
+      const dv = _V[7].copy(tg).sub(sh), L = dv.length() || 1, reach = (a.D.ua + a.D.fa) * a.H * 0.93;
+      if (L > reach) tg.copy(sh).addScaledVector(dv, reach / L);
+      dv.normalize(); dv.y += 0.12;
+      armIK(a, o, s, tg, cd(a, o, sx, -1, -0.2, 9), { fing: _V[10].copy(dv), palm: cd(a, o, 0, 1, 0, 11) });
+    } else armIK(a, o, s, chestPt(a, o, sx * 0.035, -0.06, T.chestD + 0.25, _V[8]), cd(a, o, sx, -1, -0.2, 9), { fing: cd(a, o, 0, 0.15, 1, 10), palm: cd(a, o, 0, 1, 0, 11) });
     fingers(o, s, a.held[s] ? 0.45 : 0.2, 0.3);
   } });
   defGesture('point', { dur: 1.9, hand: 'free', fn(o, a, g) {
@@ -3564,7 +3602,7 @@ const Rig = (() => {
       face: { eyes: '#34261b', brows: '#5e5a54', browThick: 1.2, wrinkles: 0.75, stubble: 0.3, bags: 0.35, beardColor: '#8a8781' },
       top: { kind: 'tee', color: '#5d6264' }, layers: [{ kind: 'jacket', color: '#3b4960', patch: 'SIGNAL HILL EXCH.\nLINES', open: false }],
       pants: { kind: 'work', color: '#3a3d42' }, shoes: { kind: 'boot', color: '#29241f', sole: '#151412' },
-      glasses: { style: 'reading', color: '#2b2320', low: true, cord: true }, toolroll: true, beltPhone: true,
+      glasses: { style: 'reading', color: '#2b2320', low: true, cord: false }, toolroll: true, beltPhone: true,
       style: { armSwing: 0.75, heavy: 0.35, stepLen: 0.92 }, habits: ['peer', 'fidget', 'nod'], habitEvery: [7, 14],
       walkSpeed: 1.0, runSpeed: 1.8,
     } },

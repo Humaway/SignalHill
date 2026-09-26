@@ -234,7 +234,7 @@ const Render = (() => {
     crowdWarn = 0;
     ambOverride = null; applyEnv();
   }
-  // CONTRACT+: Render.lightAt(point, {torch=true, pool=true, ambient=false}) → rough light level at a world point
+  // CONTRACT+: Render.lightAt(point, {torch=true, pool=true, ambient=false, exclude: handle}) → rough light level at a world point
   // (≈ 1 for a surface 2 m in front of the torch). For effects that should only show where light really falls
   // (pickup glints, the Tethered's clamshell glare, Aidan's phone glow): torch cone × falloff, pool lights × falloff,
   // plus the hemisphere ambient on request.
@@ -257,7 +257,7 @@ const Render = (() => {
     if (o.pool !== false) {
       for (const s of allSlots) {
         const l = s.light;
-        if (!s.handle || !(l.intensity > 0)) continue;
+        if (!s.handle || !(l.intensity > 0) || (o.exclude && s.handle === o.exclude)) continue;
         const d = l.position.distanceTo(p);
         const range = l.distance > 0 ? 1 - U.smooth(U.clamp((d - l.distance * 0.5) / (l.distance * 0.5))) : 1;
         let k = l.intensity * range / (1 + d * d) / 8;

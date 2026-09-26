@@ -358,7 +358,9 @@
 
   // --- screen content painters (used for defaults; content can redraw via userData.screen.draw) -------------------
   function paintStatic(ctx, w, h, r = Math.random, a = 1) {
-    const id = ctx.getImageData(0, 0, w, h), d = id.data;
+    // (every pixel is overwritten: a fresh ImageData, never a readback — a static TV repaints 12 times a second into a
+    // GPU-backed screen canvas, and getImageData there stalls on the GPU each time)
+    const id = ctx.createImageData(w, h), d = id.data;
     for (let i = 0; i < d.length; i += 4) { const v = (r() * 255 * a) | 0; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255; }
     ctx.putImageData(id, 0, 0);
   }
@@ -471,10 +473,13 @@
   const flyerTex = (i) => ctex('flyer|' + i, 160, 224, (ctx, w, h, r) => {
     const f = FLYERS[i % FLYERS.length];
     ctx.fillStyle = ['#f0ecdf', '#f3e59a', '#e6eef0', '#f1dcdc'][i % 4]; ctx.fillRect(0, 0, w, h);
-    txt(ctx, f[0], w / 2, 34, { size: 24, font: F.heavy, weight: '900', color: '#1a1a1a', align: 'center' });
+    // (the title shrinks to fit the sheet with a margin: GARAGE SALE / PIANO LESSONS ran off both edges at 24 px)
+    const ts = fit(ctx, [f[0]], w - 16, 30, (q) => `900 ${q}px ${F.heavy}`, 24);
+    txt(ctx, f[0], w / 2, 34, { size: ts, font: F.heavy, weight: '900', color: '#1a1a1a', align: 'center' });
     ctx.strokeStyle = '#444'; ctx.lineWidth = 2; ctx.strokeRect(22, 46, w - 44, 70);
     ctx.fillStyle = 'rgba(60,60,60,0.35)'; ctx.beginPath(); ctx.ellipse(w / 2, 86, 28, 20, 0, 0, TAU); ctx.fill();
-    for (let k = 1; k < 4; k++) txt(ctx, f[k], w / 2, 118 + k * 18, { size: 13, font: F.sans, color: '#222', align: 'center' });
+    const bs = fit(ctx, f.slice(1), w - 14, 60, (q) => `${q}px ${F.sans}`, 13);
+    for (let k = 1; k < 4; k++) txt(ctx, f[k], w / 2, 118 + k * 18, { size: bs, font: F.sans, color: '#222', align: 'center' });
     for (let k = 0; k < 7; k++) { ctx.save(); ctx.translate(12 + k * 20, h - 4); ctx.rotate(-Math.PI / 2); txt(ctx, '04 2231', 0, 0, { size: 9, font: F.mono, color: '#333' }); ctx.restore(); ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(21 + k * 20, h - 46, 1, 46); }
     if (r() < 0.6) { ctx.clearRect(21 + 2 * 20, h - 46, 20, 46); }
     TU.age(ctx, w, h, r, 1.1, { sun: 0.35 });
@@ -3792,7 +3797,9 @@
     cyl(g, 0.2, 0.55, 0, 0.04, 0.35, { color: '#e8e6de', roughness: 0.3, transparent: true, opacity: 0.7 }, { seg: 10 });
   });
   // plant_pot: office plant. opts variant 'palm' (default) | 'fern' | 'dead' | 'fiddle'
-  def('plant_pot', { collide: 'auto' }, (K, o, g) => {
+  // (collides as the pot only — r 0.22 m, 0.42 m high: drooping fronds never block a corner or the examine beside it,
+  // and never block a camera's view of Aidan)
+  def('plant_pot', { collide: 0.22, h: 0.42 }, (K, o, g) => {
     const v = o.variant || 'palm', r = rngOf(K, o, 'pp2');
     cyl(g, 0, 0, 0, 0.17, 0.36, { color: '#3a3e40', roughness: 0.5 }, { r2: 0.21, seg: 16 });
     add(g, gCircle(0.19, 14), { tex: 'dirt' }, 0, 0.33, 0, { rx: -90, cast: false });

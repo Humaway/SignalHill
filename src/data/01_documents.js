@@ -12,7 +12,10 @@
 const DOC_level = () => (S.difficulty && S.difficulty.riddle) || 'normal';
 const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${base}_${lvl}` : base);
 {
-  const doc = (id, title, group, paper, text, o = {}) => defineDoc({ id, title, group, paper, text, ...o });
+  // (a time keeps its am / pm: "9:10 am." never wraps as "9:10" / "am." in the reading view — a no-break space,
+  // which the reading view's wrap (split on ' ') keeps together and which prints as a space)
+  const DOC_nb = (t) => (typeof t === 'string' ? t.replace(/(\d) (am|pm)\b/g, '$1\u00a0$2') : t);
+  const doc = (id, title, group, paper, text, o = {}) => defineDoc({ id, title, group, paper, text: DOC_nb(text), ...o, ...(o.hand ? { hand: DOC_nb(o.hand) } : {}) });
 
   // =================================================================================================================
   // Story documents — in the order they turn up in play (the memos list keeps this order); the puzzle clues sit where

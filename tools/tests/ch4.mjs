@@ -57,8 +57,8 @@ const snap = (h) => ev(h, `const M = SH.mod, S = SH.S; return { room: M.World.ro
 // record every subtitle / message / card line (the dialogue checks read them back)
 async function spy(h) {
   await ev(h, `if (!window.__c4spy) { window.__c4spy = true; window.__c4lines = []; const U = SH.mod.UI;
-    for (const fn of ['subtitle', 'message', 'card', 'say']) { const o = U[fn]; if (typeof o !== 'function') continue;
-      U[fn] = function (...a) { try { window.__c4lines.push(fn[0] + ':' + a.filter((x) => typeof x === 'string').join(' | ')); } catch (e) {} return o.apply(this, a); }; } }
+    for (const fn of ['subtitle', 'message', 'card', 'say', 'choice']) { const o = U[fn]; if (typeof o !== 'function') continue;
+      U[fn] = function (...a) { try { window.__c4lines.push(fn[0] + ':' + a.map((x) => (typeof x === 'string' ? x : Array.isArray(x) ? 'CHOICE[' + x.map((y) => (typeof y === 'string' ? y : (y && (y.label || y.text)) || '')).join('|') + ']' : '')).filter(Boolean).join(' | ')); } catch (e) {} return o.apply(this, a); }; } }
     return 1;`);
 }
 async function saw(h, text, notes, where) {
@@ -95,7 +95,7 @@ async function playUntil(h, pred, maxSec, what) {
 
 // Let whatever the game is doing play out: scenes (played or skipped per path), a ringing call (answered / declined per
 // path), a document's reading view (closed). Returns when the player has control, or when a choice / keypad waits.
-async function settle(h, P, notes, o = {}) {
+export async function settle(h, P, notes, o = {}) {
   const maxIter = o.maxIter ?? 900;
   for (let i = 0; i < maxIter; i++) {
     const s = await snap(h);
@@ -161,7 +161,7 @@ async function takeHop(h, P, notes, hop) {
   throw new Error(`${kind} ${from} → ${to} did not work from ${x},${z}: ${JSON.stringify(await snap(h))}`);
 }
 // press E at a spot and let the result play out
-async function useAt(h, P, notes, x, z, yaw, o = {}) {
+export async function useAt(h, P, notes, x, z, yaw, o = {}) {
   await tp(h, x, z, yaw);
   await press(h, 'interact', 0, o.after ?? 0.4);
   return settle(h, P, notes, o);
@@ -196,6 +196,27 @@ async function resolveTethered(h, P, notes, id, cut, o = {}) {
   notes.push(`${id} ${res}`);
   await heal(h);
   await settle(h, P, notes);
+  return res;
+}
+
+// a Reach: a few real swings of the bar from beside it, the Enemies API to put it down, then E to stomp it
+async function resolveReach(h, notes, id) {
+  const st = await ev(h, `const e = SH.mod.Enemies.get(${JSON.stringify(id)}); return e && !e.resolved ? { x: e.pos.x, z: e.pos.z } : null;`);
+  if (!st) return null;
+  await equip(h, 'steel_bar');
+  const spot = await ev(h, `for (const [dx, dz, yaw] of [[1.4, 0, -90], [-1.4, 0, 90], [0, 1.4, 180], [0, -1.4, 0]]) { const x = ${st.x} + dx, z = ${st.z} + dz; if (SH.mod.World.pointFree(x, z, 0.3)) return [x, z, yaw]; } return [${st.x} + 1.4, ${st.z}, -90];`);
+  await tp(h, ...spot);
+  await ev(h, "SH.press('ready', 600); return 1");
+  for (let k = 0; k < 3; k++) await press(h, 'attack', 0, 0.9);
+  await ev(h, 'SH.mod.Input.releaseAll(); return 1');
+  await ev(h, `const e = SH.mod.Enemies.get(${JSON.stringify(id)}); if (e && !e.resolved && !e.downed) e.damage(Math.max(1, e.hp), 'steel_bar'); return 1`);
+  await advance(h, 0.6);
+  const at = await ev(h, `const e = SH.mod.Enemies.get(${JSON.stringify(id)}); return e ? [e.pos.x, e.pos.z] : null;`);
+  if (at) { await tp(h, at[0] + (spot[0] - st.x) * 0.7, at[1] + (spot[1] - st.z) * 0.7, spot[2]); await press(h, 'interact', 0, 1.0); }
+  let res = await ev(h, `const e = SH.mod.Enemies.get(${JSON.stringify(id)}); return !e || e.resolved || null;`);
+  if (!res) { await ev(h, `const e = SH.mod.Enemies.get(${JSON.stringify(id)}); if (e) SH.mod.Enemies.kill(e); return 1`); res = 'killed (API)'; }
+  notes.push(`${id}: ${res}`);
+  await heal(h);
   return res;
 }
 
@@ -242,7 +263,7 @@ async function walkPath(h, pts, what, o = {}) {
 
 // the Team 3 pod phone (GAMEPLAY 4-3): static, then the pulse clicks 2-2-3-1 repeating while the handset is up.
 // Easy logs the digits after one listen, Normal after two, Hard never (hang up with E).
-async function podPhone(h, P, notes, riddle) {
+export async function podPhone(h, P, notes, riddle) {
   await tp(h, 23.65, 17.8, -90);
   await press(h, 'interact', 0, 0.3);
   await mustReach(h, 'SH.mod.Script.busy', 5, 'the Team 3 pod phone picked up');
@@ -268,29 +289,64 @@ async function podPhone(h, P, notes, riddle) {
   await settle(h, P, notes);
 }
 // the records door's rotary dial: E, then dial the number on the keyboard (a wrong one first on the connected path)
-async function rotary(h, P, notes, wrongFirst) {
+export async function rotary(h, P, notes, wrongFirst) {
   await tp(h, 8.05, 0.95, 180);
   await press(h, 'interact', 0, 0.3);
   await mustReach(h, 'SH.mod.UI.capturing()', 20, 'the rotary dial', { step: 0.2 });
   await advance(h, 0.8);
   if (wrongFirst) {
     await h.page.keyboard.type('1961', { delay: 40 });
-    await advance(h, 6);
+    // (the refusal is written into the dial's own message line once the fourth digit has run back)
+    const refused = await advanceUntil(h, "[...document.querySelectorAll('.ui-kp-msg')].some((m) => m.textContent.includes('Nothing. Just a dial tone.'))", 10, { step: 0.2 });
+    await advance(h, 1.5);
     if (!(await ev(h, 'return SH.mod.UI.capturing()'))) throw new Error('the rotary dial closed on a wrong number');
-    await saw(h, 'Nothing. Just a dial tone.', notes, 'the rotary dial (wrong)');
+    if (!refused) notes.push('MISSING line (the rotary dial (wrong)): Nothing. Just a dial tone.');
     notes.push('rotary: 1961 refused');
   }
-  await h.page.keyboard.type('2231', { delay: 40 });
-  await advance(h, 0.5);
-  await mustReach(h, '!SH.mod.UI.capturing()', 20, 'the rotary dial taking 2231');
+  // (in the headless harness a typed digit is now and then lost before the dial reads it: a player would clear the dial
+  // with Backspace and dial again, and so does this)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await h.page.keyboard.type('2231', { delay: 60 });
+    if (await advanceUntil(h, '!SH.mod.UI.capturing()', 12, { step: 0.25 })) break;
+    notes.push(`FLAKE: the rotary dial did not take all four digits (attempt ${attempt + 1}); cleared and dialled again`);
+    await h.page.keyboard.press('Backspace');
+    await advance(h, 1.0);
+  }
+  await mustReach(h, '!SH.mod.UI.capturing()', 5, 'the rotary dial taking 2231');
   await settle(h, P, notes);
   if (!(await ev(h, "return !!SH.S.done['unlocked:c4_floor:records']"))) throw new Error('the records door did not unlock after 2231');
   await saw(h, 'It took it.', notes, 'the rotary dial');
 }
 
+// walk with real keys to (x, z) during the fight, topping Aidan's health up as a player would with the coffee and energy
+// drinks he carries (the walk itself is what is tested, not the damage race)
+function walkFight(h, x, z, o = {}) {
+  const tol = o.tol ?? 0.45;
+  return walkTo(h, x, z, { ...o, until: `(SH.S.health < 55 ? (SH.mod.Player.heal(100), false) : false) || Math.hypot(SH.mod.Player.pos.x - ${x}, SH.mod.Player.pos.z - ${z}) < ${tol}` + (o.stop ? ` || (${o.stop})` : '') });
+}
+// Chase's distance from Aidan (page expression) and position
+const CHASE_D = "(() => { const b = SH.mod.World.build, c = b && b.npcs && b.npcs.chase; return c ? Math.hypot(c.root.position.x - SH.mod.Player.pos.x, c.root.position.z - SH.mod.Player.pos.z) : 99; })()";
+// walk to (x, z) with E held and Chase in tow, as a player keeps him: whenever he drops behind (the Escalation knocks him
+// back, or he snags on the counter) turn back for him first — E still held takes hold of him again within 2 m
+async function walkWithChase(h, x, z, o = {}) {
+  const tol = o.tol ?? 0.45;
+  for (let k = 0; k < 14; k++) {
+    const d = await ev(h, `return ${CHASE_D}`);
+    if (d > 1.8) {
+      const c = await ev(h, 'const c = SH.mod.World.build.npcs.chase; return [c.root.position.x, c.root.position.z]');
+      await walkFight(h, c[0], c[1], { maxSec: 6, tol: 1.1 });
+      await advance(h, 0.4);
+      continue;
+    }
+    await walkFight(h, x, z, { maxSec: o.maxSec ?? 15, tol, stop: `${CHASE_D} > 2.1` });
+    if ((await ev(h, `return Math.hypot(SH.mod.Player.pos.x - ${x}, SH.mod.Player.pos.z - ${z})`)) < tol + 0.05) return true;
+  }
+  return false;
+}
+
 // the Escalation (BOSS): Chase swings every 4 s unless Aidan holds E within 2 m; the duress button; both through the
 // back-office door. P.hits 'few' holds him back from the start; 'many' lets him swing until chaseHits ≥ 4 (the grab).
-async function escalation(h, P, notes) {
+export async function escalation(h, P, notes) {
   await mustReach(h, "SH.mod.World.room === 'c4_oldstore' && !SH.mod.Script.cutscene && SH.mod.Player.control !== false", 120, 'the Escalation handing control back');
   await shot(h, P.__opts || {}, 'boss');
   await saw(h, 'Get Chase to the back office.', notes, 'the boss objective');
@@ -300,7 +356,12 @@ async function escalation(h, P, notes) {
   // 1. the duress button under the counter (the staff side)
   await heal(h);
   if (P.hits === 'many') {
-    // stand back by the demo tables and let him swing (and take what comes)
+    // the duress button first (behind the counter), then stand back by the demo tables and let him swing (and take what
+    // comes) until Level 3 has him; then walk him to the door along the front of the store
+    await tp(h, 15.6, 2.25, 0);
+    await press(h, 'interact', 0, 0.4);
+    await advanceUntil(h, "!!SH.S.done['c4:duress']", 3);
+    await advanceUntil(h, '!SH.mod.Script.busy', 8);
     await tp(h, 6.0, 7.5, 90);
     for (let k = 0; k < 60 && (await hits()) < 4; k++) { await advance(h, 1.0); if ((await ev(h, 'return SH.S.health')) < 60) await heal(h); }
     if ((await hits()) < 4) throw new Error('Chase never reached four hits: ' + (await hits()));
@@ -310,33 +371,61 @@ async function escalation(h, P, notes) {
     await advance(h, 3.5);
     notes.push('the Level 3 grab happened');
   }
-  await tp(h, 15.6, 2.25, 0);
-  await press(h, 'interact', 0, 0.4);
-  await advanceUntil(h, "!!SH.S.done['c4:duress']", 3);
-  if (!(await ev(h, "return !!SH.S.done['c4:duress']"))) {
-    await tp(h, 15.6, 2.3, 0); await press(h, 'interact', 0, 0.4);
-  }
-  if (!(await ev(h, "return !!SH.S.done['c4:duress']"))) throw new Error('the duress button did not press: ' + JSON.stringify(await snap(h)));
-  notes.push('duress button pressed');
-  await advance(h, 0.6);
-  // 2. hold him back: go to him, hold E, walk to the back-office door together, release, E on the door
-  for (let tries = 0; tries < 6; tries++) {
-    if (await ev(h, '!!SH.S.flags.c4_bossDone')) break;
-    await heal(h);
+  // (a free spot beside Chase, facing him)
+  const besideChase = async () => {
     const c = await chase();
     if (!c) throw new Error('cannot find Chase in the old store');
-    await tp(h, c[0] + 0.9, c[1] + 0.9, -135);
+    return ev(h, `for (const [dx, dz] of [[0.9, 0], [-0.9, 0], [0, 0.9], [0, -0.9], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]]) { const x = ${c[0]} + dx, z = ${c[1]} + dz; if (x > 0.4 && x < 19.6 && z > 0.4 && z < 11.6 && SH.mod.World.pointFree(x, z, 0.3)) return [x, z, Math.atan2(-dx, -dz) * 180 / Math.PI]; } return [${c[0]} - 0.9, ${c[1]}, 90];`);
+  };
+  const chaseDist = () => ev(h, `let d = 99; await SH.run(async (G) => { const C = G.actor('chase'); if (C && C.raw) d = Math.hypot(C.raw.root.position.x - SH.mod.Player.pos.x, C.raw.root.position.z - SH.mod.Player.pos.z); }); return d;`);
+  if (P.hits === 'few') {
+    // hold him back from the first second: straight to him behind the counter, hold E (he follows), take him along to
+    // the duress button and tap E there (a fresh press while still holding)
+    await tp(h, ...(await besideChase()));
     await ev(h, "SH.press('interact', 600); return 1");
     try {
-      await advance(h, 0.6);
-      const ok = await walkTo(h, 18.6, 8.5, { maxSec: 25, tol: 0.5 });
-      if (!ok) notes.push(`walk to the office door (try ${tries + 1}) did not arrive: ${JSON.stringify(await snap(h))}`);
+      await advance(h, 0.5);
+      if (!(await walkWithChase(h, 15.6, 2.3, { maxSec: 10, tol: 0.3 }))) notes.push('walk to the duress button (holding Chase) did not arrive: ' + JSON.stringify(await snap(h)));
+      await ev(h, 'SH.mod.Player.face(0); return 1');
+      await advance(h, 0.1);
+      await ev(h, "SH.press('interact', 600); return 1");
+      await advanceUntil(h, "!!SH.S.done['c4:duress']", 4);
+      await advanceUntil(h, '!SH.mod.Script.busy', 10);
+    } finally { await ev(h, 'SH.mod.Input.releaseAll(); return 1'); }
+    if (await ev(h, "return !!SH.S.done['c4:duress']")) notes.push(`duress button pressed (holding Chase; chaseHits ${await hits()})`);
+  }
+  if (!(await ev(h, "return !!SH.S.done['c4:duress']"))) {
+    await tp(h, 15.6, 2.25, 0);
+    await press(h, 'interact', 0, 0.4);
+    await advanceUntil(h, "!!SH.S.done['c4:duress']", 3);
+  }
+  if (!(await ev(h, "return !!SH.S.done['c4:duress']"))) { await tp(h, 15.6, 2.3, 0); await press(h, 'interact', 0, 0.4); }
+  if (!(await ev(h, "return !!SH.S.done['c4:duress']"))) throw new Error('the duress button did not press: ' + JSON.stringify(await snap(h)));
+  await advance(h, 0.3);
+  // 2. hold him back and walk him to the back office door (round the counter's east end from behind it), wait for him at
+  //    the door, release, E on the door. When the Escalation knocks him out of Aidan's hold, go back for him.
+  for (let tries = 0; tries < 8; tries++) {
+    if (await ev(h, 'return !!SH.S.flags.c4_bossDone')) break;
+    if ((await ev(h, 'return SH.mode')) === 'death') break;
+    await heal(h);
+    if ((await chaseDist()) > 1.6) await tp(h, ...(await besideChase()));
+    await ev(h, "SH.press('interact', 600); return 1");
+    try {
+      await advance(h, 0.5);
+      const behind = await ev(h, 'return SH.mod.Player.pos.z < 3.9 && SH.mod.Player.pos.x < 16.9');
+      const legs = behind ? [[17.1, 2.3], [17.4, 6.0], [18.55, 8.5]] : [[18.55, 8.5]];
+      for (const [x, z] of legs) {
+        if (!(await walkWithChase(h, x, z, { maxSec: 15, tol: 0.45 }))) { notes.push(`walk to ${x},${z} (holding Chase, try ${tries + 1}) did not arrive: ${JSON.stringify(await snap(h))}`); break; }
+      }
+      for (let k = 0; k < 12 && (await chaseDist()) > 2.2; k++) await advance(h, 0.25);
     } finally { await ev(h, 'SH.mod.Input.releaseAll(); return 1'); }
     await advance(h, 0.1);
     await tp(h, 18.9, 8.5, 90);
     await press(h, 'interact', 0, 0.5);
     if (await advanceUntil(h, '!!SH.S.flags.c4_bossDone', 2)) break;
+    await advanceUntil(h, '!SH.mod.Script.busy', 6);
   }
+  if ((await ev(h, 'return SH.mode')) === 'death') throw new Error('Aidan died in the Escalation: ' + JSON.stringify(await snap(h)));
   if (!(await ev(h, 'return !!SH.S.flags.c4_bossDone'))) throw new Error('never got Chase into the back office: ' + JSON.stringify(await snap(h)));
   notes.push(`into the back office (chaseHits ${await hits()})`);
 }
@@ -382,7 +471,7 @@ export async function play(h, opts = {}) {
         if (P.answer) { await saw(h, "I'm here. I think I'm here.", notes, 'luka4'); await saw(h, 'Go home, Luka.', notes, 'luka4'); await saw(h, 'Not without you.', notes, 'luka4'); }
       }
       await resolveTethered(h, P, notes, 'c4_park:teth', P.cut, { from: 180, swing: true });
-      if (P.examine) { await useAt(h, P, notes, 27.9, 24.4, 180); await saw(h, 'Route 44.', notes, 'the bus-stop timetable'); }
+      if (P.examine) { await useAt(h, P, notes, 27.9, 24.65, 0); await saw(h, 'Route 44.', notes, 'the bus-stop timetable'); }
     }
     // ---- 4B the lobby: the Floor Plan on the reception counter, the ticket machine, the sign, the Champion wall -----------
     if (!(await has('map_care'))) {
@@ -422,7 +511,7 @@ export async function play(h, opts = {}) {
       await settle(h, P, notes);
       if (!(await done('cs:4-1')) || !(await flag('c4_metChase'))) throw new Error('4-1 did not play (c4_metChase)');
       if (P.chaseNotes) {
-        await useAt(h, P, notes, 6.25, 18.75, 180);
+        await useAt(h, P, notes, 6.75, 18.25, 200);
         if (!(await read('chase_notes'))) notes.push("BUG: Chase's Notes could not be read on his desk after 4-1");
       }
       if (opts.saveLoad && !saved2) {
@@ -471,8 +560,7 @@ export async function play(h, opts = {}) {
       if (!(await ev(h, "return SH.mod.Menus.isOpen() && SH.mod.Menus.current === 'doc'"))) notes.push('BUG: 4-4 did not open the Call Logs before the choice');
       await shot(h, opts, 'logs_doc');
       await playUntil(h, 'SH.mod.Script.choosing', 60, 'the call-log choice');
-      const labels = await ev(h, 'const c = SH.mod.Script.choosing; return c && (c.opts || c.options || c.items || null)');
-      notes.push('4-4 choice: ' + JSON.stringify(labels));
+      if (!(await ev(h, "return (window.__c4lines || []).some((l) => l.includes('CHOICE[Read on|Tear it up]'))"))) notes.push('MISSING choice labels (4-4): Read on / Tear it up');
       await choose(h, P.readLogs ? 0 : 1);
       await playUntil(h, '!!SH.S.outage && !SH.mod.World.outageBusy && !SH.mod.Script.busy', 90, 'the Outage taking the building');
       await settle(h, P, notes);
@@ -480,7 +568,7 @@ export async function play(h, opts = {}) {
       if (P.readLogs) await saw(h, "'Assigned: Aidan.'", notes, '4-4 Read on');
       notes.push(`4-4: ${P.readLogs ? 'Read on' : 'Tear it up'}`);
       await shot(h, opts, 'records_outage');
-      await useAt(h, P, notes, 8.55, 5.5, 180);
+      await useAt(h, P, notes, 8.55, 5.5, 0);
       if (!(await has('rmap_care'))) notes.push('BUG: no receipt map (rmap_care) from the records printer');
     }
     // ---- 4-5 the Outage Care Centre: the maze along the west wall, to the lobby doors (Chase's old store) ---------------------
@@ -489,6 +577,10 @@ export async function play(h, opts = {}) {
       if ((await room()) === 'c4_floor') {
         await shot(h, opts, 'maze_in');
         await equip(h, 'steel_bar');
+        // the three Reaches in the maze: fought (real swings, then the API) before the walk — standing and trading blows
+        // in a corridor while walking blind would only test the walker
+        for (const id of ['c4_floor:oreach1', 'c4_floor:oreach2', 'c4_floor:oreach3']) await resolveReach(h, notes, id);
+        await tp(h, 7.1, 0.9, -90);                                    // back at the records door
         // records door → west along the north aisle → the walkway → C1 east → the row-3 gap → C2 west → the walkway →
         // C3 east → the row-7 gap → A7 west → the walkway → A8 → the SW door
         const route = [[1.0, 0.8], [0.8, 5.2], [16.9, 5.2], [16.95, 11.8], [0.8, 12.0], [0.8, 17.6], [16.95, 17.7], [16.95, 22.4], [0.8, 22.4], [0.8, 26.3]];

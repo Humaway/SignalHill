@@ -56,7 +56,7 @@
     let t = TEXC.get(key);
     if (t) return t;
     const c = document.createElement('canvas'); c.width = w; c.height = h;
-    const ctx = c.getContext('2d');
+    const ctx = c.getContext('2d', { willReadFrequently: true });
     draw(ctx, w, h, U.rng(U.hash('c8:' + key)));
     t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
@@ -397,6 +397,9 @@
   // shape and the road read; the fog density eases toward C8.fogTo (the summit thins as he climbs). Skipped while
   // the Outage transition cross-fades the environment.
   // ---------------------------------------------------------------------------------------------------------------
+  // the Outage look of the three outdoor rooms (as Chapter 2's village: a lighter sick-teal fog that dark figures read
+  // against, and a sky light that shows the road — dark, never invisible)
+  const C8_OUTFOG = '#23504a', C8_OUTAMB = 1.0;
   function C8_ambient(fogK, outK) {
     const k = clamp(Tex.outage || 0, 0, 1), want = Math.round(lerp(fogK, outK, k) * 100) / 100;
     if (want === C8.amb) return;
@@ -539,7 +542,9 @@
 
   defineRoom({
     id: 'c8_summit', name: 'SUMMIT ROAD', area: 'SUMMIT ROAD', chapter: 8, outdoor: true, surface: 'bitumen', ambient: 'wind_heavy',
-    fog: { density: 0.062 }, outageFog: { density: 0.05, color: '#122b28' },
+    fog: { density: 0.062 }, outageFog: { density: 0.05, color: C8_OUTFOG },
+    // the fog thins as he climbs (onUpdate eases toward this); Cam.check reads the same rule
+    fogAt: (x, y, z, out) => { const k = clamp((12 - z) / 72, 0, 1); return out ? lerp(0.05, 0.024, k) : lerp(0.066, 0.04, k); },
     surfaces: [{ box: [8, -4, 36, -2.8], s: 'gravel' }, { box: [8, -18, 36, -16.8], s: 'gravel' }, { box: [8, -32, 36, -30.8], s: 'gravel' }, { box: [8, -46, 30, -44.8], s: 'gravel' }],
     bounds: [-1, -60.5, 45, 12.5],
     entries: { bottom: [40, 10.4, 180], top: [37, -57.6, 0], start: [40, 10.4, 180] },
@@ -654,7 +659,7 @@
       // the chain in a heap, the padlock still shut on it
       for (let k = 0; k < 9; k++) K.cyl(39.4 + Math.sin(k * 1.7) * 0.28, 0.02, 11.6 + Math.cos(k * 1.3) * 0.22, 0.03, 0.02, { tex: 'metal', color: '#6f6f68' }, { rz: 90, rot: k * 40 });
       K.box(39.8, 0.0, 11.55, 0.07, 0.09, 0.03, { tex: 'metal', color: '#b0973e' });
-      K.prop('sign_post', 36.9, 11.3, 180, { style: 'council', text: 'SUMMIT RD\nMAST ACCESS ONLY\nNO THROUGH ROAD', w: 0.8, h: 0.6, post: 2.2 });
+      K.prop('sign_post', 36.9, 11.3, 0, { style: 'council', text: 'SUMMIT RD\nMAST ACCESS ONLY\nNO THROUGH ROAD', w: 0.8, h: 0.6, post: 2.2 });
       K.examine(39.6, 0.4, 11.3, ['The chain\'s on the ground. The padlock\'s still locked.', 'Somebody cut the chain instead. [beat] Or it just let go.'], { id: 'c8su:chain', r: 1.4 });
       K.examine(36.9, 1.6, 11.0, ['"Summit Road. Mast access only. No through road."', 'No through road. [beat] It only goes up.'], { id: 'c8su:sign', r: 1.3 });
 
@@ -751,8 +756,8 @@
       K.prop('sign_post', 36.8, -29.2, 180, { style: 'warning', text: 'STEEP\nGRADE', w: 0.6, h: 0.6, y: 9 });
       K.prop('road_sign', 34, -58.8, 180, { text: 'SIGNAL HILL\nRADIO TERMINAL', sub: 'NO PUBLIC ACCESS', w: 1.8, h: 0.7, y: 16.5 });
       K.examine(34, 18, -58.3, ['"Signal Hill Radio Terminal." [beat] "No public access."', 'I\'m not the public. I work for the phone company. [beat] That\'s the joke.'], { id: 'c8su:terminal', r: 1.6 });
-      // gum trees on the banks, their tops in the fog; dead shrubs
-      for (const [x, z, y, h] of [[28, -8.2, topAB(28), 12], [14, -8.6, topAB(14), 10], [30, -22.6, topBC(30), 11], [16, -22.2, topBC(16), 12], [26, -36.4, topCD(26), 9], [12, -36.6, topCD(12), 11], [3, -50, C8_hillY(3, -50) - 0.1, 10], [10, -60, C8_hillY(10, -60) - 0.1, 12], [25.5, -62, C8_hillY(25.5, -62) - 0.1, 10]]) K.prop('gum_tree', x, z, (x * 41) % 360, { y, h });
+      // gum trees on the banks (along the wall tops, behind the rail cameras), their tops in the fog; dead shrubs
+      for (const [x, z, y, h] of [[28, -4.9, topAB(28), 12], [14, -4.9, topAB(14), 10], [30, -18.9, topBC(30), 11], [16, -18.9, topBC(16), 12], [26, -32.9, topCD(26), 9], [12, -32.9, topCD(12), 11], [3, -50, C8_hillY(3, -50) - 0.1, 10], [10, -60, C8_hillY(10, -60) - 0.1, 12], [25.5, -62, C8_hillY(25.5, -62) - 0.1, 10]]) K.prop('gum_tree', x, z, (x * 41) % 360, { y, h });
       for (const [x, z, y] of [[22, -7.2, topAB(22)], [9, -21.2, topBC(9)], [34, -35.4, topCD(34)], [40, -44, 16.5]]) K.prop('shrub', x, z, 0, { y, w: 1.4, h: 1.0, collide: false, dead: true });
       K.dress('leaves', [9, -2.8, 35, 3.5], 18, { seed: 8102 }); K.dress('leaves', [9, -16.8, 35, -10.5], 18, { seed: 8103 });
       K.dress('leaves', [9, -30.8, 35, -24.5], 16, { seed: 8104 }); K.dress('leaves', [31, -58, 43, -40], 16, { seed: 8105 });
@@ -807,10 +812,9 @@
       C8_rowPlan().forEach((p, i) => K.examine(p.x, seatY(p.x, p.z) + 0.8, p.z, lines[i % lines.length], { id: 'c8su:seat' + i, r: 1.4 }));
     },
     onUpdate(dt) {
-      C8_ambient(0, 0.5);
+      C8_ambient(0, C8_OUTAMB);
       const z = Player.pos ? Player.pos.z : 0;
-      const k = clamp((12 - z) / 72, 0, 1);
-      C8.fogTo = S.outage ? lerp(0.05, 0.024, k) : lerp(0.066, 0.04, k);
+      C8.fogTo = ROOMS.c8_summit.fogAt(0, 0, z, !!S.outage);
       C8_fogStep(dt);
       C8_rowLook(dt);
     },
@@ -835,6 +839,7 @@
   // apron outside it (x 3–27, z 20–34) where the summit road ends. Inside: the mast (centre 15, 5) in its inner
   // enclosure (x 9.5–20.5, z 0.3–10.5; its gate at x 15 → c8_mast:base), HUT 1 (west, locked), HUT 2 (east, x 22–27,
   // z 5–9.5, walk-in: the first aid kit, the energy drink), the floodlight on its pole with the Unread (8.8, 14.2).
+  // Fenced pens fill the ground behind both huts (no walkable spot a camera can't see).
   // =================================================================================================================
   const CP = { gate: [15, 20], phone: [10.4, 20.12], booth: [24.8, 24.6], flood: [8.8, 14.2], hut: [22, 5, 27, 9.5], door: [22, 7.25] };
   // the gate: two chain-link leaves on hinges at x 13 and 17, chained and padlocked until the code; they swing north
@@ -921,7 +926,8 @@
       await G.wait(0.6);
       G.sfx('static', { dur: 0.4, vol: 0.35, phone: true });
       await G.wait(0.5);
-      const mid = riddle() === 'easy' ? 'Every tech learned it. Nineteen sixty-one. The year the exchange opened.'
+      // (spec §2A, Easy: Wai states "1961")
+      const mid = riddle() === 'easy' ? 'Every tech learned it. 1961. The year the exchange opened.'
         : riddle() === 'hard' ? 'Every tech learned it. The day and month the exchange opened.' : 'Every tech learned it. The year the exchange opened.';
       await G.say('WAI (phone)', `Gate's on the old combination. ${mid} [beat] Go on, mate. I'll put you through when you get there.`);
       G.set('c8_phone', true);
@@ -950,7 +956,7 @@
 
   defineRoom({
     id: 'c8_compound', name: 'MAST COMPOUND', area: 'THE MAST', chapter: 8, outdoor: true, surface: 'gravel', ambient: 'wind_heavy',
-    fog: { density: 0.05 }, outageFog: { density: 0.04, color: '#122b28' },
+    fog: { density: 0.05 }, outageFog: { density: 0.04, color: C8_OUTFOG },
     surfaces: [{ box: [3, 23, 27, 34.2], s: 'bitumen' }, { box: [22.1, 5.1, 26.9, 9.4], s: 'concrete' }],
     bounds: [0, 0, 30, 34.2],
     entries: { gate: [15, 32.2, 180], mast: [15, 11.6, 0], start: [15, 32.2, 180] },
@@ -1054,7 +1060,7 @@
       K.collider(9.5, 10.42, 14.1, 10.58, { h: 2.4 }); K.collider(15.9, 10.42, 20.5, 10.58, { h: 2.4 });
       K.box(14.1, 0, 11.2, 0.05, 2.0, 1.4, { tex: 'chainlink', color: '#b8bebb' }, { rot: 20 });
       K.prop('sign_post', 16.2, 10.75, 0, { style: 'warning', text: 'CLIMBING\nHARNESS\nREQUIRED', w: 0.5, h: 0.5, post: 2.0 });
-      K.exit({ id: 'c8_compound:mast', box: [14.1, 10.2, 15.9, 10.6], to: 'c8_mast', entry: 'base', sound: 'steps' });
+      K.exit({ id: 'c8_compound:mast', box: [14.1, 10.2, 15.9, 11.0], to: 'c8_mast', entry: 'base', sound: 'steps' });   // (the gravel ends at z 10.5)
       K.examine(15, 2.2, 11.2, ['The mast. [beat] It goes up into the fog and doesn\'t stop.', 'There\'s a red light up there somewhere. Blinking.'], { id: 'c8c:mast', r: 1.8 });
 
       // ---- HUT 1 (west): locked -----------------------------------------------------------------------------------
@@ -1115,6 +1121,23 @@
       K.examine(23.2, 0.5, 6.9, ['A camp bed and a sleeping bag. Somebody stayed up here.', 'Waiting for a part, maybe. Or for someone to call back.'], { id: 'c8c:bed', r: 1.2 });
       K.examine(24.6, 1.65, 9.1, 'A calendar stuck on August. [beat] Nobody\'s turned it over.', { id: 'c8c:cal', r: 1.2 });
 
+      // ---- the fenced pens behind the huts (so nobody walks round the back of a hut, out of every camera's sight): gas
+      // bottles and the pole transformer behind HUT 1, the cable yard behind HUT 2. Chain-link: seen through, not walked.
+      fence(0, 7.2, 3.0, 7.2); fence(7.4, 3.2, 7.4, 0);
+      K.collider(0.3, 0.3, 2.95, 7.1, { h: 2.6 }); K.collider(2.95, 0.3, 7.3, 3.15, { h: 2.6 });
+      fence(20.5, 5.0, 22.0, 5.0); fence(27.0, 9.5, 30, 9.5);
+      K.collider(20.6, 0.3, 29.7, 4.95, { h: 2.6 }); K.collider(27.05, 4.95, 29.7, 9.4, { h: 2.6 });
+      for (let i = 0; i < 4; i++) { K.cyl(0.9 + i * 0.42, 0, 6.5, 0.17, 1.25, { color: '#cfc9b8', roughness: 0.5, metalness: 0.2 }); K.cyl(0.9 + i * 0.42, 1.25, 6.5, 0.07, 0.12, { tex: 'metal', color: '#6c6f6a' }); }
+      K.box(1.7, 0.75, 6.72, 1.8, 0.03, 0.03, { tex: 'metal', color: '#4a4c49' });
+      K.box(5.4, 0, 1.4, 1.5, 1.45, 1.0, { tex: 'metal', color: '#6c7a70', roughness: 0.6 });
+      K.box(5.4, 1.45, 1.4, 1.6, 0.06, 1.1, { tex: 'metal', color: '#5a655d' });
+      for (let i = 0; i < 3; i++) K.cyl(4.9 + i * 0.5, 1.51, 1.4, 0.06, 0.34, { color: '#c9c5b6', roughness: 0.4 });
+      K.prop('rf_sign', 7.46, 1.6, 90, { variant: 'fence', mount: 1.45 });
+      K.prop('cable_drum', 24.2, 2.6, 25, {}); K.prop('cable_drum', 26.4, 1.6, 70, { variant: 'flat' }); K.prop('cable_drum', 28.4, 2.3, 90, {});
+      K.prop('pallet', 22.2, 1.4, 5, { n: 2, load: 'wrapped' });
+      K.examine(1.6, 1.2, 7.6, ['Gas bottles chained up in a pen. The gate\'s padlocked.', 'Everything up here is locked. [beat] Everything except the way up.'], { id: 'c8c:pen1', r: 1.3 });
+      K.examine(28.5, 1.2, 9.9, ['Drums of cable, fenced in. Enough to wire every house on the hill.', 'None of it\'s connected to anything.'], { id: 'c8c:pen2', r: 1.3 });
+
       // ---- the yard: the floodlight (the Unread's), the generator, drums, the cable ladder to the mast ---------------
       K.prop('floodlight', CP.flood[0], CP.flood[1], 70, { light: 'point', bank: 1 });
       K.examine(CP.flood[0] + 0.5, 1.4, CP.flood[1] + 0.6, async (G) => {
@@ -1152,7 +1175,7 @@
       K.examine(11.8, 1.4, 20.5, ['A hi-vis vest on the fence. "M. — LINES" in marker on the back.', 'It\'s been out here long enough to go grey.'], { id: 'c8c:vest', r: 1.1 });
     },
     onUpdate(dt) {
-      C8_ambient(0, 0.48);
+      C8_ambient(0, C8_OUTAMB);
       C8.fogTo = S.outage ? 0.036 : 0.045;
       C8_fogStep(dt);
       C8_laterTick(dt);
@@ -1426,7 +1449,8 @@
   async function C8_enterHut(G) {
     let yes = false;
     try { yes = Game.endingFor(S) === 'yes'; } catch (e) { yes = false; }
-    if (yes) { await G.ending('yes'); return; }
+    // (in its own non-skippable wrapper, like 8-2: a skip of 8-1 must never carry into E-YES)
+    if (yes) { await G.run(async (G2) => { await G2.ending('yes'); }, { control: false, skippable: false, inheritSkip: false, name: 'c8:yes' }); return; }
     C8.pitchChain = true;
     try {
       await G.goto('c8_transmitter', 'door', { sound: 'door' });
@@ -1435,17 +1459,16 @@
   }
   defineRoom({
     id: 'c8_mast', name: 'THE MAST', area: 'THE MAST', chapter: 8, outdoor: true, surface: 'gravel', ambient: 'wind_heavy',
-    fog: { density: 0.035 }, outageFog: { density: 0.03, color: '#11282a' },
+    fog: { density: 0.035 }, outageFog: { density: 0.03, color: C8_OUTFOG },
     surfaces: [{ box: [-1.45, 1.6, 1.45, 2.9], s: 'concrete' }, { box: [1.5, -1.0, 5.5, 2.85], s: 'metal' }, { box: [-1.0, -5.5, 3.0, -1.6], s: 'metal' }, { box: [-5.5, -2.6, -1.05, 1.4], s: 'metal' }],
     bounds: [-7.5, -5.5, 7.5, 10.3],
     entries: { base: [0, 8.6, 180], top: [-3.2, -0.6, -90], start: [0, 8.6, 180] },
     cameras: [
-      // the base: low from the gate, looking up the lattice into the fog
-      { id: 'c8_mast:yard', vol: [-7.5, 1.55, 7.5, 10.3], y: [-1, 0.8], type: 'pan', pos: [0.2, 0.9, 16.2], target: [0.4, 5.2, 2.6], fov: 50, pan: { lag: 0.3, yaw: 40, pitch: 34 } },
-      // the first ladder, side-on from out in the fog
-      { id: 'c8_mast:l1lo', vol: [0.2, 1.2, 1.8, 2.9], y: [0.8, 9.5], type: 'pan', pos: [12.5, 6.2, 9.4], target: [1, 5, 2.1], fov: 46, pan: { lag: 0.25, yaw: 30, pitch: 40 } },
-      // straight down the ladder: Aidan small against the fog, the compound and the town's lights far below
-      { id: 'c8_mast:l1hi', vol: [0.2, 1.2, 1.8, 2.9], y: [9.5, 19.7], type: 'pan', pos: [0.4, 23.4, 3.35], target: [1.0, 11, 2.1], fov: 46, pan: { lag: 0.25, yaw: 40, pitch: 30 } },
+      // the base: low from the gate, looking up the lattice into the fog — and up at him on the first ten metres of rungs
+      { id: 'c8_mast:yard', vol: [-7.5, 1.2, 7.5, 10.3], y: [-1, 9.5], type: 'pan', pos: [0.2, 0.9, 16.2], target: [0.4, 5.2, 2.6], fov: 50, pan: { lag: 0.3, yaw: 40, pitch: 34 } },
+      // straight down the ladder from out over the drop: Aidan small against his own torchlight on the steel, the
+      // compound and the town's lights far below
+      { id: 'c8_mast:l1hi', vol: [0.2, 1.2, 1.8, 2.9], y: [9.5, 19.7], type: 'pan', pos: [2.4, 25.2, 6.3], target: [1.0, 12, 2.1], fov: 46, pan: { lag: 0.25, yaw: 40, pitch: 30 } },
       // platform 1, from out over the compound: the ladder going on up, the red nest glowing on its rungs
       { id: 'c8_mast:p1', vol: [1.5, -1.0, 5.5, 2.85], y: [19.5, 20.6], type: 'static', pos: [9.4, 24.2, 6.6], target: [2.6, 21.4, -0.6], fov: 'fit' },
       // looking up the ladder at the nest from the platform's corner
@@ -1455,7 +1478,8 @@
       // platform 2, high: the landing and, below the lip, the ladder he came up
       { id: 'c8_mast:p2', vol: [-1.0, -5.5, 3.0, -1.6], y: [39.5, 40.6], type: 'static', pos: [7.6, 46.2, -9.8], target: [0.9, 40.2, -3.3], fov: 'fit' },
       // the last ladder from below and behind: the top landing and the hut hanging over him in the fog
-      { id: 'c8_mast:l3', vol: [-1.8, -2.8, -0.6, -1.5], y: [40.6, 55.8], type: 'pan', pos: [-3.6, 43.6, -8.4], target: [-1.2, 51.5, -2.1], fov: 52, pan: { lag: 0.25, yaw: 30, pitch: 30 } },
+      // (pitch 75: it tilts down far enough to keep his feet in frame on the first rungs — Cam.check's ladder samples)
+      { id: 'c8_mast:l3', vol: [-1.8, -2.8, -0.6, -1.5], y: [40.6, 55.8], type: 'pan', pos: [-3.6, 43.6, -8.4], target: [-1.2, 51.5, -2.1], fov: 52, pan: { lag: 0.25, yaw: 30, pitch: 75 } },
       // the top landing: wide from out in the fog, the hut door
       { id: 'c8_mast:p3', vol: [-5.5, -2.6, -1.05, 1.4], y: [55.5, 56.6], type: 'static', pos: [-10.8, 58.6, 5.6], target: [-3.1, 56.5, -0.8], fov: 'fit' },
     ],
@@ -1479,7 +1503,7 @@
       K.collider(-7.6, 10.28, -1.1, 10.42, { h: 2.3 }); K.collider(1.1, 10.28, 7.6, 10.42, { h: 2.3 });
       K.exit({ id: 'c8_mast:gate', box: [-1.1, 9.95, 1.1, 10.35], to: 'c8_compound', entry: 'mast', sound: 'steps' });
       // the compound beyond: HUT 2, the floodlight glow, the fence in the fog
-      K.box(8.5, 0, 3.5, 5, 2.8, 4.5, { tex: 'metal', color: '#9d9888' });
+      K.box(10.35, 0, 2.3, 4.5, 2.8, 4.5, { tex: 'metal', color: '#9d9888' });
       K.prop('floodlight', -6.2, 12.4, 160, { light: false });
       // ---- the mast itself ---------------------------------------------------------------------------------------------
       const mb = C8_mastBody(K, { cx: 0, cz: 0, walk: true });
@@ -1542,7 +1566,7 @@
       K.trigger([-5.5, -2.6, -1.05, 1.4], (G) => G.cutscene('8-1'), { id: 'c8_mast:top', once: false, when: () => !done('cs:8-1') && Player.pos && Player.pos.y > 55.5 && Player.mode !== 'ladder' });
     },
     onUpdate(dt) {
-      C8_ambient(0, 0.46);
+      C8_ambient(0, C8_OUTAMB);
       const y = Player.pos ? Player.pos.y : 0;
       C8.fogTo = (S.outage ? 0.032 : 0.036) - clamp(y / 56, 0, 1) * 0.008;
       C8_fogStep(dt);
@@ -1929,9 +1953,10 @@
           if (!P) return false;
           if (S.health < 1) S.health = 1;
           const d = Math.hypot(P.x - px, P.z - pz);
-          // low behind him, looking along the floor at the phone; the Closer rearing at the frame's edge
-          const bx = P.x - px, bz = P.z - pz, bl = Math.hypot(bx, bz) || 1;
-          G.cam({ pos: [P.x + (bx / bl) * 2.4 - (bz / bl) * 0.9, 1.05, P.z + (bz / bl) * 2.4 + (bx / bl) * 0.9], target: [lerp(P.x, px, 0.6), 0.35, lerp(P.z, pz, 0.6)], fov: 52 });
+          // behind him and off to the side, looking along the floor at the phone: Aidan on his belly in the middle of the
+          // frame, the Closer rearing over him on the far side (never between the lens and him), the phone's glow ahead
+          const bx = (P.x - px) / (Math.hypot(P.x - px, P.z - pz) || 1), bz = (P.z - pz) / (Math.hypot(P.x - px, P.z - pz) || 1);
+          G.cam({ pos: [P.x + bx * 3.4 - bz * 1.8, 2.0, P.z + bz * 3.4 + bx * 1.8], target: [lerp(P.x, px, 0.4), 0.35, lerp(P.z, pz, 0.4)], fov: 52 });
           if (d < 1.05) {
             try { UI.holdPrompt('{interact} Call', 0); } catch (err) { /* ui */ }
             if (Input.pressed && Input.pressed('interact')) { try { Input.consume('interact'); } catch (err) { /* input */ } called = true; return true; }
@@ -1982,12 +2007,13 @@
       // low wide from the door: the whole floor running away to the counter and the light box
       { id: 'c8_transmitter:door', vol: [9.6, 5.2, 20.4, 13.6], type: 'static', pos: [15, 0.85, 19.4], target: [15, 2.1, 3.4], fov: 'fit' },
       // high over the counter
-      { id: 'c8_transmitter:counter', vol: [8, 0.3, 22, 5.2], type: 'static', pos: [15, 4.35, 10.4], target: [15, 0.7, 2.4], fov: 'fit' },
-      // the four corners of the floor, each from the far high corner (the plinths in the foreground)
-      { id: 'c8_transmitter:nw', vol: [0.3, 0.3, 9.6, 10.4], type: 'pan', pos: [22.5, 4.3, 17.8], target: [5, 0.8, 5.2], fov: 48, pan: { lag: 0.3, yaw: 40, pitch: 30 } },
-      { id: 'c8_transmitter:ne', vol: [20.4, 0.3, 29.7, 10.4], type: 'pan', pos: [7.5, 4.3, 17.8], target: [25, 0.8, 5.2], fov: 48, pan: { lag: 0.3, yaw: 40, pitch: 30 } },
-      { id: 'c8_transmitter:sw', vol: [0.3, 10.4, 9.6, 19.7], type: 'pan', pos: [22.5, 4.3, 2.2], target: [5, 0.8, 15], fov: 48, pan: { lag: 0.3, yaw: 40, pitch: 30 } },
-      { id: 'c8_transmitter:se', vol: [20.4, 10.4, 29.7, 19.7], type: 'pan', pos: [7.5, 4.3, 2.2], target: [25, 0.8, 15], fov: 48, pan: { lag: 0.3, yaw: 40, pitch: 30 } },
+      { id: 'c8_transmitter:counter', vol: [8, 0.3, 22, 5.2], type: 'static', pos: [15, 3.95, 10.5], target: [15, 0.7, 2.4], fov: 'fit' },
+      // the four corners of the floor, each from the far high corner (the plinths in the foreground; between the ceiling
+      // panels, not under them)
+      { id: 'c8_transmitter:nw', vol: [0.3, 0.3, 9.6, 10.4], type: 'pan', pos: [24, 3.7, 19.3], target: [5, 0.8, 5.2], fov: 48, pan: { lag: 0.3, yaw: 40, pitch: 30 } },
+      { id: 'c8_transmitter:ne', vol: [20.4, 0.3, 29.7, 10.4], type: 'pan', pos: [6, 3.7, 19.3], target: [25, 0.8, 5.2], fov: 48, pan: { lag: 0.3, yaw: 40, pitch: 30 } },
+      { id: 'c8_transmitter:sw', vol: [0.3, 10.4, 9.6, 19.7], type: 'pan', pos: [24, 3.7, 0.7], target: [5, 0.8, 15], fov: 48, pan: { lag: 0.3, yaw: 40, pitch: 30 } },
+      { id: 'c8_transmitter:se', vol: [20.4, 10.4, 29.7, 19.7], type: 'pan', pos: [6, 3.7, 0.7], target: [25, 0.8, 15], fov: 48, pan: { lag: 0.3, yaw: 40, pitch: 30 } },
       // the door behind him: from the counter end of the floor, looking back at the only thing in here that's real
       { id: 'c8_transmitter:south', vol: [9.6, 13.6, 20.4, 19.7], type: 'static', pos: [15, 3.9, 4.8], target: [15, 1.0, 18.8], fov: 'fit' },
     ],
@@ -2066,7 +2092,11 @@
       // the floor phone (8-3), and its call
       C8_phoneBuild(K);
     },
-    onUpdate() { /* (lit room: the torch isn't needed) */ },
+    onUpdate() {
+      // (lit room: the torch isn't needed.) The Closer's floor is the one place the Outage never reaches: white, glossy,
+      // perfect — the kit's props keep their Fog-world materials here (S.outage stays true; only the dissolve is held off)
+      try { if (Tex.outage > 0 && !World.outageBusy) Tex.setOutage(0); } catch (e) { /* tex */ }
+    },
     onLeave() { C8_clRelease(); C8.beam = null; C8.fight = null; C8.closer = null; try { UI.stamp(null); UI.holdPrompt(null); } catch (e) { /* ui */ } },
     async onEnter(G) {
       G.bars(0);
@@ -2369,6 +2399,9 @@
       await G.loop((dt) => { t += dt; for (const sh of shards) { sh.v.y -= 9.8 * dt; sh.s.position.addScaledVector(sh.v, dt); if (sh.s.position.y < 0.01) { sh.s.position.y = 0.01; sh.v.set(sh.v.x * 0.3, 0, sh.v.z * 0.3); } sh.s.rotation.x += sh.r.x * dt; sh.s.rotation.y += sh.r.y * dt; } return t >= 0.9; });
     }
     A.pose('lie'); G.sfx('thud', { pos: [tx, 0.2, tz], vol: 1.0 }); G.sfx('hurt', { pos: [tx, 1, tz], heavy: true });
+    // the bar goes out of his hand with the fall (he crawls with nothing; the call scenes after it show no weapon)
+    G.equip(null);
+    G.sfx('hit', { pos: [tx - 0.9, 0.1, tz + 0.6], vol: 0.5 });
     // His phone skitters across the polished floor and stops face up, 8 m away.
     A.hold('R', null);
     const ph = World.obj && World.obj('c8t:phone');
@@ -2512,7 +2545,9 @@
     if (!(A.raw && A.raw.held && A.raw.held.R)) A.hold('R', 'phone');
     try { A.raw.armPose('R', 'phone_ear'); } catch (err) { /* rig */ }
     A.look(null);
-    G.cam({ pos: rel(A, 0.78, 0.32, 0.02), target: headAt(A).toArray(), fov: 32, to: { pos: rel(A, 0.62, 0.26, 0.02), fov: 29 }, dur: 14 });
+    // near-frontal on a long lens from a metre off: his face, the phone at his ear, the raised elbow out at the frame's
+    // edge (closer than that, or from the side, the elbow comes across his face)
+    G.cam({ pos: rel(A, 1.15, 0.2, 0.06), target: headAt(A).toArray(), fov: 26, to: { pos: rel(A, 1.0, 0.17, 0.06), fov: 24 }, dur: 14 });
   }
   defineCutscene('E-C1', async (G) => {
     const A = G.aidan;

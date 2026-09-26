@@ -306,13 +306,19 @@ const World = (() => {
     if (c.blocker) { ui('message', c.blocker); blockerMark(c); }
     if (c.soft) Player.turnAround();
   }
+  // Dynamic colliders (enemy bodies, c.dynamic) come first in `cols` and their push-out is capped at 0.4 r per pass, so
+  // the static colliders resolved right after always see a penetration shallower than the circle's radius: a body that
+  // walked into Aidan eases him away but can never shove his centre across a thin wall (a 0.15 m K.wall).
   function resolve(x, z, r, cols, out, o) {
+    const maxDyn = r * 0.4;
     for (let it = 0; it < 4; it++) {
       let any = false;
       for (const c of cols) {
         const p = Kit.collide(c, x, z, r);
         if (!p) continue;
-        x += p.x; z += p.z; any = true;
+        let px = p.x, pz = p.z;
+        if (c.dynamic) { const m = Math.hypot(px, pz); if (m > maxDyn) { px *= maxDyn / m; pz *= maxDyn / m; } }
+        x += px; z += pz; any = true;
         if (!out.hit) out.hit = c;
         if (o.player && (c.blocker || c.soft)) touch(c);
       }
@@ -340,7 +346,7 @@ const World = (() => {
       const cy = c.y || 0;
       if (cy > feet + 1.7 || cy + c.h < feet + 0.2) continue;       // overhead / below the knees (a kerb is a floor step)
       if (o.ignore && o.ignore(c)) continue;
-      cols.push(c);
+      if (c.dynamic) cols.unshift(c); else cols.push(c);             // (dynamic bodies first: see resolve)
     }
     for (const ex of build.exits) {
       if (!matchWorld(ex.world, S.outage) || !ex.when || !inBand(ex.yBand, feet) || safeWhen(ex.when)) continue;

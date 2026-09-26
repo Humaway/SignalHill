@@ -37,6 +37,10 @@
 //   'script'(phase, name). G extras: G.shot(spec)/G.shots([…]) (declarative cutscene shots), G.waitInput(), G.persist(),
 //   G.heal(n), G.damage(n, source, o), G.equip(id), G.menu(name, o), G.screen(content, o), G.stamp(text, o),
 //   G.phone (Phone), G.enemies (Enemies), G.ctx, G.name, G.world (World), A.say(text, o), A.talk(s), A.yaw, A.id.
+// CONTRACT+ (maintenance, pass 2): a letterboxed scene restores Aidan's arm poses when it ends (opts.keepPose:true keeps
+//   what it left); Player puts the equipped weapon away while a letterboxed scene owns him; G.boss and G.ending end the
+//   skip of the calling scene (Script.skipping is false during the fight / the ending); a scene started with
+//   inheritSkip:false (the endings' scenes, G.boss) is its own skip chain.
 // CONTRACT+ (maintenance): G.finally(fn(how)), G.addLight(kind, o) (freed at the end), G.actor(enemy | enemy id),
 //   G.doc(id, {page, highlight}), G.cam({far}); a G.boss ends the skip of the scene that awaited it; skipping scripts
 //   that only wait yield a frame every SPIN_MAX instant waits; actor promises never report Script.ABORT; o.dur of
@@ -224,6 +228,8 @@ const Script = (() => {
     }
     if (ctx.blocking) { blockStack.push(ctx); setLock(ctx, true); }
     if (ctx.letterbox) setLetterbox(ctx, true);
+    // Aidan's arm poses as the scene found them (restored when it ends: a phone_ear left by E-C1 never carries into E-C2)
+    if (ctx.letterbox && hasPlayer() && Player.poseSnapshot) { try { ctx.poseSnap = Player.poseSnapshot(); } catch (e) { ctx.poseSnap = null; } }
     refreshSkippable();
     if (ctx.opts.cutscene) Bus.emit('cutscene', ctx.opts.cutscene, 'start');
     Bus.emit('script', 'start', ctx.name);
@@ -258,6 +264,7 @@ const Script = (() => {
     for (const fn of ctx.finals.splice(0).reverse()) { try { fn(ctx.aborted ? 'aborted' : ctx.skipping ? 'skipped' : 'done'); } catch (e) { console.error(`[Script] "${ctx.name}" finally`, e); } }
     if (ctx.music && ctx.skipping) snd('stopMusic', 1);
     if (ctx.postSaved && !ctx.opts.keepPost) restorePost(ctx);
+    if (ctx.poseSnap && !ctx.opts.keepPose) { try { Player.poseRestore(ctx.poseSnap); } catch (e) { console.error('[Script] poseRestore', e); } ctx.poseSnap = null; }
     if (camOwner === ctx) { camOwner = null; try { if (hasCam() && Cam.isScripted) Cam.release(); } catch (e) { console.error('[Script] Cam.release', e); } }
     if (ctx.lb) setLetterbox(ctx, false);
     setLock(ctx, false);
@@ -337,8 +344,9 @@ const Script = (() => {
       if (c.suspended || !c.skippable) return null;
       let t = c;
       // (a parent that is already skipping is not part of this chain: a scene started after its skip — past a G.boss —
-      // is skipped on its own)
-      for (let p = t.parent; p && p.blocking && p.skippable && !p.suspended && !p.done && !p.aborted && !p.skipping; p = p.parent) t = p;
+      // is skipped on its own; so is a scene started with inheritSkip:false — the endings' cutscenes, played nested in
+      // the Ch 8 scene that called G.ending: skipping one of them skips that one only)
+      for (let p = t.parent; t.opts.inheritSkip !== false && p && p.blocking && p.skippable && !p.suspended && !p.done && !p.aborted && !p.skipping; p = p.parent) t = p;
       return t;
     }
     return null;
@@ -346,6 +354,14 @@ const Script = (() => {
   function markSkipping(ctx) {
     ctx.skipping = true;
     for (const ch of ctx.children) if (ch.opts.inheritSkip !== false) markSkipping(ch);
+  }
+  // end a skip: the chain ctx belongs to (from the outermost skipping ancestor down, with the G.bg children that
+  // inherited it) plays normally again — a G.boss does this when the fight starts
+  function endSkip(ctx) {
+    let top = ctx;
+    while (top.parent && top.parent.skipping && top.opts.inheritSkip !== false) top = top.parent;
+    const clear = (c) => { c.skipping = false; for (const ch of c.children) if (ch.skipping && ch.opts.inheritSkip !== false) clear(ch); };
+    if (top.skipping) clear(top);
   }
   function skip() {
     const t = skipTarget();
@@ -1015,8 +1031,13 @@ const Script = (() => {
         chk(ctx);
         const b = typeof BOSSES !== 'undefined' ? BOSSES[id] : null;
         if (!b || typeof b.run !== 'function') { console.warn(`[Script] no boss "${id}"`); return undefined; }
-        // the fight is gameplay: the calling scene steps aside (no letterbox, control back) and can't be skipped
+        // the fight is gameplay: the calling scene steps aside (no letterbox, control back) and can't be skipped; a skip
+        // made before the fight covered the scene up to the fight and ends here (Script.skipping is false during the
+        // fight — a scene skipped into a boss never leaves anything waiting on !Script.skipping hanging)
         const hadLb = ctx.lb, hadLock = ctx.lockHeld;
+        if (ctx.skipping) endSkip(ctx);
+        // the fight starts from Aidan's normal arms (a pose the scene set before it would otherwise last the fight)
+        for (let c = ctx; c; c = c.parent) if (c.poseSnap) { try { Player.poseRestore(c.poseSnap); } catch (e) { /* no player */ } break; }
         ctx.suspended++;
         if (hadLb) setLetterbox(ctx, false);
         if (hadLock) setLock(ctx, false);
@@ -1029,9 +1050,9 @@ const Script = (() => {
           ctx.suspended = Math.max(0, ctx.suspended - 1);
           if (!ctx.aborted) {
             if (hadLb) setLetterbox(ctx, true); if (hadLock) setLock(ctx, true);
-            // a skip made before the fight covered the scene up to the fight: what follows it (another cutscene the
-            // scene plays next) is new to the player — the scene and the chain it belongs to stop skipping
-            for (let c = ctx; c && c.skipping; c = c.parent) c.skipping = false;
+            // (the skip ended when the fight started: what follows it — another cutscene the scene plays next — is new
+            // to the player and is skipped on its own)
+            if (ctx.skipping) endSkip(ctx);
           }
           refreshSkippable();
         }
@@ -1060,6 +1081,8 @@ const Script = (() => {
       async ending(name) {
         chk(ctx);
         if (hasGame() && Game.ending) {
+          // a skip of the calling scene ends here: the ending is new to the player (its scenes are skipped one by one)
+          if (ctx.skipping) endSkip(ctx);
           ctx.inGoto++;
           try { return await guard(ctx, Promise.resolve(Game.ending(name, { parent: ctx }))); } finally { ctx.inGoto--; }
         }

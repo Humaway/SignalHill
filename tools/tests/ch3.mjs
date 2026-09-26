@@ -23,7 +23,7 @@
 // and the foyer, reload that slot (Game.continueFrom) and play on; later save at the Operators' Hall wall phone and
 // reload it after the fuse board.
 // → { chapter: 3, F, A, flags, notes }
-import { ev, advance, advanceUntil, mustReach, choose, press, walkTo, errorCount, report } from './lib.mjs';
+import { ev, advance, advanceUntil, mustReach, choose, press, walkTo, errorCount, assertNoErrors, report } from './lib.mjs';
 
 const PATHS = {
   connected: { answer: true, cut: { forecourt: true, tethN: true, tethS: true }, acct4: true, logs: true, play: true, borrowed: 'examine', patch: 3, trip: true, examine: true, wai: 'saved' },
@@ -322,8 +322,8 @@ async function borrowed(h, P, notes) {
   if (P.borrowed === 'talk' && hp0 - hp1 < 12) notes.push('BUG: Talk first did not grab (no damage)');
   if (P.borrowed === 'examine' && hp1 < hp0) notes.push('BUG: Examine + Step back still hurt');
   if (await ev(h, `const e = SH.mod.Enemies.get(${JSON.stringify(id)}); return !!(e && e.disguised);`)) throw new Error('the Borrowed never revealed itself');
-  // the fight: the bar, real swings, then the API
-  await equip(h, 'steel_bar');
+  // the fight: the bar (or the box cutter, if a chained run arrives without it), real swings, then the API
+  await equip(h, (await ev(h, "return SH.S.inv.some((i) => i && i.id === 'steel_bar')")) ? 'steel_bar' : 'box_cutter');
   const e = await ev(h, `const e = SH.mod.Enemies.get(${JSON.stringify(id)}); return e ? { x: e.pos.x, z: e.pos.z } : null`);
   if (e) {
     await ev(h, "SH.press('ready', 600); return true;");
@@ -403,6 +403,13 @@ export async function play(h, opts = {}) {
       if ((await ev(h, 'return SH.mod.Player.pos.x')) > 100 && !(await walkTo(h, 101, 4.0, { maxSec: 12, tol: 0.8 }))) notes.push('BUG: could not walk up from the back gate');
       if (opts.saveLoad && !saved1) { await payphoneSave(h, P, notes, 0, [7.2, 1.45, 180]); saved1 = true; }
       if (P.examine) { await useAt(h, P, notes, 46.1, 0.9, 180); await saw(h, 'Operators lived up here. Right next to work.', notes, 'the M. — Operator letterbox'); }
+      // the lower branch toward Relay Street ends at a drop (spec §7A gating): walk into it
+      if (P.examine && !(await ev(h, "return (window.__c3lines || []).some((l) => l.includes(\"I can't go that way.\"))"))) {
+        await tp(h, 77, 16.5, 0);
+        await walkTo(h, 77, 22, { maxSec: 6, until: "(window.__c3lines || []).some((l) => l.includes(\"I can't go that way.\"))" });
+        await saw(h, "I can't go that way.", notes, 'the drop at the end of the lower branch');
+        await settle(h, P, notes);
+      }
       await takeHop(h, P, notes, HOPS[0]);
     }
     // ---- 3-1 the forecourt: CALL 3, the Tethered, the plaque, the hum ---------------------------------------------------
@@ -455,6 +462,13 @@ export async function play(h, opts = {}) {
       await saw(h, 'Go on. Basement.', notes, 'Wai talk 3');
     }
     await goRoom(h, P, notes, 'c3_hall');
+    // the frame-hall doors: a maglock with no power until the fuses are set (spec §9 3-4, §7B)
+    if (P.examine && !(await flag('c3_fused')) && !(await done('c3:frameLocked'))) {
+      await useAt(h, P, notes, 1.4, 6.63, -90);
+      await saw(h, "It's locked.", notes, 'the frame-hall doors before the fuses');
+      await saw(h, "There's no power to it.", notes, 'the frame-hall doors before the fuses');
+      if ((await room()) !== 'c3_hall') throw new Error('the frame-hall doors opened before the fuses');
+    }
     await resolveTethered(h, P, notes, 'c3_hall:tethN', P.cut.tethN, { from: 90 });
     await resolveTethered(h, P, notes, 'c3_hall:tethS', P.cut.tethS, { from: 90 });
     if ((P.logs && !(await read('oplog1'))) || (P.acct4 && !(await read('acct4')))) {
@@ -559,7 +573,10 @@ export async function play(h, opts = {}) {
       if ((P.wai === 'saved') !== ws) throw new Error(`waiSaved = ${ws}, want ${P.wai}`);
       if (!ws && !(await flag('waiLost'))) notes.push('BUG: waiLost not set after 3-3alt');
       if (P.play && ws) for (const l of ['You plugged me back in.', 'It was going to disconnect you.', 'I was gonna let it.', "Someone should keep the line open.", "You pick one up, I'll be on the other end.", 'Said he could hear phones.']) await saw(h, l, notes, '3-3');
-      await saw(h, "If there's a real number for her, it's there.", notes, 'the objective');
+      // Aidan's objective updates (a phone note; the thought itself only shows when the scene plays)
+      const obj = await ev(h, "const n = (SH.S.notes || []).find((x) => x && x.id === 'c3_callcentre'); return n ? n.text : null;");
+      if (!obj || !obj.includes("Chase went to the call centre. Wai says it keeps every call log in the district.") || !obj.includes("If there's a real number for her, it's there.")) notes.push(`BUG: the objective note after 3-3 is ${JSON.stringify(obj)}`);
+      if (P.play) await saw(h, "If there's a real number for her, it's there.", notes, 'the objective');
       if (await ev(h, 'return !!SH.S.outage')) throw new Error('still in the Outage after the Restructure');
       if (!(await has('rmap_exchange'))) { await useAt(h, P, notes, 17.4, 8.6, 180); if (!(await has('rmap_exchange'))) notes.push('BUG: no receipt map (rmap_exchange) in the frame hall'); }
     }
@@ -613,6 +630,7 @@ export default async function (page, h) {
     ? [{ path: one, riddle: process.env.CH3_RIDDLE || 'normal', saveLoad: process.env.CH3_SAVELOAD === '1', shots }]
     : [{ path: 'connected', riddle: 'normal', saveLoad: true, shots }, { path: 'tomorrow', riddle: 'hard', saveLoad: false }, { path: 'coverage', riddle: 'easy', saveLoad: false }];
   let all = true;
+  const e0 = await errorCount(h);
   for (const cfg of runs) {
     const notes = [];
     try { all = (await runOne(h, cfg, notes)) && all; }
@@ -624,5 +642,7 @@ export default async function (page, h) {
       try { await h.shot('.build/ch3_fail.png'); } catch (e2) { /* no page */ }
     }
   }
+  await assertNoErrors(h, { since: e0 }).catch((e) => { all = false; console.log(e.message); });
+  report('ch3 (all runs)', all);
   return all;
 }

@@ -483,24 +483,61 @@ const Cam = (() => {
     return true;
   }
   // the meshes that can hide Aidan from a camera: visible, opaque, in this world (world-tagged groups of the other world
-  // excluded); sprites, lines, points, transparent / alpha-tested materials and actors aren't occluders
+  // excluded); sprites, lines, points, transparent / alpha-tested materials and actors aren't occluders. With
+  // o.veils the transparent ones (plastic sheeting, curtains, glass, cut-out foliage) come back as a second list, each
+  // with its effective opacity (material opacity × the texture's average alpha / cut-out coverage); additive glows never.
   const _ray = new THREE.Raycaster();
-  function occluders(rb, outage) {
+  function occluders(rb, outage, o = {}) {
     const hidden = new Set();
     for (const t of rb.tagged || []) if (!matchWorld(t.world, outage)) hidden.add(t.obj);
-    const list = [];
-    const walk = (o) => {
-      if (!o.visible || hidden.has(o) || o.userData.rig || o.userData.noOcclude) return;
-      if (o.isMesh && !o.isInstancedMesh) {
-        const ms = Array.isArray(o.material) ? o.material : [o.material];
-        if (ms.some((m) => m && !m.transparent && m.opacity >= 0.99 && m.visible !== false && !m.alphaTest)) list.push(o);
+    const list = [], veils = [];
+    const walk = (ob) => {
+      if (!ob.visible || hidden.has(ob) || ob.userData.rig || ob.userData.noOcclude) return;
+      if (ob.isMesh && !ob.isInstancedMesh) {
+        const ms = Array.isArray(ob.material) ? ob.material : [ob.material];
+        if (ms.some((m) => m && !m.transparent && m.opacity >= 0.99 && m.visible !== false && !m.alphaTest)) list.push(ob);
+        else if (o.veils) {
+          let a = 0;
+          for (const m of ms) if (m && m.visible !== false && m.blending !== THREE.AdditiveBlending) a = Math.max(a, matAlpha(m));
+          if (a > 0.04) { ob.userData._veilA = a; veils.push(ob); }
+        }
       }
-      for (const c of o.children) walk(c);
+      for (const c of ob.children) walk(c);
     };
     rb.group.updateMatrixWorld(true);
     walk(rb.group);
-    list.root = rb.group;
+    list.root = rb.group; veils.root = rb.group;
+    if (o.veils) list.veils = veils;
     return list;
+  }
+  // a material's effective opacity: opacity × the average alpha of its map / alphaMap (cut-outs: the covered fraction)
+  function matAlpha(m) {
+    let a = m.transparent || m.opacity < 0.99 ? m.opacity : 1;
+    const cov = (t, lum) => {
+      if (!t || !t.image) return 1;
+      const ud = t.userData || (t.userData = {}), key = (lum ? '_avgL' : '_avgA') + (m.alphaTest ? '@' + m.alphaTest : '');
+      if (ud[key] !== undefined) return ud[key];
+      let v = 1;
+      try {
+        const img = t.image, W = 32, H = 32;
+        if (img.width && img.height) {
+          const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+          const x = cv.getContext('2d'); x.drawImage(img, 0, 0, W, H);
+          const d = x.getImageData(0, 0, W, H).data;
+          let sum = 0;
+          for (let i = 0; i < d.length; i += 4) {
+            const q = lum ? (d[i] + d[i + 1] + d[i + 2]) / 765 : d[i + 3] / 255;
+            sum += m.alphaTest ? (q > m.alphaTest ? 1 : 0) : q;
+          }
+          v = sum / (W * H);
+        }
+      } catch (e) { v = 1; }
+      ud[key] = v;
+      return v;
+    };
+    if (m.map && (m.transparent || m.alphaTest)) a *= cov(m.map, false);
+    if (m.alphaMap) a *= cov(m.alphaMap, true);
+    return U.clamp(a);
   }
   function occludedBy(list, from, to) {
     const d = _e.copy(to).sub(from), len = d.length();
@@ -509,10 +546,132 @@ const Cam = (() => {
     _ray.near = 0.05; _ray.far = len - 0.35;
     const hits = _ray.intersectObjects(list, false);
     if (!hits.length) return null;
-    let o = hits[0].object, name = o.name;
-    while ((!name || /^(merged|mesh|part|leaf)/i.test(name)) && o.parent && o.parent !== list.root) { o = o.parent; name = o.name || name; }
+    return nameOf(hits[0].object, list.root);
+  }
+  function nameOf(o, root) {
+    let name = o.name;
+    while ((!name || /^(merged|mesh|part|leaf|kit:)/i.test(name)) && o.parent && o.parent !== root) { o = o.parent; name = o.name || name; }
     return name || 'mesh';
   }
+  // light through transparent layers between the lens and Aidan's chest: → {t (0..1 transmittance), hit} | null
+  function veiledBy(veils, from, to) {
+    if (!veils || !veils.length) return null;
+    const d = _e.copy(to).sub(from), len = d.length();
+    if (len < 0.5) return null;
+    _ray.set(from, d.divideScalar(len));
+    _ray.near = 0.05; _ray.far = len - 0.35;
+    const hits = _ray.intersectObjects(veils, false);
+    if (!hits.length) return null;
+    let t = 1, top = null, seen = new Set();
+    for (const h of hits) {
+      const k = h.object.uuid + ':' + Math.round(h.distance * 20);           // (a double-sided sheet counts once)
+      if (seen.has(k)) continue; seen.add(k);
+      const a = h.object.userData._veilA || 0;
+      t *= 1 - a;
+      if (!top || a > (top.userData._veilA || 0)) top = h.object;
+    }
+    return { t, hit: top ? nameOf(top, veils.root) : 'mesh' };
+  }
+  // Fog: the density the room shows in a world (mirrors World's environment: the room's fog / outageFog / env /
+  // outageEnv, else Render's preset). A camera def may override it for the check with fog: density | false (a room
+  // whose onUpdate thins the fog for that shot).
+  function roomFog(def, outage) {
+    const o = { outdoor: !!def.outdoor, fog: (outage && def.outageFog) || def.fog || null, noFog: !!def.noFog, ...(def.env || {}) };
+    if (outage && def.outageEnv) Object.assign(o, def.outageEnv);
+    if (o.noFog) return 0;
+    if (o.fog && typeof o.fog.density === 'number') return o.fog.density;
+    return outage ? (o.outdoor ? 0.06 : 0.035) : (o.outdoor ? 0.075 : 0.03);
+  }
+  // (x, y, z = Aidan's feet) — a room whose onUpdate moves the fog with him gives the check the same rule as
+  // def.fogAt(x, y, z, outage) → density; a camera def's fog: density | false | (x, y, z, outage) => density wins
+  function camFog(c, def, outage, x, y, z) {
+    const f = c.src && c.src.fog;
+    try {
+      if (f === false) return 0;
+      if (typeof f === 'number') return f;
+      if (typeof f === 'function') return +f(x, y, z, outage) || 0;
+      if (f && typeof f.density === 'number') return f.density;
+      if (typeof def.fogAt === 'function') { const d = def.fogAt(x, y, z, outage); if (typeof d === 'number') return d; }
+    } catch (e) { console.error('[Cam] fog rule', def.id, e); }
+    return roomFog(def, outage);
+  }
+  // Beyond FOG_K / density (FogExp2 ≈ 92 % fog) Aidan is a faint ghost, and past ~1.8 / density he is gone: flagged
+  // beyond 21 m in 0.075 street fog, 32 m at 0.05, 53 m in 0.03 interiors (calibrated on c1_relay:south: a clear
+  // silhouette at 1.4 / density, faint at 1.6, a ghost at 1.85)
+  const FOG_K = 1.6;
+  // The lens inside something solid (a parked car, a cabinet): rays in 14 directions from the lens — at least 9 first
+  // meet a back face within 6 m (the lens is inside a closed shell; the exit points bound it) — AND the shot shows the
+  // shell's insides: of 25 rays through the frame, at least 2 first meet a surface the renderer draws (a front face, a
+  // double-sided seat / window) inside the shell's bounds. A lens inside a plain single-sided box looking out through
+  // its culled side sees nothing of the box and passes — the stair-core and cutaway-wall tricks — and so does a lens
+  // tucked into a cupboard shooting past foreground dressing outside it. Also flagged: clutter against the glass — 65 % of
+  // the frame (the 25 rays, a drawn opaque surface counting 1, foliage / sheeting their combined opacity) covered within
+  // 1.2 m of the lens (a camera inside a tree canopy or a shrub, behind a curtain). → {x, y, z, hit, frame} | null
+  const DIRS = (() => { const a = []; for (const v of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) a.push(V(...v)); for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) a.push(V(x, y, z).normalize()); return a; })();
+  const FRAME = []; for (const nx of [-0.9, -0.45, 0, 0.45, 0.9]) for (const ny of [-0.9, -0.45, 0, 0.45, 0.9]) FRAME.push([nx, ny]);
+  const _n = V(), _fd = V(), _shell = new THREE.Box3(), _sp = V(), NEAR_CLUTTER = 1.2;
+  function lensInside(c, occ, aspect) {
+    if (!occ || !occ.length) return null;
+    // (a rail camera only ever sits where Aidan's projection onto the rail puts it: the stretch the volume covers)
+    const v = c.vol, rp = (x, z) => railPos(c, x, z, V());
+    const lenses = c.type === 'rail' && c.rail ? [rp(v[0], v[1]), rp(v[2], v[3]), rp(v[0], v[3]), rp(v[2], v[1]), rp((v[0] + v[2]) / 2, (v[1] + v[3]) / 2)]
+      : c.type === 'scripted' && c.keys && c.keys.length ? c.keys.map((k) => k.pos) : [c.pos];
+    const sides = new Map();
+    for (const o of occ) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) if (m && !sides.has(m)) { sides.set(m, m.side); m.side = THREE.DoubleSide; } }
+    // the first surface along the ray the renderer draws / culls from this side: [{culled, h}] in order
+    const along = (p, dir, near, far) => {
+      _ray.set(p, dir); _ray.near = near; _ray.far = far;
+      const out = [];
+      for (const h of _ray.intersectObjects(occ, false)) {
+        if (!h.face) continue;
+        const m = Array.isArray(h.object.material) ? h.object.material[h.face.materialIndex || 0] : h.object.material;
+        const side = sides.get(m);
+        _n.copy(h.face.normal).transformDirection(h.object.matrixWorld);
+        const away = _n.dot(dir) > 0;
+        out.push({ culled: side === THREE.DoubleSide ? false : side === THREE.BackSide ? !away : away, h });
+      }
+      return out;
+    };
+    const veils = occ.veils || [];
+    try {
+      for (let i = 0; i < lenses.length; i++) {
+        const p = lenses[i];
+        // (where it looks: the key's target, else the def's target — by default the volume's middle)
+        const tgt = c.type === 'scripted' && c.keys && c.keys[i] ? c.keys[i].target : c.target;
+        probe.fov = c.fovV; probe.aspect = aspect; orient(probe, p, tgt, c.roll); probe.updateMatrixWorld(true);
+        // clutter against the glass: half the frame is hidden by something within 1.2 m of the lens (a tree canopy, a
+        // curtain, a shelf the lens is buried in): per ray, 1 for a drawn opaque surface, else 1 − Π(1 − α) of the veils
+        let cover = 0, nearWhat = null;
+        for (const [nx, ny] of FRAME) {
+          _fd.set(nx, ny, 0.5).unproject(probe).sub(p).normalize();
+          const f = along(p, _fd, cam.near * 1.2, NEAR_CLUTTER).find((q) => !q.culled);
+          if (f) { cover++; nearWhat = nearWhat || f.h.object; continue; }
+          if (!veils.length) continue;
+          _ray.set(p, _fd); _ray.near = cam.near * 1.2; _ray.far = NEAR_CLUTTER;
+          let t = 1; const seen = new Set();
+          for (const v of _ray.intersectObjects(veils, false)) { const k = v.object.uuid + ':' + Math.round(v.distance * 20); if (seen.has(k)) continue; seen.add(k); t *= 1 - (v.object.userData._veilA || 0); nearWhat = nearWhat || v.object; }
+          cover += 1 - t;
+        }
+        if (cover / FRAME.length >= 0.65) return { x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2), hit: nameOf(nearWhat, occ.root), frame: +(cover / FRAME.length).toFixed(2) };
+        let back = 0;
+        _shell.makeEmpty(); _shell.expandByPoint(p);
+        for (const dir of DIRS) { const f = along(p, dir, 0.02, 6)[0]; if (f && f.culled) { back++; _shell.expandByPoint(f.h.point); } }
+        if (back < 9) continue;
+        _shell.expandByScalar(-0.03);
+        let seen = 0, what = null;
+        for (const [nx, ny] of FRAME) {
+          _fd.set(nx, ny, 0.5).unproject(probe).sub(p).normalize();
+          const f = along(p, _fd, cam.near * 1.2, 8).find((q) => !q.culled);
+          if (f && _shell.containsPoint(_sp.copy(f.h.point))) { seen++; what = what || f.h.object; }
+        }
+        if (seen >= 2) return { x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2), hit: nameOf(what, occ.root), frame: +(seen / FRAME.length).toFixed(2) };
+      }
+    } finally { for (const [m, sd] of sides) m.side = sd; }
+    return null;
+  }
+  // Cam.check(roomId|'*', o) → problems. o: aspect (16/9), step (0.5; 1 with occlusion), worlds, occlusion
+  // (true: every occluded / veiled sample; 'summary': one problem per camera whose occluded + veiled share of its
+  // samples passes o.occlusionMax, default 0.05), fog:false, lens:false, ladders:false, force (cutsceneOnly rooms).
   function check(id = roomId, o = {}) {
     if (id === '*' || id === 'all') {
       const all = [];
@@ -522,11 +681,13 @@ const Cam = (() => {
     const def = ROOMS[id];
     if (!def) return [{ cam: null, x: 0, z: 0, why: 'noroom', room: id }];
     if (def.cutsceneOnly && !o.force) return [];                     // the player never walks it: no coverage needed
+    const summary = o.occlusion === 'summary', occMax = o.occlusionMax ?? 0.05;
     const aspect = o.aspect ?? 16 / 9, step = o.step ?? (o.occlusion ? 1 : 0.5);
     let rb = null, temp = false;
     if (typeof World !== 'undefined' && World && World.room === id && World.build) rb = World.build;
     else { rb = Kit.build(def); temp = true; }
     const problems = [];
+    const r2 = (v) => Math.round(v * 100) / 100;
     try {
       const cams = (CAMERAS[id] || []).map((d, i) => norm(d, i, rb, id, aspect));
       const worlds = o.worlds || (roomHasOutage(rb, cams) ? ['fog', 'outage'] : ['fog']);
@@ -540,29 +701,82 @@ const Cam = (() => {
       const x0 = Math.ceil(b[0] / step - 1e-6) * step, z0 = Math.ceil(b[1] / step - 1e-6) * step;
       for (const w of worlds) {
         const outage = w === 'outage';
-        const occ = o.occlusion ? occluders(rb, outage) : null;
+        const needMeshes = o.occlusion || o.lens !== false;
+        const all = needMeshes ? occluders(rb, outage, { veils: true }) : null;
+        const occ = o.occlusion ? all : null, veils = occ ? occ.veils : null;
+        const stats = new Map();
+        const stat = (c) => { let s0 = stats.get(c); if (!s0) { s0 = { n: 0, bad: 0, hits: new Map(), at: null }; stats.set(c, s0); } return s0; };
+        // the lens: once per camera per world
+        if (o.lens !== false) for (const c of cams) {
+          if (!matchWorld(c.world, outage)) continue;
+          const r = lensInside(c, all, aspect);
+          if (r) problems.push({ cam: c.id, x: r.x, z: r.z, y: r.y, why: 'lens-inside', hit: r.hit, frame: r.frame, world: w });
+        }
+        // one sample (feet at y) against the camera that shows it
+        const sample = (c, xx, y, zz, extra) => {
+          steadyView(c, xx, y, zz, tmp);
+          for (const h of [0.1, 1.8]) {
+            const why = visibility(tmp, _b.set(xx, y + h, zz), aspect);
+            if (why) { problems.push({ cam: c.id, x: xx, z: zz, y, h, why, world: w, ...extra }); return; }
+          }
+          if (o.fog !== false) {
+            const dens = camFog(c, def, outage, xx, y, zz);
+            if (dens > 0) {
+              const dist = tmp.pos.distanceTo(_b.set(xx, y + CHEST, zz));
+              if (dist > FOG_K / dens) { problems.push({ cam: c.id, x: xx, z: zz, y, h: CHEST, why: 'fogged', dist: r2(dist), max: r2(FOG_K / dens), world: w, ...extra }); return; }
+            }
+          }
+          if (occ) {
+            const st = summary ? stat(c) : null;
+            if (st) st.n++;
+            // hips, chest and head: hidden when at least two of the three are behind something (a rail across his chest
+            // alone doesn't hide him)
+            let hit = null, why = 'occluded', tv = null, nb = 0, nv = 0, vt = 1, vh = null;
+            for (const hh of [0.55, CHEST, 1.6]) {
+              const q = occludedBy(occ, tmp.pos, _b.set(xx, y + hh, zz));
+              if (q) { nb++; hit = hit || q; continue; }
+              const v = veiledBy(veils, tmp.pos, _b.set(xx, y + hh, zz));
+              if (v && v.t < 0.45) { nv++; vt = Math.min(vt, v.t); vh = vh || v.hit; }
+            }
+            if (nb >= 2) why = 'occluded';
+            else if (nb + nv >= 2) { why = 'veiled'; hit = vh || hit; tv = r2(vt); }
+            else hit = null;
+            if (hit) {
+              if (st) { st.bad++; st.hits.set(hit, (st.hits.get(hit) || 0) + 1); if (!st.at) st.at = [xx, zz, y]; }
+              else problems.push({ cam: c.id, x: xx, z: zz, y, h: CHEST, why, hit, ...(tv !== null ? { t: tv } : {}), world: w, ...extra });
+            }
+          }
+        };
         for (let x = x0; x <= b[2] + 1e-6; x += step) for (let z = z0; z <= b[3] + 1e-6; z += step) {
           const xx = Math.round(x * 1000) / 1000, zz = Math.round(z * 1000) / 1000;
           const layers = def.stackedFloors ? Kit.floorLayers(rb.floors, xx, zz, outage) : [Kit.floorAt(rb.floors, xx, zz, outage)];
           for (const y of layers) {
-          if (y === null || !walkable(rb, xx, zz, y, outage)) continue;
-          const containing = cams.filter((c) => matchWorld(c.world, outage) && inVol(c, xx, zz, y));
-          if (!containing.length) { problems.push({ cam: null, x: xx, z: zz, y, why: 'uncovered', world: w }); continue; }
-          const top = Math.max(...containing.filter((c) => !c.when).map((c) => c.pri), -Infinity);
-          for (const c of containing) {
-            if (!c.when && c.pri < top) continue;
-            steadyView(c, xx, y, zz, tmp);
-            let bad = false;
-            for (const h of [0.1, 1.8]) {
-              const why = visibility(tmp, _b.set(xx, y + h, zz), aspect);
-              if (why) { problems.push({ cam: c.id, x: xx, z: zz, y, h, why, world: w }); bad = true; break; }
-            }
-            if (!bad && occ) {
-              const hit = occludedBy(occ, tmp.pos, _b.set(xx, y + CHEST, zz));
-              if (hit) problems.push({ cam: c.id, x: xx, z: zz, y, h: CHEST, why: 'occluded', hit, world: w });
-            }
+            if (y === null || !walkable(rb, xx, zz, y, outage)) continue;
+            const containing = cams.filter((c) => matchWorld(c.world, outage) && inVol(c, xx, zz, y));
+            if (!containing.length) { problems.push({ cam: null, x: xx, z: zz, y, why: 'uncovered', world: w }); continue; }
+            const top = Math.max(...containing.filter((c) => !c.when).map((c) => c.pri), -Infinity);
+            for (const c of containing) { if (!c.when && c.pri < top) continue; sample(c, xx, y, zz); }
           }
+        }
+        // ladders: Aidan on the rungs (where Player.climb holds him), every 0.5 m from the bottom to the top, against the
+        // camera whose volume (and height band) holds his feet there; a height no camera contains keeps the camera he
+        // climbed in with, so only covered heights are checked
+        if (o.ladders !== false) for (const L of rb.ladders || []) {
+          if (!matchWorld(L.world, outage)) continue;
+          const r = (L.rot || 0) * Math.PI / 180, lx = r2(L.x + Math.sin(r) * 0.34), lz = r2(L.z + Math.cos(r) * 0.34);
+          const yTop = Math.max(L.y0 + 0.1, L.y1 - 0.95);
+          for (let y = L.y0 + 0.25; y <= yTop + 1e-6; y += 0.5) {
+            const yy = r2(y);
+            const containing = cams.filter((c) => matchWorld(c.world, outage) && inVol(c, lx, lz, yy));
+            if (!containing.length) continue;
+            const top = Math.max(...containing.filter((c) => !c.when).map((c) => c.pri), -Infinity);
+            for (const c of containing) { if (!c.when && c.pri < top) continue; sample(c, lx, yy, lz, { ladder: L.id }); }
           }
+        }
+        if (summary) for (const [c, st] of stats) {
+          if (!st.n || st.bad / st.n <= occMax) continue;
+          const hit = [...st.hits.entries()].sort((a, bb) => bb[1] - a[1])[0][0];
+          problems.push({ cam: c.id, x: st.at[0], z: st.at[1], y: st.at[2], why: 'occluded', frac: r2(st.bad / st.n), n: st.bad, of: st.n, hit, world: w });
         }
       }
     } finally { if (temp && rb && rb.dispose) rb.dispose(); }

@@ -19,6 +19,8 @@
 //   --all-rooms          with --camcheck: check every room
 //   --allow-errors       exit 0 even if the page logged errors
 //   --quiet              only print errors and results
+// env: SH_CHROME_ARGS   extra Chromium switches (space-separated); SH_GPU_CANVAS=1 keeps 2D canvases GPU-accelerated
+//      (by default they raster on the CPU: SwiftShader made accelerated-canvas draws and readbacks stall for minutes)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -37,7 +39,11 @@ const html = fs.readFileSync(file, 'utf8');
 const exe = fs.existsSync('/opt/pw-browsers/chromium-1194/chrome-linux/chrome') ? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' : undefined;
 const browser = await chromium.launch({
   executablePath: exe,
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
+  // 2D canvases raster on the CPU (SH_GPU_CANVAS=1 keeps them on the "GPU"): here the GPU is SwiftShader, and every
+  // accelerated-canvas draw and readback queued behind it — a room with an animated screen could stall a run for many
+  // minutes. SH_CHROME_ARGS adds switches (space-separated).
+  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required',
+    ...(process.env.SH_GPU_CANVAS === '1' ? [] : ['--disable-accelerated-2d-canvas']), ...String(process.env.SH_CHROME_ARGS || '').split(/\s+/).filter(Boolean)],
 });
 const page = await browser.newPage({ viewport: { width: vw, height: vh } });
 const problems = [];

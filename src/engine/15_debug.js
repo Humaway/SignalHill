@@ -7,7 +7,8 @@
 //            running script, fps, world draw calls / triangles / lights.
 //   CHAPTER — 0…8 (a fresh state + CHAPTERS[n].debugState(S), then Game.startChapter(n) with its card) and TEST ROOM.
 //   TOOLS   — NOCLIP (Player.noclip), CAMERA VOLUMES (Cam.debugDraw with the Cam.check problems of the current room,
-//             listed underneath), OUTAGE (instant world swap), HEAL.
+//             listed underneath), LINE OF SIGHT (the same with Cam.check's occlusion pass), OUTAGE (instant world swap),
+//             HEAL.
 //   ENDING  — presets that force F / A and the fate flags (or the playthrough + stickers for Yes) so that
 //             Game.endingFor(S) gives CONNECTED / OUT OF COVERAGE / FOLLOW UP TOMORROW / YES; PLAY ENDING runs
 //             Game.ending(Game.endingFor(S)).
@@ -81,6 +82,7 @@ const Debug = (() => {
     button(tRow, 'NOCLIP', () => { Player.noclip = !Player.noclip; }, 'noclip');
     button(tRow, 'CAMERA VOLUMES', () => showVolumes(!camOn), 'cam');
     button(tRow, 'RE-CHECK', () => showVolumes(true, true), 'recheck');
+    button(tRow, 'LINE OF SIGHT', () => showVolumes(true, true, { occlusion: true }), 'sight');
     button(tRow, 'OUTAGE', () => { if (World.room) World.setOutage(!S.outage); }, 'outage');
     button(tRow, 'OUTAGE ⟳', () => { if (World.room) World.outageTransition(!S.outage); }, 'outageT');
     button(tRow, 'HEAL', () => { Player.heal(100); }, 'heal');
@@ -140,13 +142,14 @@ const Debug = (() => {
   // ---------------------------------------------------------------------------------------------------------------
   // Tools
   // ---------------------------------------------------------------------------------------------------------------
-  function showVolumes(v, recheck) {
+  // (o.occlusion: the slow line-of-sight pass too — the LINE OF SIGHT button: occluded / veiled samples drawn red)
+  function showVolumes(v, recheck, o = {}) {
     camOn = !!v;
     if (!camOn) { Cam.debugDraw(false); if (camEl) camEl.textContent = ''; return null; }
     const room = World.room;
     let problems = [];
     if (room && (recheck || lastProblemRoom !== room || !lastProblems)) {
-      try { problems = Cam.check(room); } catch (e) { console.error('[Debug] Cam.check', e); problems = []; }
+      try { problems = Cam.check(room, o); } catch (e) { console.error('[Debug] Cam.check', e); problems = []; }
       lastProblems = problems; lastProblemRoom = room;
     } else problems = lastProblems || [];
     Cam.debugDraw(true, problems);
@@ -228,7 +231,7 @@ const Debug = (() => {
       choose: (i) => { try { return Script.choose(i); } catch (e) { return false; } },
       press: (action, sec = 0) => { Input.inject(action, sec); return true; },
       teleport: (x, z, yawDeg) => { Player.teleport(x, z, yawDeg); return state(); },
-      camCheck: (roomId) => Cam.check(roomId || World.room),
+      camCheck: (roomId, o) => Cam.check(roomId || World.room, o || {}),
       rooms: () => Object.keys(ROOMS),
       run: (fn, o = {}) => Script.run(fn, { control: true, name: 'SH.run', persist: true, ...o }),
       screenshot: () => Render.capture(),

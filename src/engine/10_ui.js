@@ -479,6 +479,7 @@ const UI = (() => {
   }
 
   function tick(dt) {
+    freshInput();
     const menu = menuOpen();
     if (menuF.target !== (menu ? 0 : 1)) menuF.to(menu ? 0 : 1, 0.3);
     const hudWant = hudOn && !kpSt.cur && !scrSt.cur;       // the HUD steps aside for keypads and in-world screens
@@ -515,8 +516,13 @@ const UI = (() => {
   function capOn() { capDepth++; try { Input.setMenu(true); } catch (e) { /* no input */ } }
   function capOff() { if (capDepth <= 0) return; capDepth--; try { Input.setMenu(false); } catch (e) { /* no input */ } }
   const swallow = (...acts) => { try { for (const a of acts) Input.consume(a); } catch (e) { /* no input */ } };
-  const pressed = (a) => { try { return Input.pressed(a); } catch (e) { return false; } };
-  const typed = () => { try { return Input.typedChars(); } catch (e) { return []; } };
+  // Presses and typed characters are acted on once per Input.update: when the game loop stalls for > 0.25 s (a slow
+  // SwiftShader frame) selfTick ticks the UI on its own, and without this the keypad would read the same typed digits
+  // (and the same E press) a second time — a doubled digit made a correct code fail.
+  let inFrame = -1, inputFresh = true;
+  const freshInput = () => { let f = -1; try { f = Input.frame; } catch (e) { return true; } inputFresh = f !== inFrame; inFrame = f; return inputFresh; };
+  const pressed = (a) => { if (!inputFresh) return false; try { return Input.pressed(a); } catch (e) { return false; } };
+  const typed = () => { if (!inputFresh) return []; try { return Input.typedChars(); } catch (e) { return []; } };
   const isDown = (a) => { try { return Input.down(a); } catch (e) { return false; } };
 
   // =================================================================================================================
@@ -2138,6 +2144,15 @@ const UI = (() => {
     get letterboxed() { return lbF ? lbF.target > 0 : false; },     // CONTRACT+
     get subtitleShown() { return subVisible(); },                    // CONTRACT+
     get messageShown() { return msgSt.active; },                     // CONTRACT+
+    // CONTRACT+: UI.textTop() → the top edge (px from the viewport top) of the subtitle / message on screen, or null —
+    // Enemies' voice lines sit above it so a monster's line never overlaps one of Aidan's thoughts
+    textTop() {
+      let top = null;
+      const vis = (el, f) => el && f && f.v > 0.02;
+      for (const el of subSt.els) if (vis(el, el._f)) { const r = el.getBoundingClientRect(); if (r.height > 0) top = top === null ? r.top : Math.min(top, r.top); }
+      if (msgSt.active && E.msg) { const r = E.msg.getBoundingClientRect(); if (r.height > 0) top = top === null ? r.top : Math.min(top, r.top); }
+      return top;
+    },
     get hud() { return hudOn; },                                     // CONTRACT+
   };
   return api;

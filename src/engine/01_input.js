@@ -19,6 +19,11 @@
 //   Right stick feeds drag() for examine rotation.
 // Injected actions (Input.inject / SH.press): a new injection while the last one still holds the action releases it
 // for one update first (a fresh press edge); injected up/down/left/right also drive Input.move().
+// Input clock: every hold time here (injected holds, heldTime, the 1 s skip hold, menu key repeat) runs on Input's own
+// clock. In the requestAnimationFrame loop it follows real time; while Game.manual is on (SH.advance) Game.tick passes
+// its fixed tick (1/30 s) to Input.update(dt), so the clock follows GAME time — SH.press('ready', 1) holds for one game
+// second, and a real key held across SH.advance(1.2) counts as held 1.2 s (the skip hold, E holds) whatever the
+// machine's speed.
 const Input = (() => {
   const ACTIONS = ['up', 'down', 'left', 'right', 'run', 'torch', 'interact', 'confirm', 'cancel', 'ready', 'attack',
     'turn', 'decline', 'inventory', 'map', 'phone', 'pause', 'skip', 'debug'];
@@ -71,9 +76,9 @@ const Input = (() => {
   const tapped = new Set();      // codes pressed since the last update (so a tap shorter than a frame still counts)
   const mouse = new Set();       // mouse buttons held
   const mouseTapped = new Set();
-  const injected = new Map();    // action → { until (real time), first } (test/debug injection)
+  const injected = new Map();    // action → { until (Input clock), first } (test/debug injection)
   const consumed = new Set();    // source ids swallowed until released
-  const since = new Map();       // source id → real time it went down
+  const since = new Map();       // source id → Input-clock time it went down
   let typed = [], typedBuf = [];
   let keyEdges = new Set(), keyEdgesBuf = new Set();
   let anyBuf = false, anyNow = false;
@@ -84,7 +89,7 @@ const Input = (() => {
   let padPrev = [];
   const lsNav = { up: false, down: false, left: false, right: false };
   let active = new Set(), prevActive = new Set();
-  let lastT = 0, dt = 0, nowT = 0;
+  let lastT = 0, dt = 0, nowT = 0, clockT = 0;   // lastT: real time of the last update; clockT: the Input clock
   let inited = false;
   let menuForced = 0;
   let canvasEl = null;
@@ -95,9 +100,14 @@ const Input = (() => {
   const api = {
     lastDevice: 'keyboard',
     pointer,
-    init, update, down, pressed, released, heldTime, consume, move, anyPressed, drag, wheel, rumble, heartbeat,
+    init, update, down, held, pressed, released, heldTime, consume, move, anyPressed, drag, wheel, rumble, heartbeat,
     releasedAfter, label, inject, releaseAll, key, keyPressed, typedChars, skipProgress, setMenu, pad, isMenu, actions: ACTIONS,
+    // CONTRACT+: Input.frame — counts updates (a consumer ticked more than once per update, like UI's stall fallback,
+    // uses it to act on each press / typed character only once); Input.clock — the Input clock (s, see the header)
+    get frame() { return updates; },
+    get clock() { return clockT; },
   };
+  let updates = 0;
 
   const realNow = () => performance.now() / 1000;
   const isTextTarget = (t) => !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
@@ -167,7 +177,7 @@ const Input = (() => {
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('gamepadconnected', onPadConnect);
     document.addEventListener('mouseleave', () => { pointer.inside = false; });
-    lastT = realNow();
+    lastT = realNow(); clockT = 0;
     return api;
   }
 
@@ -208,10 +218,15 @@ const Input = (() => {
     try { return typeof Menus !== 'undefined' && !!Menus.isOpen && !!Menus.isOpen(); } catch (e) { return false; }
   }
 
-  function update() {
+  // update(tickDt?) — tickDt (seconds) advances the Input clock by a game tick instead of real time (Game.tick passes
+  // it while Game.manual is on, i.e. under SH.advance); without it the clock follows real time (clamped to 0.1 s).
+  function update(tickDt) {
     if (!inited) init();
-    const t = realNow();
-    dt = Math.min(0.1, Math.max(0, t - lastT)); lastT = t; nowT = t;
+    const real = realNow();
+    const realDt = Math.min(0.1, Math.max(0, real - lastT)); lastT = real;
+    dt = tickDt !== undefined && tickDt !== null && tickDt >= 0 ? Math.min(0.1, +tickDt || 0) : realDt;
+    clockT += dt; updates++;
+    const t = clockT; nowT = t;
     pollPads();
     const menu = isMenu();
 
@@ -230,7 +245,7 @@ const Input = (() => {
     lsNav.left = lx < -(lsNav.left ? NAV_OFF : NAV_ON);
     lsNav.right = lx > (lsNav.right ? NAV_OFF : NAV_ON);
     for (const d in lsNav) if (lsNav[d]) active.add('ls:' + d);
-    // injected: always down for the first update after inject(), then while real time < until. A new injection that
+    // injected: always down for the first update after inject(), then while the Input clock < until. A new injection that
     // lands while the previous one still holds the action first releases it for one update (a fresh press edge).
     for (const [a, e] of injected) {
       if (e.gap) { e.gap = false; continue; }
@@ -286,7 +301,7 @@ const Input = (() => {
     dragAcc = { dx: 0, dy: 0 };
     wheelNow = wheelAcc; wheelAcc = 0;
 
-    tickHeart(t);
+    tickHeart(real);                                   // (rumble is physical: real time)
   }
 
   // ---- queries -----------------------------------------------------------------------------------------------
@@ -297,6 +312,20 @@ const Input = (() => {
   function heldTime(a) { const o = S_(a); return o && o.down ? Math.max(0, nowT - o.t0) : 0; }
   // CONTRACT+: Input.releasedAfter(a) → length (s) of the hold that ended this frame (0 if not released now); tap vs hold.
   function releasedAfter(a) { const o = S_(a); return o && o.released ? o.relHold : 0; }
+  // CONTRACT+: Input.held(a) — a key / button / injection bound to `a` is physically held, even when its press was
+  // consumed. For "hold E" mechanics that run while the player has control (Ch 4's "Hold him back"): the E press that
+  // also used an interactable in reach, or dismissed a message, was consumed, so Input.down() stays false for the rest
+  // of that hold — Input.held() still sees the key down.
+  function held(a) {
+    if (!S_(a)) return false;
+    const menu = isMenu();
+    for (const s of active) {
+      const i = s.indexOf(':'), kind = s.slice(0, i), id = s.slice(i + 1);
+      const list = kind === 'k' ? KEYMAP[id] : kind === 'm' ? (menu ? MOUSE_MENU : MOUSE)[id] : kind === 'p' ? ((menu && PAD_MENU[id]) || PAD[id]) : [id];
+      if (list && list.includes(a)) return true;
+    }
+    return false;
+  }
   // Swallow the press: every physical source currently driving `a` is ignored (for all actions) until released.
   function consume(a) {
     if (!S_(a)) return;
@@ -350,12 +379,14 @@ const Input = (() => {
     for (const s of SKIP_SOURCES) if (since.has(s) && active.has(s)) best = Math.max(best, (nowT - since.get(s)) / SKIP_HOLD);
     return Math.min(1, best);
   }
-  // CONTRACT+: Input.inject(action, sec=0) — simulate the action held for `sec` real seconds from the next update
-  //            (at least one frame). Used by SH.press and tests.
+  // CONTRACT+: Input.inject(action, sec=0) — simulate the action held for `sec` seconds of the Input clock from the next
+  //            update (at least one frame): real seconds in the live loop, GAME seconds under SH.advance (Game.manual).
+  //            Used by SH.press and tests.
   function inject(a, sec = 0) {
     if (!S_(a)) return;
     const gap = injected.has(a) || active.has('i:' + a);              // still held from the last injection: release first
-    injected.set(a, { until: realNow() + Math.max(0, +sec || 0), first: true, gap });
+    // (the hold starts at the next update: until = the clock then + sec; `first` guarantees that update)
+    injected.set(a, { until: clockT + Math.max(0, +sec || 0), first: true, gap, sec: Math.max(0, +sec || 0) });
   }
   // CONTRACT+: Input.setMenu(on) — force menu context (D-pad = nav only, right mouse = cancel) for overlays that
   //            are not Menus screens (UI.choice, UI.keypad …). Calls nest. Menus.isOpen() also counts automatically.

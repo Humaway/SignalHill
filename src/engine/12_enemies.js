@@ -82,6 +82,9 @@
 //   ('low'), Standard def.puppet / e.puppet / e.scripted, e.clipboard / e.straighten on any Standard-bodied enemy,
 //   doors opened only on the walker's way through them (e.data.noOpen), moveToward arrival slack (1 mm) + o.ignore,
 //   freed Tethered reach their seat, unread vertical / ceiling, borrowed autoRange / interactR.
+// CONTRACT+ (the unreliable signal): Enemies.aware(e) — has it found Aidan (per type: T.aware(e); a def.aware bool | fn
+//   overrides; custom types / bosses without one are aware), warm for Enemies.AWARE.warm (4) s after it lost him;
+//   nearestThreat(pos, {aware:true}) → only aware threats (the Phone's UNRELIABLE source). See "Queries".
 const Enemies = (() => {
   const D2R = Math.PI / 180, TAU = Math.PI * 2, HALF = Math.PI / 2;
   const clamp = U.clamp, lerp = U.lerp;

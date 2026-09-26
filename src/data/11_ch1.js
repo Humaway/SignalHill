@@ -710,7 +710,17 @@
       K.wall(0, -0.075, 0, 3.075, H, WM);
       K.wall(40, 3.075, 40, -0.075, H, WM, { openings: [{ at: 1.575, w: 1.0, h: 2.15 }] });
       // the void past the cutaway wall (visual only): a dark slab so the rail never sees nothing
-      K.plane(20, -0.01, 5.2, 42, 4.4, { color: '#141615', roughness: 1 }, { rot: [-90, 0, 0] });
+      K.plane(20, -0.01, 6.0, 56, 6, { color: '#141615', roughness: 1 }, { rot: [-90, 0, 0] });
+      // the building cut through along the cutaway (the gap sweep): the slab over the ceiling and the rooms either end of
+      // the corridor as dark section faces flush with the cut, so the rail frames a corridor inside a building instead of
+      // a lit box in grey fog; a dark lobby behind the fire door
+      {
+        const CUT = { tex: 'concrete', color: '#262927', roughness: 1 };
+        K.box(20, H + 0.01, 1.475, 54, 1.8, 3.35, CUT, { shadow: false });
+        K.box(-3.54, -0.3, 1.475, 6.92, H + 0.32, 3.35, CUT, { shadow: false });
+        K.box(43.54, -0.3, 1.475, 6.92, H + 0.32, 3.35, CUT, { shadow: false });
+        K.box(5, 0, -2.2, 2.4, 2.4, 1.8, { color: '#161a19', roughness: 1 }, { shadow: false });
+      }
       // doors
       K.door({ id: 'c1_corridor:dock', x: 40, z: 1.5, rot: 90, w: 0.95, style: 'metal', to: 'c1_dock', entry: 'corridor', sign: 'LOADING DOCK', signBack: 'GOODS IN' });
       K.door({ id: 'c1_corridor:security', x: 31, z: 3.075, rot: 0, w: 0.9, style: 'wood', to: 'c1_security', entry: 'door', sign: 'SECURITY', color: '#d8d0bc' });
@@ -1213,6 +1223,48 @@
       K.plane(-3, 1.6, 6, 6, 3.6, { color: '#b7c0bd', emissive: '#8e9996', emissiveIntensity: 0.6, roughness: 1 }, { rotY: 90, emissive: true });
       K.box(-1.5, 0, 6, 3, 0.02, 3.6, { tex: 'tile', color: '#6a6a62' });
       K.sign('SIGNAL HILL PLAZA', 0.18, 3.4, 6, 3.2, 0.4, { rotY: 90, style: 'shop', bg: '#1d3d4a', fg: '#e6dfc9' });
+      // ---- the Plaza's body round the concourse (the gap sweep): party walls in the joints between the shopfronts,
+      // flush with their faces; the bulkhead over them up to the balconies; one back wall behind every shop interior (the
+      // store's lit floor included, so the view through the glass stays); the end walls the full depth of the balconies;
+      // a ceiling over the first floor's walkways — never a slot onto the dark
+      {
+        const PL = 'plaster_stained', SI = { tex: 'plaster', color: '#e2e0d8' }, DK = { color: '#161a19', roughness: 1 };
+        const SW = (x0, x1, z0, z1, y0, y1, mat = PL) => K.box((x0 + x1) / 2, y0, (z0 + z1) / 2, x1 - x0, y1 - y0, z1 - z0, mat, { shadow: false });
+        // north: the joints, the bulkhead, the store's own side walls, the corner past it, the back wall
+        for (const [a, b] of [[11.5, 11.75], [17.75, 18], [24, 24.25], [30.25, 30.5], [36.5, 36.75], [42.75, 43.9]]) SW(a, b, -4.3, -0.9, 0, 4.4);
+        SW(11.5, 43.9, -4.3, -0.92, 3.6, 4.4);
+        for (const [a, b] of [[43.9, 44.3], [57.7, 58.1]]) SW(a, b, -4.3, -1.3, 0, 4.4, SI);
+        SW(58.1, 59.85, -4.3, -0.85, 0, 4.4);
+        SW(11.5, 60.15, -4.6, -4.3, 0, 4.4);
+        // south: the corner at the west end, the joints, the fire door's other jamb (and the dark stair lobby behind it),
+        // the bulkhead, the back wall
+        SW(0.15, 3, 12.0, 15.3, 0, 4.4);
+        for (const [a, b] of [[9, 9.25], [15.25, 15.5], [21.5, 21.7], [50.25, 50.5]]) SW(a, b, 12.28, 15.3, 0, 4.4);
+        SW(43.53, 44.25, 12.0, 12.5, 0, 2.2);
+        SW(42.3, 43.75, 13.3, 15.3, 0, 2.4, DK);
+        SW(3, 21.7, 12.3, 15.3, 3.6, 4.4); SW(44.25, 55.8, 12.3, 15.3, 3.6, 4.4);
+        SW(-0.15, 60.15, 15.3, 15.6, 0, 4.4);
+        // the end walls on past the balconies, the walkways' ceiling
+        for (const x of [0, 60]) SW(x - 0.15, x + 0.15, 12, 15.6, 0, H);
+        SW(59.85, 60.15, -4.6, -1, 0, H); SW(-0.15, 0.15, -2.8, -1, 4.4, H);
+        K.ceiling(0, -4.6, 60, 2.6, H, 'ceiling_tile'); K.ceiling(0, 9.4, 60, 15.6, H, 'ceiling_tile');
+        // the food court through its mouth (the room itself is c1_foodcourt, x − 8, z − 22.2 from here): the jambs of the
+        // short passage, the carpet running back under its tables, the stalls shuttered along its far walls, its ceiling
+        SW(0, 3.1, -2.3, -1.4, 0, 4.4); SW(10.9, 11.5, -2.3, -1.4, 0, 4.4); SW(2.9, 11.1, -2.3, -1.4, 3.4, 4.4);
+        SW(-8, 22, -22.2, -2.2, -0.02, 0, { tex: 'carpet', color: '#6b5e52' });
+        K.ceiling(-8, -22.2, 22, -2.3, 4.6, 'ceiling_tile');
+        SW(-8.3, -8, -22.5, -2.3, 0, 4.6); SW(22, 22.3, -22.5, -2.3, 0, 4.6); SW(-8.3, 22.3, -22.5, -22.2, 0, 4.6);
+        for (const [x0, x1, c] of [[-7.7, -1.1, '#7a2a1a'], [-0.9, 5.7, '#c9a822'], [5.9, 12.5, '#1f3f5c'], [12.7, 18.1, '#2e4a2e']]) {
+          SW(x0, x1, -22.2, -21.95, 0, 2.72, { tex: 'metal', color: '#5d625f' }); SW(x0, x1, -22.2, -21.9, 2.9, 3.6, { color: c, roughness: 0.6 });
+        }
+        for (const [z0, z1, c] of [[-18.4, -12, '#3a2418'], [-11.8, -5.4, '#b3261e']]) {
+          SW(21.75, 22, z0, z1, 0, 2.72, { tex: 'metal', color: '#5d625f' }); SW(21.7, 22, z0, z1, 2.9, 3.6, { color: c, roughness: 0.6 });
+        }
+        [[5, 5.5], [10, 6.5], [15.5, 5.2], [22, 5.8], [4.5, 10.5], [9.5, 11.5], [14.5, 10.6], [20, 11.8], [25, 11], [6, 16.5], [12, 16.2], [21.5, 16.8], [26, 17]]
+          .forEach(([x, z], i) => K.prop('cafe_table', x - 8, z - 22.2, i * 37, { chairs: 2 + (i % 3), radius: 0.42, collide: false }));
+        K.fogOnly(() => K.light('fluoro', 7, 4.58, -6.2, { len: 1.2, real: false }));
+        K.outageOnly(() => K.light('fluoro', 7, 4.58, -6.2, { len: 1.2, real: false, color: '#bfe0d4' }));
+      }
       // ---- the middle: the dry fountain (the phone in the leaves), benches, planters, the kiosk, the directory -------
       const [fx, fz] = CN.fountain;
       K.prop('fountain', fx, fz, 0, { radius: 2.2 });
@@ -1359,6 +1411,39 @@
       stall(29.72, 7, -90, 6.4, 'COFFEE HOUSE', '#3a2418', '#e8d8b8');
       stall(29.72, 13.6, -90, 6.4, 'HOT DONUTS', '#b3261e', '#fff4e0');
       K.collider(0, -1, 30, 0.35, { h: 4 }); K.collider(29.65, 0, 31, 20, { h: 4 });
+      // ---- the concourse through the mouth (the gap sweep; the room itself is c1_concourse, x + 8, z + 22.2 from here):
+      // the jambs of the short passage, the concourse floor, the shops across it shuttered, its west end with the chained
+      // doors' fog, both balconies and the atrium ceiling — a dark centre going on, never a flat grey slot
+      {
+        const PL = 'plaster_stained', CON = { tex: 'concrete', color: '#8e8a80' };
+        const SW = (x0, x1, z0, z1, y0, y1, mat = PL) => K.box((x0 + x1) / 2, y0, (z0 + z1) / 2, x1 - x0, y1 - y0, z1 - z0, mat, { shadow: false });
+        SW(8, 11.1, 20.15, 21.2, 0, H); SW(18.9, 21, 20.15, 21.2, 0, H); SW(10.9, 19.1, 20.15, 21.2, 3.4, H);
+        SW(8, 68, 21.0, 22.6, -0.02, 0, { tex: 'tile', color: '#8a8a80' }); SW(8, 68, 22.6, 34.3, -0.02, 0, { tex: 'carpet', color: '#6a6f68' });
+        SW(19.5, 68, 20.15, 21.25, 0, 4.4, { tex: 'render_cracked', color: '#6f6b62' });
+        // the shops across the concourse, the corner, the walls between them, the bulkhead, the back
+        for (const [x, w, v, o] of [[14, 6, 'shop', { name: 'POST OFFICE', bg: '#b3261e', fg: '#f4efe4', shutter: 1 }], [20.25, 6, 'shop', { name: 'SUNNY\'S BAKERY', bg: '#c9a822', fg: '#2a1a0a', shutter: 0.8 }], [26.5, 6, 'vacant', {}]]) K.prop('shopfront', x, 34.55, 180, { w, variant: v, indoor: true, collide: false, ...o });
+        SW(8.15, 11, 34.2, 37.5, 0, 4.4); SW(17, 17.25, 34.48, 37.5, 0, 4.4); SW(23.25, 23.5, 34.48, 37.5, 0, 4.4); SW(29.5, 68, 34.2, 37.5, 0, 4.4);
+        SW(11, 29.5, 34.5, 37.5, 3.6, 4.4); SW(8, 68, 37.5, 37.8, 0, 4.4);
+        // the west end: the wall, the chained front doors' opening, the fog pressed to the glass; the east end
+        SW(7.85, 8.15, 20.15, 26.4, 0, 8); SW(7.85, 8.15, 30.0, 37.8, 0, 8); SW(7.85, 8.15, 26.4, 30.0, 2.6, 8);
+        K.plane(5, 1.6, 28.2, 6, 3.6, { color: '#b7c0bd', emissive: '#8e9996', emissiveIntensity: 0.6, roughness: 1 }, { rotY: 90, emissive: true });
+        SW(5, 7.85, 25.2, 31.2, -0.02, 0, { tex: 'tile', color: '#6a6a62' });
+        for (const z of [25.2, 31.2]) SW(5, 7.85, z - 0.1, z + 0.1, 0, 3.4);
+        SW(5, 7.85, 25.2, 31.2, 3.4, 3.5);
+        SW(67.85, 68.15, 20.15, 37.8, 0, 8);
+        // both balconies (slab, fascia, rail), the dark shops upstairs on the far side, the atrium ceiling
+        SW(8, 68, 21.2, 24.8, 4.4, 4.75, CON); SW(8, 68, 24.74, 24.86, 4.05, 4.4, { color: '#1d3d4a', roughness: 0.5 });
+        SW(8, 68, 31.6, 36.2, 4.4, 4.75, CON); SW(8, 68, 31.54, 31.66, 4.05, 4.4, { color: '#1d3d4a', roughness: 0.5 });
+        for (const z of [24.8, 31.6]) SW(8, 68, z - 0.04, z + 0.04, 5.68, 5.73, { tex: 'metal', color: '#9aa09e' });
+        SW(8, 68, 35.65, 35.95, 4.75, 8, { tex: 'render_cracked', color: '#8f8a7e' });
+        for (let x = 11; x < 68; x += 7) SW(x - 2.6, x + 2.6, 35.62, 35.65, 5.15, 7.55, { color: '#101313', roughness: 0.2, metalness: 0.3 });
+        K.ceiling(8, 20.15, 68, 37.8, 8, 'ceiling_tile');
+        // on the floor out there: a bench, a bin, a dead planter, the directory stand
+        K.prop('bench', 18.5, 28.2, 90, { len: 1.8, collide: false }); K.prop('bin', 17, 25.6, 0, { variant: 'street', collide: false });
+        K.prop('planter', 22, 30.8, 0, { variant: 'round', dead: true, collide: false });
+        SW(12.16, 12.24, 30.55, 31.85, 0, 1.9, { color: '#1f2a2b', roughness: 0.5 });
+        K.fogOnly(() => K.light('fluoro', 24, 4.38, 24.4, { len: 1.2, real: false }));
+      }
       // the kitchen's staff door (Fog: locked; the Outage: the way on)
       K.door({ id: 'c1_foodcourt:kitchen', x: FC.kitchen[0], z: -0.075, rot: 0, w: 0.95, style: 'metal', sign: 'STAFF ONLY', to: 'c1_kitchen', entry: 'food', locked: () => !S.outage, lockMsg: 'It\'s locked.' });
       // the toilets (west wall): locked
@@ -1729,6 +1814,24 @@
       K.door({ id: 'c1_backoffice:store', x: 1.2, z: 5.075, rot: 0, w: 0.9, style: 'wood', to: 'c1_store', entry: 'office', color: '#d8d0bc', sign: 'STAFF ONLY', signBack: 'SALES FLOOR' });
       K.door({ id: 'c1_backoffice:stock', x: 6.075, z: 2.5, rot: 90, w: 0.9, style: 'metal', to: 'c1_stockroom', entry: 'door', locked: () => !S.outage, lockMsg: 'Stock only. It\'s locked.', sign: 'STOCK ONLY', mapMark: true });
       K.door({ id: 'c1_backoffice:kitchen', x: -0.075, z: 3.4, rot: 90, w: 0.9, style: 'metal', to: 'c1_kitchen', entry: 'office', locked: () => !S.outage, lockMsg: 'It\'s locked.', sign: 'SERVICE' });
+      // the building cut through along the cutaway north wall (the gap sweep): the slab over the ceiling, the rooms either
+      // side and the ground outside as dark section faces flush with the cut, so the lenses beyond it frame an office
+      // inside the Plaza instead of a lit box in grey fog; the store's back wall runs on either side of the office's
+      {
+        const CUT = { tex: 'concrete', color: '#262927', roughness: 1 };
+        K.box(3, H + 0.01, 2.425, 24, 1.6, 5.15, CUT, { shadow: false });
+        K.box(-4.575, -0.3, 2.425, 8.85, H + 0.32, 5.15, CUT, { shadow: false });
+        K.box(10.575, -0.3, 2.425, 8.85, H + 0.32, 5.15, CUT, { shadow: false });
+        K.box(3, -0.3, -4.075, 24, 0.29, 7.85, CUT, { shadow: false });
+        for (const x of [-9.15, 15.15]) K.box(x, -0.3, -4.075, 0.3, 4.9, 7.85, CUT, { shadow: false });   // (round the lenses)
+        K.box(3, H + 1.61, -4.075, 24.6, 0.3, 7.85, CUT, { shadow: false });
+        const SWL = { tex: 'plaster', color: '#e2e0d8' };
+        for (const x of [-4.575, 10.575]) K.box(x, 0, 5.075, 8.85, ST.h, 0.15, SWL, { shadow: false });
+        K.box(3, H, 5.075, 6.3, ST.h - H, 0.15, SWL, { shadow: false });
+        // (and the sales floor's own floor and ceiling out past the window, under the lit backdrop)
+        K.box(3, -0.02, 7.6, 24, 0.02, 4.9, { tex: 'vinyl_retail', color: '#d8d6ce' }, { shadow: false });
+        K.ceiling(-9, 5.15, 15, 10.05, ST.h);
+      }
       // beyond the window: the sales floor (lit in the Fog world, dark and ringing in the Outage)
       K.fogOnly(() => { K.plane(4.4, 1.6, 6.3, 3, 2.6, { color: '#dfe8e6', emissive: '#9fbcb8', emissiveIntensity: 0.5 }, { rotY: 180, emissive: true }); K.box(4.4, 0, 5.8, 2.6, 0.9, 0.5, { color: '#0e6f6e' }); });
       K.outageOnly(() => K.plane(4.4, 1.6, 6.3, 3, 2.6, { color: '#06100f', roughness: 1 }, { rotY: 180 }));

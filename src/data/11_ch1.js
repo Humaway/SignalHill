@@ -547,7 +547,7 @@
       // the building: the back wall with the roller door jammed half up and the goods-in door, the canopy, lamps
       const BW = { tex: 'concrete', color: '#857e70' };
       K.wall(-1.2, -0.15, 20.5, -0.15, 5.8, BW, { thick: 0.3, y: 0, openings: [{ at: 6.2, w: 3.2, h: 4.0 }, { at: 16.7, w: 1.0, h: 3.3 }], grime: true });
-      K.door({ id: 'c1_dock:roller', x: 5, z: -0.15, y: py, rot: 0, w: 3.0, h: 2.8, style: 'roller', open: 0.48 });
+      K.door({ id: 'c1_dock:roller', x: 5, z: -0.15, y: py, rot: 0, w: 3.0, h: 2.8, style: 'roller', open: 0.48, when: () => false, mapMark: false }); // scenery: jammed (the examine below)
       K.blocker(3.4, -0.2, 6.6, 0.25, 'It\'s jammed halfway. I\'m not crawling under it.');
       K.box(5, py, -1.6, 3.4, 2.8, 0.1, { color: '#070808', roughness: 1 });                    // dark behind the gap
       K.box(5, py, -0.9, 3.4, 0.02, 1.4, { tex: 'concrete', color: '#4a4842' });
@@ -588,7 +588,7 @@
       K.light('street', -4, 5.6, 9, { real: false, haloSize: 3.2, haloOpacity: 0.4 });
       // examine
       K.examine(5, py + 1.0, 0.4, ['Jammed halfway up. Black underneath.', 'Something in there smells like wet cardboard.'], { id: 'c1d:roller', r: 1.8 });
-      K.examine(15.5, py + 1.3, 0.3, 'Somebody wedged it open. On purpose.', { id: 'c1d:door', r: 1.2, when: () => !done('c1:dockin') });
+      K.examine(14.85, py + 0.3, 0.55, 'Somebody wedged it open. On purpose.', { id: 'c1d:door', r: 1.2, when: () => !done('c1:dockin') });
       K.examine(7.4, py + 0.5, 3.0, ['Flattened boxes, stacked for the recycler. Every store has one of these piles.', 'Chargers. Cases. Screen protectors. [beat] I know these boxes.'], { id: 'c1d:boxes', r: 1.5 });
       K.examine(2.3, py + 1.0, 3.1, ['Stock on a pallet, still wrapped.', 'Delivered. Signed for. Never unpacked.'], { id: 'c1d:pallet', r: 1.6 });
       K.examine(12.5, 1.2, 11.3, 'The skip\'s full of packaging. Nobody\'s come to empty it.', { id: 'c1d:skip', r: 1.8 });
@@ -1348,9 +1348,9 @@
       K.examine(18.4, 0.6, 8.4, 'A chair on its side. Everyone else pushed theirs in.', { id: 'c1fc:chair', r: 1.3 });
       K.examine(9.5, 0.9, 11.5, ['Somebody\'s tray. Half a burger in its paper. A kids\' meal toy, still in the bag.', 'They got up in the middle of it.'], { id: 'c1fc:tray', r: 1.3 });
       K.examine(4.2, 1.3, 8.6, 'Order here. Touch to start. [beat] It\'s not taking orders.', { id: 'c1fc:kiosk', r: 1.3, world: 'fog' });
-      K.examine(FC.kitchen[0], 1.5, 0.5, ['Staff only. The kitchen.', 'Every stall shares it. You can get right through to the back of the centre that way.'], { id: 'c1fc:kitchen', r: 1.2, world: 'fog' });
+      K.examine(FC.kitchen[0] - 1.0, 1.5, 0.35, ['Staff only. The kitchen.', 'Every stall shares it. You can get right through to the back of the centre that way.'], { id: 'c1fc:kitchen', r: 1.2, world: 'fog' });
       K.examine(3.0, 1.1, 19.4, 'Sachets. Tomato sauce, sugar, salt. Hundreds of them. For all the people.', { id: 'c1fc:condiments', r: 1.3 });
-      K.examine(0.4, 1.5, 6, 'The toilets. Locked. A sign says "Please ask at the Food Court counter for the key."', { id: 'c1fc:toilets', r: 0.9, world: 'fog' });
+      K.examine(0.35, 1.5, 7.3, 'The toilets. Locked. A sign says "Please ask at the Food Court counter for the key."', { id: 'c1fc:toilets', r: 0.9, world: 'fog' });
     },
     onUpdate() { C1_ringTick('c1_foodcourt'); C1_ambient(['#74827f', 0.5], ['#2a8a84', 0.62]); },
     onLeave() { C1_ringStop(); C1_ambientOff(); C1.onPhone = false; },
@@ -1698,7 +1698,6 @@
       // examine
       K.examine(3.8, 1.5, 0.3, ['Top Performer. Chloe. January, February, March, April …', 'There\'s room on the wall for more. She measured it.'], { id: 'c1bo:certs', r: 1.3 });
       K.examine(BO.term[0] + 0.6, 0.9, 0.62, 'Energy drinks. Four empties, lined up by the keyboard like tally marks.', { id: 'c1bo:cans', r: 1.0 });
-      K.examine(6.0, 1.5, 2.5, 'Stock only. It\'s locked.', { id: 'c1bo:stockdoor', r: 1.1, world: 'fog' });
       K.examine(5.8, 1.3, 3.55, ['Her jacket. On the hook since the start of the month, by the look of it.', 'The pockets are full of receipts.'], { id: 'c1bo:jacket', r: 1.1 });
       K.examine(0.5, 1.0, 4.55, 'The safe. Tomorrow\'s float. Yesterday\'s float. The same float.', { id: 'c1bo:safe', r: 1.1 });
       K.examine(4.6, 1.0, 0.35, 'The printer. A contract in the tray, printed and never signed.', { id: 'c1bo:printer', r: 1.1 });

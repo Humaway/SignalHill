@@ -529,7 +529,7 @@
       K.wall(W + 0.15, D + 0.075, -0.15, D + 0.075, H, 'glass', { openings: [{ at: W + 0.15 - CS.door[0], w: 1.9, h: 2.45 }], collideH: H });
       for (let x = 0.1; x <= W; x += 3.0) K.box(x, 0, D + 0.07, 0.07, H, 0.12, { tex: 'metal', color: '#bfc3bd' });
       K.box(W / 2, 2.62, D + 0.075, W + 0.3, H - 2.62, 0.22, { color: '#10403f', roughness: 0.5 });
-      K.door({ id: 'e_citystore:front', x: CS.door[0], z: D + 0.075, rot: 0, w: 1.8, h: 2.4, style: 'glass_double' });
+      K.door({ id: 'e_citystore:front', x: CS.door[0], z: D + 0.075, rot: 0, w: 1.8, h: 2.4, style: 'glass_double', when: () => false, mapMark: false }); // the scenes open it (G.door)
       K.box(CS.door[0], 0, D - 0.7, 2.4, 0.012, 1.3, { tex: 'fabric_knit', color: '#0e5f5e' });
       K.plane(CS.door[0], 0.014, D - 0.7, 1.7, 0.62, matTex(), { rot: [-90, 0, 0] });
       for (const x of [7.3, 10.7]) { K.box(x, 0, D - 0.45, 0.12, 1.5, 0.4, { color: '#c9ccca', roughness: 0.3 }, { collide: true }); K.light('led', x, 1.46, D - 0.45, { color: '#2aff5a', intensity: 1.4 }); }

@@ -1775,7 +1775,7 @@
         K.dress('receipts', [3.4, 1.4, 4.6, 7.8], 12, { seed: 251 }); K.dress('receipts', [4.9, 4.8, 9.6, 7.6], 16, { seed: 252 });
         K.writing('FOLLOW UP TOMORROW', 3.39, 1.7, 5.9, 1.6, { rotY: 90, world: 'outage' });
         K.writing('DID YOU CHECK', 7.4, 1.85, 3.69, 1.6, { rotY: 0, world: 'outage' });
-        K.examine(3.45, 1.1, 3.0, ['The kitchen door. [beat] There was never a door here.'], { id: 'c2u9:kdoor', r: 0.6 });
+        K.examine(3.45, 1.3, 3.8, ['The kitchen door. [beat] There was never a door here.'], { id: 'c2u9:kdoor', r: 0.9 }); // beside the door: E head-on opens it
       });
     },
     async onEnter(G, from) {

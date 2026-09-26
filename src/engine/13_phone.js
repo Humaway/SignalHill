@@ -41,8 +41,9 @@
 //     a Tethered that has noticed him, a Reach that sees him / still rages / pounds a door, a stirred Unread, a
 //     Standard that has seen him or hunts; dormant ones read nothing; awareness stays warm 4 s);
 //   * the shown strength trails the true reading (rise τ 1.2 s, fall τ 2.5 s) with a slow random walk of about ±0.6
-//     bar on top; 5 bars only within 3 m; the static and every tell (the EFTPOS beep per bar, the pulse, the battery
-//     drain, the vibration) follow the lagged reading, and a tell keeps sounding while its reading fades;
+//     bar on top (the bars only); 5 bars only within 3 m; the static and every tell (the EFTPOS beep per bar shown, the
+//     pulse, the battery drain, the vibration) follow the lagged reading, and a tell keeps sounding while it fades; a
+//     skipped scene resolves the lag at once (the reading it leaves is the played scene's — tools/tests/skipall.mjs);
 //   * phantoms: with no aware threat within 20 m and nothing else owning the phone or the player (override, call,
 //     Phone.display insert, cutscene or blocking script, menu, keypad, Outage transition, death, no control), after a
 //     quiet 50–140 s (Fog world) / 35–90 s (Outage) the reading climbs to 1–3 bars (rarely 4) over 1–2 s, holds 2–6 s
@@ -247,9 +248,13 @@ const Phone = (() => {
     const silent = kind === 'none' || kind === 'nobars';
     const target = !kind || silent ? 0 : d <= T.full ? 5 : 1 + ((T.range - d) / (T.range - T.full)) * 4;
     un.src = kind ? near.e : null; un.dist = d; un.target = target;
-    // the lag: exponential toward the true strength (rise faster than fall), never slower than minRate
+    // the lag: exponential toward the true strength (rise faster than fall), never slower than minRate. A skipped scene
+    // resolves it at once (as it does waits and fades): the reading it leaves is the one the played scene leaves.
     const diff = target - un.L;
-    if (diff !== 0 && dt > 0) {
+    let skipping = false;
+    try { skipping = typeof Script !== 'undefined' && !!Script && !!Script.skipping; } catch (e) { /* no script */ }
+    if (skipping) un.L = target;
+    else if (diff !== 0 && dt > 0) {
       let step = diff * (1 - Math.exp(-dt / (diff > 0 ? T.riseTau : T.fallTau)));
       const minStep = T.minRate * dt;
       if (Math.abs(step) < minStep) step = Math.sign(diff) * Math.min(minStep, Math.abs(diff));
@@ -286,7 +291,8 @@ const Phone = (() => {
     if (fromPh) n = Math.min(n, 4, un.ph ? un.ph.peak + 1 : 4);
     else if (!(kind && d <= T.full)) n = Math.min(n, 4);
     un.n = n; un.fromPh = fromPh;
-    const prox = clamp((eff - 1) / 4);
+    // the static and the tells follow the lagged strength (the wobble moves only the bars)
+    const prox = clamp((un.L - 1) / 4);
     const tk = fromPh ? 'phantom' : un.kind;
     st.tell = fromPh ? null : un.kind; st.dist = d; st.prox = prox;
     markReal(!!kind && !silent, dt, un.L >= 1 || kind === 'battery');
@@ -296,7 +302,7 @@ const Phone = (() => {
       st.batt = st.batt > tgt ? Math.max(tgt, st.batt - 0.3 * dt) : Math.min(1, st.batt + 0.04 * dt);
     } else st.batt = Math.min(1, st.batt + 0.05 * dt);
     let shown = n, mode = 'normal', stat = prox * 0.85;
-    const live = eff >= 0.5;                     // a tell sounds while there is a reading at all
+    const live = un.L >= 0.5;                    // a tell sounds while there is a reading at all
     switch (tk) {
       case 'phantom': stat = Math.max(stat, phStat); break;
       case 'none': shown = 0; n = 0; stat = 0; break;

@@ -50,9 +50,10 @@ function install() {
   // the sounds Phone plays (Snd.play wrapped: name + the phone's reading as it was)
   Z.sounds = [];
   if (!M.Snd.__sig) { const f = M.Snd.play; M.Snd.play = function (name, o) { Z.sounds.push({ name, t: +(Z.t || 0).toFixed(3) }); return f.call(this, name, o); }; M.Snd.__sig = true; }
-  // step `sec` of game time in 1/30 s ticks; fn(t) after each tick (return true to stop)
+  // step `sec` of game time in 1/30 s ticks; fn(t) after each tick, t = the game time since this run began (return true
+  // to stop). Z.t is the test's own game clock (the sound log's times).
   Z.t = 0;
-  Z.run = async (sec, fn) => { const n = Math.round(sec * 30); for (let i = 0; i < n; i++) { await SH.advance(1 / 30); Z.t += 1 / 30; if (fn && fn(Z.t) === true) break; } };
+  Z.run = async (sec, fn) => { const n = Math.round(sec * 30); for (let i = 1; i <= n; i++) { await SH.advance(1 / 30); Z.t += 1 / 30; if (fn && fn(i / 30) === true) break; } };
   Z.rd = () => M.Phone.reading;
   // sample the reading for `sec`: max / min bars, max static, min battery, phantoms seen, sources seen
   Z.sample = async (sec, o = {}) => {
@@ -191,6 +192,16 @@ export default async function (page, h) {
       if (!(r12[2] / r12[3] > 0.55 && r12[2] / r12[3] < 0.72)) bad('the rise is not τ ≈ 1.2 s');
       if (!(f15[1] >= 1 && fall0 && fall0[0] > 2 && fall0[0] < 8)) bad('the bars do not fall with lag');
       if (!r.real) bad("S.done['signal:real'] was not set by an aware reading in play");
+    }
+    // a skipped scene resolves the lag at once: it leaves the reading (and the static) the played scene leaves
+    {
+      const r = await ev(h, `const once = async (skip) => { await __sig.fresh(); SH.mod.Phone.TUNE.jitter = 0; let e = null;
+          SH.mod.Script.run(async (G) => { e = __sig.probe('sig:skip', 8); await G.wait(8); }, { control: false, letterbox: true, skippable: true, name: 'signal:skip' });
+          await __sig.run(0.2); if (skip) SH.skip(); await __sig.run(20, () => !SH.mod.Script.busy); const q = __sig.rd(); const at = { lag: +q.lag.toFixed(2), target: +q.target.toFixed(2) };
+          await __sig.run(1.5); const st = +__sig.rd().static.toFixed(3); if (e) e.remove(); __sig.tune(); return { ...at, static: st }; };
+        return { played: await once(false), skipped: await once(true) }`);
+      say(`B skip: a scene that brings an aware probe 8 m off — played: strength ${r.played.lag} of ${r.played.target} as it ends, static 1.5 s later ${r.played.static}; skipped: ${r.skipped.lag} of ${r.skipped.target}, static ${r.skipped.static}`);
+      if (!(Math.abs(r.skipped.lag - r.skipped.target) < 0.02 && Math.abs(r.played.lag - r.skipped.lag) < 0.05 && Math.abs(r.played.static - r.skipped.static) < 0.02)) bad('a skipped scene leaves a different reading from the played one');
     }
     // the EFTPOS tell follows the lagged reading: one beep per bar as it climbs (CLASSIC: one beep, at once)
     {

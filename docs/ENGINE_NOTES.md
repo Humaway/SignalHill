@@ -550,8 +550,9 @@ other dead enemies aren't spawned again.
   `'unreliable'`; `Phone.signalMode`), read every frame. CLASSIC is the old radar: the nearest threat of any kind within
   20 m, its distance mapped to 1–5 bars at once. UNRELIABLE: only an **aware** threat transmits (above, §5); the shown
   strength trails the true one (rise τ 1.2 s, fall τ 2.5 s, never slower than 0.2 bar/s) with a slow random walk of
-  ±0.6 bar; 5 bars only within 3 m; the static and the tells (beep per bar, pulse, battery drain, vibration) follow the
-  lagged reading and keep sounding while it fades. **Phantoms:** from Chapter 1 on, once `S.done['signal:real']` is set
+  ±0.6 bar on the bars; 5 bars only within 3 m; the static and the tells (beep per bar shown, pulse, battery drain,
+  vibration) follow the lagged strength and keep sounding while it fades; a skip (`Script.skipping`) resolves the lag at
+  once, so a skipped scene leaves the reading the played one does. **Phantoms:** from Chapter 1 on, once `S.done['signal:real']` is set
   (one second of play reading an aware threat — either mode; Bus `'signal:real'`), a quiet 50–140 s (Fog) / 35–90 s
   (Outage) with no aware threat within 20 m brings a reading that is not there: 1–3 bars (rarely 4) over 1–2 s, 2–6 s
   under rising static (~40 % with one fake tell: an EFTPOS beep, a buzz, distant keys), then gone (Bus
@@ -735,6 +736,7 @@ node tools/run.mjs --file .build/x.html --size 1280x720 --quiet --script tools/t
 node tools/run.mjs --file .build/x.html --size 1280x720 --quiet --script tools/tests/title.mjs     # ~4 min
 node tools/run.mjs --file .build/x.html --size 1280x720 --quiet --script tools/tests/ui.mjs        # ~16 min
 node tools/run.mjs --file .build/x.html --size 960x540  --quiet --script tools/tests/options.mjs   # ~2 min
+node tools/run.mjs --file .build/x.html --size 960x540  --quiet --script tools/tests/signal.mjs    # ~6 min
 node tools/run.mjs --file .build/x.html --size 960x540  --quiet --script tools/tests/gamepad.mjs   # ~1 min
 SH_CHROME_ARGS="--autoplay-policy=document-user-activation-required" \
   node tools/run.mjs --file .build/x.html --size 960x540 --ready 3 --quiet --script tools/tests/audiogate.mjs
@@ -772,6 +774,16 @@ SH_CHROME_ARGS="--autoplay-policy=document-user-activation-required" \
   tank vs camera-relative walking, the camera's shake offset, the audio bus gains — `Snd.stats().volumes / buses`,
   CONTRACT+ —, the examine model's turn, rumble on a synthesised pad), META.options in localStorage after each change,
   a page reload restoring and applying them at boot, and a first-time NEW GAME going setup → calibration → the game.
+* `signal.mjs` — the UNRELIABLE signal in TEST STREET with the live loop off (`Game.manual(true)`: game time only by
+  1/30 s ticks): each monster type dormant in range (Tethered facing away / seated, Reach beyond its sight, Unread
+  resting, Standard facing away, Borrowed disguised) reads 0 bars, no static, no battery drain — and reads at once in
+  CLASSIC; each aware one is the source; custom types aware unless `T.aware` / `def.aware`; the 4 s warm; the rise
+  (≈ 63 % at τ = 1.2 s) and fall lag, the EFTPOS tell beeping per lagged bar, 5 bars only within 3 m, the wobble;
+  `signal:real` set by play, not by dormant monsters; phantoms with a sped-up `Phone.TUNE`: gated (Chapter ≥ 1, a real
+  reading), never under an override (shown as authored), a letterboxed scene, a `Phone.display` insert, a menu (one
+  under way ends as it opens) or an aware threat in 20 m, ended by a real threat; the same S + seed → the same
+  phantoms; the real intervals (50–140 s Fog, 35–90 s Outage); CLASSIC against the old radar tick by tick along a
+  moving threat's path; a mode switch carrying the bars; the Options row with real keys.
 * `gamepad.mjs` — a synthesised standard-mapping pad (`navigator.getGamepads` overridden) plays the title (A, the
   D-pad and the stick, OPTIONS, B), NEW GAME → setup → calibration → the Prologue skipped by holding Start, then walks,
   runs (RT), examines (A), torch (Y), quick turn (B), ready / attack (LT / X), pause (Start, D-pad, A, B, Start), map

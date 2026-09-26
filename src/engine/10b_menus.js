@@ -239,8 +239,8 @@ const Menus = (() => {
 #ui .ph-lcd{image-rendering:pixelated;image-rendering:crisp-edges;}
 /* options */
 #ui .op-head{position:absolute;left:0;right:0;top:9vh;text-align:center;}
-#ui .op-rows{position:absolute;left:24vw;right:24vw;top:17vh;}
-#ui .op-row{display:flex;justify-content:space-between;align-items:baseline;}
+#ui .op-rows{position:absolute;left:24vw;right:24vw;top:14.5vh;}
+#ui .op-row{display:flex;justify-content:space-between;align-items:baseline;padding:.26em 0;}
 #ui .op-v{letter-spacing:.12em;}
 /* save / load */
 #ui .sv-head{position:absolute;left:0;right:0;top:12vh;text-align:center;}

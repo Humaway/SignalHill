@@ -431,6 +431,7 @@ async function office(h, P, notes, opts) {
 // ---- the lift lobby: the voice (6-voice), forcing lift B (6-lift) → the Outage → the shaft ------------------------------------
 async function liftB(h, P, notes, opts) {
   await goRoom(h, P, notes, 'c6_level6');
+  if (!(await ev(h, 'return !!SH.S.flags.c6_doors'))) {
   if (P.walk) {
     await tp(h, 9.0, 19.1, 180);
     await walkPath(h, P, notes, [[12, 18.2], [19, 18.0]], 'the spine to the lobby', { room: 'c6_level6' });
@@ -449,6 +450,10 @@ async function liftB(h, P, notes, opts) {
   await holdAction(h, 'interact', 3.0);
   await mustReach(h, '!!SH.S.flags.c6_doors', 6, 'lift B forced (c6_doors)');
   await shot(h, opts, 'l6_forced');
+  } else {
+    // (resumed at the autosave the forced doors wrote: stand back in front of lift B)
+    await tp(h, 26.0, 15.25, 180);
+  }
   await mustReach(h, '!!SH.S.outage && !SH.mod.World.outageBusy', 20, 'the Outage taking the lobby');
   await shot(h, opts, 'l6_outage');
   await settle(h, P, notes);
@@ -556,12 +561,16 @@ export async function play(h, opts = {}) {
   const start = await snap(h);
   if (start.chapter !== 6) throw new Error('ch6.play: not at Chapter 6: ' + JSON.stringify(start));
   await settle(h, P, notes);
-  if ((await ev(h, 'return SH.mod.World.room')) !== 'c5_level4') throw new Error('ch6.play: expected to start on Level 4 (c5_level4)');
+  if (!opts.resume && (await ev(h, 'return SH.mod.World.room')) !== 'c5_level4') throw new Error('ch6.play: expected to start on Level 4 (c5_level4)');
   const F0 = start.F, A0 = start.A;
   const flag = (n) => ev(h, `return !!(SH.S.flags && SH.S.flags[${JSON.stringify(n)}])`);
   let saved = false, reloaded = false;
 
   await shot(h, opts, 'start');
+  // opts.resume (a CONTINUE mid-chapter, e.g. after dying in the Middle): lift B already forced → straight back down the
+  // shaft (the autosave after the doors gave); anything earlier plays the chapter from its start
+  const atLift = !!opts.resume && (await flag('c6_doors'));
+  if (!atLift) {
   await escalations(h, P, notes, opts);
   await goRoom(h, P, notes, 'c5_level4');
   if (!(await flag('c6_power'))) {
@@ -579,6 +588,7 @@ export async function play(h, opts = {}) {
     if (!(await flag('c6_office'))) await office(h, P, notes, opts);
     if (opts.saveLoad && saved && !reloaded) { reloaded = true; await reload(h, P, notes, 0); continue; }
     break;
+  }
   }
   await liftB(h, P, notes, opts);
   await setPiece(h, P, notes, opts);

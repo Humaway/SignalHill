@@ -243,7 +243,7 @@ export async function play(h, opts = {}) {
   const start = await snap(h);
   if (start.chapter !== 1) throw new Error('ch1.play: not at Chapter 1: ' + JSON.stringify(start));
   await settle(h, P, notes);
-  if ((await ev(h, 'return SH.mod.World.room')) !== 'c1_relay') throw new Error('ch1.play: expected to start on Relay Street');
+  if (!opts.resume && (await ev(h, 'return SH.mod.World.room')) !== 'c1_relay') throw new Error('ch1.play: expected to start on Relay Street');
   const F0 = start.F, A0 = start.A;
   let saved1 = false, reloaded1 = false, saved2 = false, reloaded2 = false;
   const flag = (n) => ev(h, `return !!(SH.S.flags && SH.S.flags[${JSON.stringify(n)}])`);

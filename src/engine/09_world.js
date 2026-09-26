@@ -457,10 +457,21 @@ const World = (() => {
     return safeWhen(it.when);
   }
   // nearestInteractable(pos, yawRadians, maxDist=3, {cone (deg, default 100), use (within its own r), look (skip
-  // look:false), crawl (only crawl:true ones)}). Score = distance + angle off the facing + the kind's priority (m):
+  // look:false), crawl (only crawl:true ones)}) — at most 1 m below his feet and 2.6 m above them (5.5 m for an examine
+  // with no floor between: see reachUp). Score = distance + angle off the facing + the kind's priority (m):
   // doors, pickups, payphones, ladders 0 · docs, stickers 0.1 · interacts 0.15 · people (npc) 0.35 · examines 0.6 —
   // an examine or a person beside a door or a pickup no longer takes the E press meant for it. it.prio overrides.
   const KIND_PRIO = { door: 0, pickup: 0, payphone: 0, break: 0, ladder: 0, doc: 0.1, sticker: 0.1, interact: 0.15, npc: 0.35, examine: 0.6 };
+  // Height: an interactable more than 2.6 m above his feet is on another level (a balcony, a ladder top) — except an
+  // examine of something high up (a wall clock, the power lines overhead): up to LOOK_UP m, as long as no floor lies
+  // between his feet and it (under it or under him). Kit's build-time reach check uses the same rule (Kit.lookUpOK).
+  const LOOK_UP = 5.5;
+  function reachUp(it, pos) {
+    const dy = it.pos.y - (pos.y || 0);
+    if (dy <= 2.6) return true;
+    if (it.kind !== 'examine' || dy > LOOK_UP) return false;
+    return Kit.lookUpOK(build.floors, it.pos, pos.x, pos.z, pos.y || 0, !!S.outage);
+  }
   function nearestInteractable(pos, yaw, maxDist = 3, o = {}) {
     if (!build) return null;
     const cone = (o.cone ?? (o.use ? 95 : 100)) * D2R;
@@ -472,9 +483,10 @@ const World = (() => {
       if (!inBand(it.yBand, pos.y)) continue;
       const dx = it.pos.x - pos.x, dz = it.pos.z - pos.z, d = Math.hypot(dx, dz);
       const dy = it.pos.y - (pos.y || 0);
-      if (dy < -1.0 || dy > 2.6) continue;                          // another level (ladder top, balcony)
+      if (dy < -1.0) continue;                                      // another level (below)
       const lim = o.use ? Math.min(maxDist, (it.r ?? 1.2) + 0.15) : maxDist;
       if (d > lim) continue;
+      if (dy > 2.6 && !reachUp(it, pos)) continue;                  // another level (ladder top, balcony)
       const ang = d < 0.35 ? 0 : Math.abs(U.angleDiff(yaw, Math.atan2(dx, dz)));
       if (ang > cone) continue;
       const s = d + ang * 0.9 + (it.prio ?? KIND_PRIO[it.kind] ?? 0);

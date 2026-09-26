@@ -606,11 +606,27 @@ const Cam = (() => {
   // its culled side sees nothing of the box and passes — the stair-core and cutaway-wall tricks — and so does a lens
   // tucked into a cupboard shooting past foreground dressing outside it. Also flagged: clutter against the glass — 65 % of
   // the frame (the 25 rays, a drawn opaque surface counting 1, foliage / sheeting their combined opacity) covered within
-  // 1.2 m of the lens (a camera inside a tree canopy or a shrub, behind a curtain). → {x, y, z, hit, frame} | null
+  // 1.2 m of the lens (a camera inside a tree canopy or a shrub, behind a curtain). Also flagged: the lens inside a prop's
+  // collider (in its height band, ≥ 5 cm in) while at least 2 of the 25 frame rays first meet a drawn surface inside that
+  // collider's box (≥ 3 cm in: not the floor, ceiling or walls around it) — a lens in the middle of a parked car sees its
+  // underbody, wheels and the undersides of its glass, but its bodywork is one extruded shell, so the back-face count
+  // above can stay under 9. Room-level K.collider / K.colliderRot records (bare: invisible), blockers, exits, doors and
+  // enemy bodies don't count; a lens inside a plain solid K.box still passes (it sees out through the culled faces).
+  // → {x, y, z, hit, frame, inside?} | null
   const DIRS = (() => { const a = []; for (const v of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) a.push(V(...v)); for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) a.push(V(x, y, z).normalize()); return a; })();
   const FRAME = []; for (const nx of [-0.9, -0.45, 0, 0.45, 0.9]) for (const ny of [-0.9, -0.45, 0, 0.45, 0.9]) FRAME.push([nx, ny]);
   const _n = V(), _fd = V(), _shell = new THREE.Box3(), _sp = V(), NEAR_CLUTTER = 1.2;
-  function lensInside(c, occ, aspect) {
+  const solidCol = (col, outage) => col && !col.bare && !col.blocker && !col.soft && !col.exit && !col.dynamic && !col.enemy && !col.door
+    && col.enabled !== false && matchWorld(col.world, outage) && col.h > 0;
+  // p at least m inside the collider (3D: its footprint and its height band) — a floor, ceiling or wall face on the
+  // collider's boundary (the stair-core trick: the lens inside a solid K.box looking out through its culled side over
+  // the floor under it) is not "inside"
+  const insideCol = (col, p, m) => {
+    if (p.y < (col.y || 0) + m || p.y > (col.y || 0) + col.h - m) return false;
+    const q = Kit.collide(col, p.x, p.z, 0.001);
+    return !!q && Math.hypot(q.x, q.z) >= m + 0.001;
+  };
+  function lensInside(c, occ, aspect, cols = null, outage = false) {
     if (!occ || !occ.length) return null;
     // (a rail camera only ever sits where Aidan's projection onto the rail puts it: the stretch the volume covers)
     const v = c.vol, rp = (x, z) => railPos(c, x, z, V());
@@ -639,6 +655,17 @@ const Cam = (() => {
         // (where it looks: the key's target, else the def's target — by default the volume's middle)
         const tgt = c.type === 'scripted' && c.keys && c.keys[i] ? c.keys[i].target : c.target;
         probe.fov = c.fovV; probe.aspect = aspect; orient(probe, p, tgt, c.roll); probe.updateMatrixWorld(true);
+        // the lens inside a prop's solid (its collider, ≥ 5 cm in, within its height band) and the shot shows its insides
+        if (cols) for (const col of cols) {
+          if (!solidCol(col, outage) || !insideCol(col, p, 0.05)) continue;
+          let seen = 0, what = null;
+          for (const [nx, ny] of FRAME) {
+            _fd.set(nx, ny, 0.5).unproject(probe).sub(p).normalize();
+            const f = along(p, _fd, cam.near * 1.2, 8).find((qq) => !qq.culled);
+            if (f && insideCol(col, f.h.point, 0.03)) { seen++; what = what || f.h.object; }
+          }
+          if (seen >= 2) return { x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2), hit: nameOf(what, occ.root), frame: +(seen / FRAME.length).toFixed(2), inside: col.name || 'prop collider' };
+        }
         // clutter against the glass: half the frame is hidden by something within 1.2 m of the lens (a tree canopy, a
         // curtain, a shelf the lens is buried in): per ray, 1 for a drawn opaque surface, else 1 − Π(1 − α) of the veils
         let cover = 0, nearWhat = null;
@@ -709,8 +736,8 @@ const Cam = (() => {
         // the lens: once per camera per world
         if (o.lens !== false) for (const c of cams) {
           if (!matchWorld(c.world, outage)) continue;
-          const r = lensInside(c, all, aspect);
-          if (r) problems.push({ cam: c.id, x: r.x, z: r.z, y: r.y, why: 'lens-inside', hit: r.hit, frame: r.frame, world: w });
+          const r = lensInside(c, all, aspect, rb.colliders, outage);
+          if (r) problems.push({ cam: c.id, x: r.x, z: r.z, y: r.y, why: 'lens-inside', hit: r.hit, frame: r.frame, ...(r.inside ? { inside: r.inside } : {}), world: w });
         }
         // one sample (feet at y) against the camera that shows it
         const sample = (c, xx, y, zz, extra) => {

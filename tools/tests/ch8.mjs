@@ -521,14 +521,16 @@ async function mast(h, P, notes, opts) {
 async function closer(h, P, notes, opts) {
   // CUTSCENE 8-1 "The Mirror" (P3): played (connected) or skipped
   const m0 = await mark(h);
-  await playUntil(h, "!!SH.S.done['cs:8-1']", 10, 'CUTSCENE 8-1 on the top landing');
-  await playUntil(h, "SH.mod.World.room === 'c8_transmitter' && !SH.mod.World.transitioning", 90, 'the transmitter room (8-1, the door)', { skip: !P.play, opts, every: P.play ? 3 : 0, name: '81' });
-  if (P.play) await sawOrder(h, ['...Yeah. [beat] I know.'], notes, '8-1', m0);
+  if (!opts.inFight) {
+    await playUntil(h, "!!SH.S.done['cs:8-1']", 10, 'CUTSCENE 8-1 on the top landing');
+    await playUntil(h, "SH.mod.World.room === 'c8_transmitter' && !SH.mod.World.transitioning", 90, 'the transmitter room (8-1, the door)', { skip: !P.play, opts, every: P.play ? 3 : 0, name: '81' });
+    if (P.play) await sawOrder(h, ['...Yeah. [beat] I know.'], notes, '8-1', m0);
+  }
   if (await ev(h, "return !!SH.mod.Enemies.get('c8_mast:std')")) notes.push('BUG: the Standard is still there after 8-1');
-  // CUTSCENE 8-2 "The Pitch"
+  // CUTSCENE 8-2 "The Pitch" (after a CONTINUE from the autosave before the fight: the Pitch again, without 8-2)
   const m1 = await mark(h);
   await playUntil(h, '!!(SH.c8 && SH.c8.fight && SH.c8.fight.phase === 1) && !SH.mod.Script.cutscene', 60, 'the Pitch (Phase 1)', { skip: !P.play, opts, every: P.play ? 3 : 0, name: '82' });
-  if (P.play) await sawOrder(h, ['Hi there! [beat] What brings you in today?', '...No.', 'Relax. I\'m you. [beat] The good version. The one who closes.'], notes, '8-2', m1);
+  if (P.play && !opts.inFight) await sawOrder(h, ['Hi there! [beat] What brings you in today?', '...No.', 'Relax. I\'m you. [beat] The good version. The one who closes.'], notes, '8-2', m1);
   const auto = await ev(h, "try { const a = SH.mod.Save.list().auto; return a ? (a.room || a.area || JSON.stringify(a).slice(0, 80)) : null; } catch (e) { return String(e); }");
   notes.push(`the autosave before the fight: ${JSON.stringify(auto)}`);
   await equip(h, ['steel_bar', 'extinguisher', 'box_cutter']);
@@ -622,12 +624,18 @@ export async function play(h, opts = {}) {
   const notes = opts.notes || [];
   await spy(h);
   const s0 = await snap(h);
-  if (s0.chapter !== 8 || s0.room !== 'c8_summit') throw new Error('ch8 play(): not at the start of Chapter 8 (' + JSON.stringify(s0) + ')');
+  if (s0.chapter !== 8 || (!opts.resume && s0.room !== 'c8_summit')) throw new Error('ch8 play(): not at the start of Chapter 8 (' + JSON.stringify(s0) + ')');
   const F0 = s0.F, A0 = s0.A;
-  await summit(h, P, notes, opts);
-  await compound(h, P, notes, opts);
-  await mast(h, P, notes, opts);
-  const ending = await closer(h, P, notes, opts);
+  // opts.resume (a CONTINUE mid-chapter, e.g. after dying in the fight): the autosave before the fight puts him back in
+  // the transmitter room and the Pitch starts again; from anywhere else the chapter plays from Summit Road
+  const inFight = !!opts.resume && s0.room === 'c8_transmitter';
+  if (!inFight) {
+    if (s0.room !== 'c8_summit') throw new Error('ch8 play(): resumed at ' + s0.room + ' (only the transmitter room or Summit Road)');
+    await summit(h, P, notes, opts);
+    await compound(h, P, notes, opts);
+    await mast(h, P, notes, opts);
+  }
+  const ending = await closer(h, P, notes, { ...opts, inFight });
   // the hand-off: Game.ending runs the rest (its first main scene starts)
   const main = MAIN[ending];
   await playUntil(h, `SH.mode !== 'play' && (!!SH.S.done['cs:${main}'] || SH.mode === 'credits' || SH.mode === 'results')`, 60, `the ending "${ending}" (${main}) under way`);

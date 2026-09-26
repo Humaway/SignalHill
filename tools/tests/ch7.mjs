@@ -558,7 +558,7 @@ export async function play(h, opts = {}) {
   const start = await snap(h);
   if (start.chapter !== 7) throw new Error('ch7.play: not at Chapter 7: ' + JSON.stringify(start));
   await settle(h, P, notes);
-  if ((await ev(h, 'return SH.mod.World.room')) !== 'c7_ringroad') throw new Error('ch7.play: expected to start on Ring Road east (c7_ringroad)');
+  if (!opts.resume && (await ev(h, 'return SH.mod.World.room')) !== 'c7_ringroad') throw new Error('ch7.play: expected to start on Ring Road east (c7_ringroad)');
   const F0 = start.F, A0 = start.A;
   let saved = false, reloaded = false;
 

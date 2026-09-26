@@ -2382,9 +2382,11 @@ const Rig = (() => {
     // curl 0.42 laid four blocky fingers across the screen in every insert)
     phone_look: (T) => AP([0.04, -0.07, T.chestD + 0.16], [1, -1, -0.2], [-0.35, 0.6, 0.75], [-0.15, 0.5, -0.9], 0.12, 0.3),
     phone_up: (T) => AP([0.075, 0.17, T.chestD + 0.22], [1, -1, 0], [0, 1, 0.1], [0.05, 0.05, 1], 0.6, 0.45),
-    // (the elbow down in front of the chest, the forearm up beside the jaw, the phone's screen to the ear: seen from the
-    // far side the arm stays behind his face, seen from the front it doesn't cover his mouth. The old pole [0.8,-1,0.3]
-    // held the elbow out at shoulder height, 45° forward — the upper arm crossed his face in every close side shot)
+    // (the forearm up beside the jaw, the phone's screen to the ear, the elbow raised out to his side and a little back,
+    // about 0.14 m above the shoulder joint: seen from the far side the whole arm stays behind his head, seen from the
+    // front the elbow is out to his side and his mouth is clear. With the phone at the ear the rig's forearm is too short
+    // for a dropped elbow: every elbow-down pole ends at shoulder height and forward, the forearm across his jaw from the
+    // far side — as the old pole [0.8,-1,0.3] did, the upper arm crossing his face in every close side shot)
     phone_ear: (T) => AP([0.08, 0.12, -0.01], [0.6, -1.5, 0.2], [-0.2, 1, 0.1], [-1, 0, 0.15], 0.6, 0.45),
     cup: (T) => AP([0.08, -0.15, T.chestD + 0.09], [1, -0.8, -0.3], [-0.6, 0, 0.8], [-1, 0.1, -0.2], 0.75, 0.5),
     bar: (T) => AP([0.125, -0.35, 0.035], [0.3, 0, -1], [0, -1, 0.12], [-1, 0, 0], 0.95, 0.7),

@@ -14,6 +14,10 @@
 //      SH_FROM    N — debug aid: start at chapter N through SH.chapter(N) instead of the title (no chain before it)
 //      SH_FROM_AUTO  a chapter-start autosave a chain run wrote (.build/chainlogs/<path>_<riddle>_chN.auto.json): debug aid,
 //                 continue the chain from it (the title's LOAD GAME → AUTOSAVE)
+//      SH_DEATH   1 (every chapter with a boss: 1 3 4 5 6 8) or a list "4,8" — Aidan dies once in each of those chapters'
+//                 boss fights (a few seconds in; Chapter 8 once Phase 2 starts); the death screen → CONTINUE (as a
+//                 player: the latest save) must restore the save exactly, with nothing of the death, the fight or the
+//                 Outage left over; then the chapter's test carries on from there (play(h, {resume:true})) to the end
 //      SH_VERBOSE 1 — print every chapter's notes
 //      SH_RENDER  1 — keep drawing frames (by default renderer.render is a no-op: see install())
 //
@@ -38,7 +42,7 @@
 //      of a first playthrough (spec §14: 60–120 minutes).
 // Prints PASS/FAIL lines; the last one is "PASS chain <path>/<riddle>".
 import fs from 'node:fs';
-import { ev, advance, advanceUntil, mustReach, report, titleNewGame, titleLoad, quitToTitle, menuReady, payphoneSave } from './lib.mjs';
+import { ev, advance, advanceUntil, mustReach, report, titleNewGame, titleLoad, quitToTitle, menuReady, payphoneSave, nav } from './lib.mjs';
 import { spy as endSpy, playEnding } from './endings.mjs';
 
 const CH = [];
@@ -64,7 +68,7 @@ const ENDING_CS = {
 };
 
 // ---- the page-side recorder (Bus events, teleports, begin() calls, saves) -----------------------------------------
-async function install(h) {
+async function install(h, o = {}) {
   // Nothing is drawn unless SH_RENDER=1: WebGL draws (SwiftShader, on the CPU) between the test's steps are what made a
   // chain crawl — three browsers kept every core busy rendering frames nobody looks at. The game logic, the post chain's
   // state and every timer run exactly as before; only renderer.render() is a no-op (screenshots draw a frame first).
@@ -93,6 +97,51 @@ async function install(h) {
       try { const p = M.Player.pos, d = Math.hypot(x - p.x, z - p.z), ch = M.S.chapter; if (d < 250) { C.tp[ch] = (C.tp[ch] || 0) + d; C.tpN[ch] = (C.tpN[ch] || 0) + 1; } } catch (e) {}
       return tp(x, z, yaw);
     };
+    // SH_DEATH: an injected death in a boss fight. Armed per chapter (C.death.arm[n] = true); the first 'boss:*' script
+    // of that chapter sets it off after C.death.delay s of game time (and once C.death.cond[n]() holds, if given) while the
+    // fight still runs: Game.death() as if the last hit landed. window.__deathAbort then makes the chapter test unwind
+    // (tools/tests/chain.mjs deathH) and SH.advance stops ticking until the chain has taken over.
+    C.death = { arm: {}, cond: {}, delay: 4, pending: null, log: [], t: 0 };
+    if (${o.death ? 'true' : 'false'}) {
+    B.on('script', (what, name) => {
+      const D = C.death;
+      if (what !== 'start' || !/^boss:/.test(String(name)) || D.pending || D.arm[M.S.chapter] !== 'boss') return;
+      D.arm[M.S.chapter] = false;
+      D.pending = { boss: String(name), ch: M.S.chapter, at: D.t + D.delay };
+    });
+    const tick = M.Game.tick;
+    M.Game.tick = function (dt, ...a) {
+      const r = tick.call(this, dt, ...a);
+      const D = C.death;
+      D.t += dt || 0;
+      // (the Standard roaming a floor: once it has been active a while)
+      if (!D.pending && D.arm[M.S.chapter] === 'std' && M.Enemies.standard.active && M.Game.mode === 'play') {
+        D.arm[M.S.chapter] = false;
+        D.pending = { boss: 'the Standard', std: true, ch: M.S.chapter, at: D.t + 6 };
+      }
+      const p = D.pending;
+      if (p && D.t >= p.at && M.Game.mode === 'play' && !M.Player.dead && !window.__deathAbort) {
+        const cond = D.cond[p.ch];
+        let go = true; if (cond) { try { go = !!cond(); } catch (e) { go = false; } }
+        if (p.std ? !M.Enemies.standard.active : !M.Script.list().some((c) => c.name === p.boss)) { D.log.push({ ...p, skipped: p.std ? 'it stopped first' : 'the fight ended first' }); D.pending = null; }
+        else if (go) {
+          const l = M.Save.latest(), env = l ? M.Save._readEnv(l.slot) : null;
+          D.log.push({ ...p, room: M.World.room, outage: !!M.S.outage, hp: M.S.health, at: +((M.S.stats && M.S.stats.time) || 0).toFixed(1),
+            slot: l ? l.slot : null, save: env ? { room: env.start && env.start.room ? env.start.room : env.S.room, chapterStart: env.chapterStart ?? null, S: env.S } : null });
+          D.pending = null;
+          window.__deathAbort = true;
+          M.Game.death();
+        }
+      }
+      return r;
+    };
+    const adv = SH.advance;
+    SH.advance = async function (sec = 1) {
+      const n = Math.max(1, Math.round(Number(sec) * 30));
+      for (let k = 0; k < n; k += 6) { if (window.__deathAbort) break; await adv.call(SH, Math.min(6, n - k) / 30); }
+      return SH.state();
+    };
+    }
     // every chapter's begin(G, o): who ran, and whether it was a resume
     M.CHAPTERS.forEach((ch, n) => { if (!ch || typeof ch.begin !== 'function' || ch.begin.__chain) return;
       const b = ch.begin; ch.begin = function (G, o) { C.begins.push({ n, resumed: !!(o && o.resumed), room: M.World.room, ...at() }); return b.call(this, G, o); }; ch.begin.__chain = true; });
@@ -325,6 +374,78 @@ async function checkAutosaves(h, notes, handoffs) {
   await quitToTitle(h);
 }
 
+// ---- SH_DEATH ---------------------------------------------------------------------------------------------------------
+// the harness handle the chapter tests get in death mode: every eval runs as usual, then throws once the injected death
+// has happened (window.__deathAbort), so the chapter's test unwinds at its next step (its finally blocks still run
+// their code: keys released, holds let go)
+function deathH(h) {
+  return { ...h, eval: (code) => h.eval(`const __r = await (async () => { ${code}
+ })(); if (window.__deathAbort) throw new Error('__DEATH_ABORT__ (the chain killed Aidan in a boss fight)'); return __r;`) };
+}
+// after the injected death: the death screen as a player sees it → CONTINUE (the latest save) → the save exactly as
+// written, and nothing of the death (the drained colour, the static, the NO SIGNAL), the fight or the Outage left
+async function deathContinue(h, n) {
+  const bad = [];
+  await ev(h, 'window.__deathAbort = false; try { SH.mod.Input.releaseAll(); } catch (e) {} return 1');
+  for (const k of ['w', 'a', 's', 'd', 'Shift', 'e']) { try { await h.page.keyboard.up(k); } catch (e) { /* not down */ } }
+  const d = await ev(h, 'const d = window.__chain.death.log.slice(-1)[0]; return d ? { ...d, save: d.save ? { room: d.save.room, chapterStart: d.save.chapterStart } : null } : null');
+  const where = d ? `died in ${d.boss} (${d.room}${d.outage ? ', Outage' : ''}, ${d.hp} health)` : 'died';
+  if (!d || !d.save) return { bad: ['no save to continue from'], line: where };
+  const e0 = await ev(h, 'return SH.errors.length');
+  if (!(await advanceUntil(h, `SH.mode === 'death' && ${menuReady('death')} && SH.mod.Menus._top.st.listF.v >= 0.5`, 30, { step: 0.2 }))) {
+    bad.push('the death screen never offered CONTINUE: ' + JSON.stringify(await ev(h, 'return { st: SH.state(), mode: SH.mode, menu: SH.mod.Menus.current }')));
+    return { bad, line: where };
+  }
+  const menu = await ev(h, 'const L = SH.mod.Menus._top.st.list; return { cur: L.items[L.i].label, items: L.items.map((x) => x.label + (x.off ? " (off)" : "")), ns: !!document.querySelector("#ui .dt-ns"), desat: +SH.mod.Render.post.desat.toFixed(2) }');
+  if (menu.cur !== 'CONTINUE' || menu.items.join() !== 'CONTINUE,LOAD GAME,TITLE') bad.push('the death screen: ' + JSON.stringify(menu));
+  if (!menu.ns) bad.push('no NO SIGNAL on the death screen');
+  const b0 = await ev(h, 'return window.__chain.begins.length');
+  await nav(h, 'confirm', 0.3);
+  if (!(await advanceUntil(h, "SH.mode === 'play' && !!SH.mod.World.room && !SH.mod.World.transitioning && !SH.mod.Menus.isOpen()", 40, { step: 0.1 }))) {
+    bad.push('CONTINUE never came back to play: ' + JSON.stringify(await ev(h, 'return { st: SH.state(), mode: SH.mode, menu: SH.mod.Menus.current }')));
+    return { bad, line: where };
+  }
+  await advance(h, 0.3);
+  const r = await ev(h, `const M = SH.mod, S = SH.S, d = window.__chain.death.log.slice(-1)[0], w = d.save.S, bad = [];
+    const J = (x) => JSON.stringify(x), inv = (s) => s.inv.map((i) => i.id + '×' + i.n).sort().join(' ');
+    if (M.World.room !== d.save.room) bad.push('continued in ' + M.World.room + ', the save is in ' + d.save.room);
+    if (S.chapter !== w.chapter) bad.push('S.chapter ' + S.chapter + ' ≠ ' + w.chapter);
+    if (S.F !== w.F || S.A !== w.A) bad.push('F/A ' + S.F + '/' + S.A + ' ≠ ' + w.F + '/' + w.A);
+    if (inv(S) !== inv(w)) bad.push('inventory ' + inv(S) + ' ≠ ' + inv(w));
+    if (S.chaseHits !== w.chaseHits) bad.push('chaseHits ' + S.chaseHits + ' ≠ ' + w.chaseHits);
+    if (J(S.calls) !== J(w.calls)) bad.push('calls ' + J(S.calls) + ' ≠ ' + J(w.calls));
+    for (const k of ['waiSaved', 'chaseSaved', 'chloeSaved', 'lukaSaved', 'lukeSaved', 'acceptedDeal', 'waiLost', 'chaseHurt', 'standardName']) if (J(S.flags[k]) !== J(w.flags[k])) bad.push('flag ' + k + ' ' + J(S.flags[k]) + ' ≠ ' + J(w.flags[k]));
+    if (J(S.freedOrder) !== J(w.freedOrder)) bad.push('freedOrder differs');
+    if (!!S.outage !== !!w.outage) bad.push('outage ' + !!S.outage + ' ≠ the save ' + !!w.outage);
+    if (M.Player.dead) bad.push('Aidan is still down');
+    if (S.health !== w.health) bad.push('health ' + S.health + ' ≠ ' + w.health);
+    const post = M.Render.post;
+    if (post.desat > 0.02 || post.noise > 0.6) bad.push('the death is still on screen: desat ' + post.desat.toFixed(2) + ', noise ' + post.noise.toFixed(2));
+    const snd = M.Snd.stats();
+    if (snd.static > 0.95) bad.push('the death static is still up (' + snd.static + ')');   // (below that: the phone static near a threat)
+    if (!S.outage && M.Tex.outage > 0.01) bad.push('Outage textures after continuing in the Fog world (Tex.outage ' + M.Tex.outage + ')');
+    if (!S.outage && snd.outageBed) bad.push('the Outage bed after continuing in the Fog world');
+    // (the transmitter room holds the dissolve off on purpose: "the one place the Outage never reaches")
+    if (S.outage && M.Tex.outage < 0.99 && M.World.room !== 'c8_transmitter') bad.push('continued into the Outage without its textures (Tex.outage ' + M.Tex.outage + ')');
+    if (M.World.outageBusy) bad.push('an Outage transition is running after CONTINUE');
+    const ids = (M.Enemies.list || []).filter((e) => e && !e.removed).map((e) => e.id);
+    const dup = ids.filter((id, i) => ids.indexOf(id) !== i);
+    if (dup.length) bad.push('enemies twice: ' + dup.join(', '));
+    if (M.UI.hud === false) bad.push('the HUD is still hidden after CONTINUE');
+    return { bad, room: M.World.room, outage: !!S.outage, F: S.F, A: S.A, bed: snd.bed };`);
+  bad.push(...r.bad);
+  // begin() runs again after a chapter-start autosave (resumed)
+  if (d.save.chapterStart !== null && d.save.chapterStart !== undefined) {
+    // (continueFrom runs begin() once the room has faded in)
+    await advanceUntil(h, `window.__chain.begins.length > ${b0}`, 8, { step: 0.1 });
+    const bs = (await ev(h, `return window.__chain.begins.slice(${b0})`)).filter((b) => b.n === n);
+    if (bs.length !== 1 || !bs[0].resumed) bad.push('continuing from the chapter-start autosave: begin() ' + JSON.stringify(bs));
+  }
+  await advance(h, 1.0);
+  for (const e of await ev(h, `return SH.errors.slice(${e0})`)) bad.push('error: ' + e);
+  return { bad, line: `${where} → CONTINUE → ${d.slot === 'auto' ? (d.save.chapterStart !== null ? 'the chapter-start autosave' : 'the autosave before the fight') : 'payphone slot ' + (d.slot + 1)}: ${r.room}${r.outage ? ' (Outage)' : ''}, F/A ${r.F}/${r.A}, bed ${r.bed}${bad.length ? ' — ' + bad.length + ' problem(s)' : ' — as saved'}` };
+}
+
 // =====================================================================================================================
 export default async function (page, h) {
   const path = process.env.SH_PATH || 'connected';
@@ -334,10 +455,14 @@ export default async function (page, h) {
   const shots = process.env.SH_SHOTS || '';
   let from = process.env.SH_FROM ? Number(process.env.SH_FROM) : 0;
   const fromAuto = process.env.SH_FROM_AUTO || '';
+  const deathArg = process.env.SH_DEATH || '';
+  // '1' → every boss fight; 'std' → the Standard roaming (Chapters 5 and 6); or a list: '4,8,s5' (s = the Standard)
+  const DEATH = new Map(deathArg === '1' ? [1, 3, 4, 5, 6, 8].map((n) => [n, 'boss']) : deathArg === 'std' ? [[5, 'std'], [6, 'std']]
+    : deathArg.split(',').filter(Boolean).map((x) => (x[0] === 's' ? [Number(x.slice(1)), 'std'] : [Number(x), 'boss'])));
   if (!WANT_ENDING[path]) throw new Error('SH_PATH must be connected|coverage|tomorrow|deal');
   if (shots) fs.mkdirSync(shots, { recursive: true });
   const T0 = Date.now();
-  const tag = `${path}/${riddle}${action !== 'normal' ? '/action-' + action : ''}${resume ? '/resume' : ''}`;
+  const tag = `${path}/${riddle}${action !== 'normal' ? '/action-' + action : ''}${resume ? '/resume' : ''}${DEATH.size ? '/death-' + [...DEATH].map(([n, k]) => (k === 'std' ? 's' : '') + n).join('') : ''}`;
   const all = [];                    // BUG lines
   const timeline = [];
   const handoffs = [];
@@ -345,8 +470,12 @@ export default async function (page, h) {
   let failed = null;
 
   try {
-    await install(h);
+    await install(h, { death: DEATH.size > 0 });
     await endSpy(h);
+    // (Chapter 8: the death comes in Phase 2, "The Close", when the Closer fights back — on the deal path, which never
+    // gets there, during the Pitch)
+    if (DEATH.size && path !== 'deal') await ev(h, 'const D = window.__chain.death; D.cond[8] = () => !!(SH.c8 && SH.c8.fight && SH.c8.fight.phase === 2); return 1');
+    const hh = DEATH.size ? deathH(h) : h;
     // ---- 1. the title → NEW GAME → setup → calibration → P-1 ------------------------------------------------------
     if (fromAuto) {
       // debug aid: continue from a chapter-start autosave a chain run wrote (.build/chainlogs/<path>_<riddle>_chN.auto.json)
@@ -376,7 +505,7 @@ export default async function (page, h) {
       else console.log(`P-1 started (${p1.room}); played through`);
     }
     // ---- 2. the chapters -------------------------------------------------------------------------------------------
-    let prev = null;
+    let prev = null, lineMark8 = 0;
     let mark = { ev: 0, err: await ev(h, 'return SH.errors.length'), begin: 0 };
     for (let n = from; n <= 8; n++) {
       const t0 = Date.now();
@@ -396,8 +525,29 @@ export default async function (page, h) {
       const evMark = n === from ? 0 : await ev(h, 'return window.__chain.ev.length');
       // (the ending sets draw their canvases — the leaderboard, the back-office monitor — as their scene starts, which on the
       // deal path is before Chapter 8's test hands over: record them from the start of the chapter)
-      if (n === 8) await ev(h, 'window.__endCanvasSpy = true; return 1');
-      const r = await CH[n].play(h, { path, riddle, saveLoad: n === 2 || n === 5 || n === 7, notes: [] });
+      if (n === 8) { await ev(h, 'window.__endCanvasSpy = true; return 1'); lineMark8 = await ev(h, 'return (window.__endLines || []).length'); }
+      if (DEATH.has(n)) await ev(h, `window.__chain.death.arm[${n}] = ${JSON.stringify(DEATH.get(n))}; return 1`);
+      let r = null;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          r = await CH[n].play(hh, { path, riddle, saveLoad: attempt === 0 && (n === 2 || n === 5 || n === 7), notes: [], resume: attempt > 0 });
+          break;
+        } catch (e) {
+          if (!(await ev(h, 'return !!window.__deathAbort')) || attempt >= 2) throw e;
+          // the injected death: the death screen → CONTINUE, then the chapter's test carries on from the save
+          const dc = await deathContinue(h, n);
+          console.log(`  †  chapter ${n}: ${dc.line}`);
+          for (const b of dc.bad) all.push(`ch${n} death: ${b}`);
+          if (dc.bad.length) { failed = `the death in chapter ${n}`; throw new Error(`the death in chapter ${n}: ${dc.bad.join(' | ')}`); }
+        }
+      }
+      if (DEATH.has(n)) {
+        // (a death still waiting for its moment when the chapter ended — the deal path never reaches Phase 2 — is dropped)
+        await ev(h, `const D = window.__chain.death; if (D.pending && D.pending.ch === ${n}) { D.log.push({ ...D.pending, skipped: 'its moment never came (the fight ended first)' }); D.pending = null; } D.arm[${n}] = false; return 1`);
+        const dl = (await ev(h, 'return window.__chain.death.log')).filter((d) => d.ch === n);
+        if (!dl.length) all.push(`BUG: SH_DEATH: ${DEATH.get(n) === 'std' ? 'the Standard never roamed' : 'no boss fight started'} in chapter ${n} (nothing to die in)`);
+        else if (dl[0].skipped) console.log(`  †  chapter ${n}: no death (${dl[0].boss}: ${dl[0].skipped})`);
+      }
       const bugs = (r.notes || []).filter((x) => /^(BUG|MISSING)/.test(x));
       const evs = await chainEv(h, evMark);
       const real = (Date.now() - t0) / 1000;
@@ -442,7 +592,8 @@ export default async function (page, h) {
       if (path === 'deal' && !st.flags.acceptedDeal) all.push('BUG: the deal path ended without acceptedDeal');
       if (path !== 'deal' && st.flags.acceptedDeal) all.push('BUG: acceptedDeal set on the ' + path + ' path');
       const e0 = await ev(h, 'return SH.errors.length');
-      const pe = await playEnding(h, want, { since: 0 });
+      // (the ending's lines from Chapter 8 on: an earlier chapter's answering machine says one of E-FT0's lines too)
+      const pe = await playEnding(h, want, { since: lineMark8, deal: path === 'deal' });
       for (const x of pe.notes) console.log('     · ' + x);
       for (const x of pe.notes) if (/^BUG/.test(x)) all.push('ending: ' + x);
       const evs = await chainEv(h);

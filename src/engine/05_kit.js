@@ -966,6 +966,15 @@ const Kit = (() => {
     }
     return ys.sort((a, b) => a - b);
   }
+  // lookUpOK(floors, itemPos, x, z, feetY, outage) — an examine up to 5.5 m above the feet at (x, z) is usable ("look up
+  // at the clock") when no floor layer lies between the feet and it, under the item or under him (that would make it
+  // another level: a balcony, a landing). World.nearestInteractable and the build-time reach check share it.
+  function lookUpOK(floors, p, x, z, feet, outage) {
+    for (const [fx, fz] of [[p.x, p.z], [x, z]]) {
+      for (const y of floorLayers(floors, fx, fz, outage)) if (y > feet + 0.6 && y < p.y + 0.3) return false;
+    }
+    return true;
+  }
   function boxPush(x, z, x0, z0, x1, z1, r) {
     const qx = clamp(x, x0, x1), qz = clamp(z, z0, z1);
     const dx = x - qx, dz = z - qz, d2 = dx * dx + dz * dz;
@@ -1217,9 +1226,10 @@ const Kit = (() => {
       }
       return obj;
     };
-    // (bare: an invisible collider with no geometry of its own — Cam.check's lens test ignores it)
-    K.collider = (x0, z0, x1, z1, o = {}) => { const b = normBox([x0, z0, x1, z1]); const r = collRec((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, (b[2] - b[0]) / 2, (b[3] - b[1]) / 2, 0, { ...o, world: W(o) }); r.bare = true; return r; };
-    K.colliderRot = (cx, cz, w, d, rotDeg = 0, o = {}) => { const r = collRec(cx, cz, w / 2, d / 2, rotDeg, { ...o, world: W(o) }); r.bare = true; return r; };
+    // (bare: an invisible room-level collider with no geometry of its own — Cam.check's lens test ignores it; one a prop
+    // builds for itself (a car's body box) stands for that prop's solid and isn't bare)
+    K.collider = (x0, z0, x1, z1, o = {}) => { const b = normBox([x0, z0, x1, z1]); const r = collRec((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, (b[2] - b[0]) / 2, (b[3] - b[1]) / 2, 0, { ...o, world: W(o) }); r.bare = !ctx.inProp; return r; };
+    K.colliderRot = (cx, cz, w, d, rotDeg = 0, o = {}) => { const r = collRec(cx, cz, w / 2, d / 2, rotDeg, { ...o, world: W(o) }); r.bare = !ctx.inProp; return r; };
     K.blocker = (x0, z0, x1, z1, msg, o = {}) => K.collider(x0, z0, x1, z1, { h: 3, ...o, blocker: msg ?? "I can't go that way." });
     K.ambient = (color, intensity) => { rb.ambient = { color, intensity }; return rb.ambient; };
 
@@ -2682,8 +2692,9 @@ const Kit = (() => {
   }
   // Build-time authoring checks (warnings, once per room and thing):
   //  * an interactable Aidan can't reach — no floor (any layer) within its use radius from which it is no more than
-  //    2.6 m above his feet (World.nearestInteractable drops anything higher as "another level") and no more than 1 m
-  //    below (a yBand limits the layers);
+  //    2.6 m above his feet (World.nearestInteractable drops anything higher as "another level"; an examine may be up
+  //    to 5.5 m above a floor with no other floor between — lookUpOK) and no more than 1 m below (a yBand limits the
+  //    layers);
   //  * an examine within 0.6 m (XZ) of a door, payphone or ladder: the two compete for the same E press — the
   //    nearer / better-faced one always wins, so one of them can't be used head-on (move it, or give one {prio});
   //  * a seam: two walkable floors of about the same height whose edges run side by side less than 0.5 m apart, with
@@ -2699,7 +2710,7 @@ const Kit = (() => {
     for (const it of rb.interactables) {
       if (it.kind === 'ladder' || !it.pos) continue;
       const outage = outOf(it.world), lim = (it.r ?? 1.2) + 0.1;
-      let best = Infinity, any = false;
+      let best = Infinity, any = false, lookUp = false;
       for (const rr of [0, 0.3, 0.6, 0.9, 1.2, 1.6, 2.0]) {
         if (rr > lim) break;
         const n = rr === 0 ? 1 : 12;
@@ -2710,11 +2721,13 @@ const Kit = (() => {
             any = true;
             const dy = it.pos.y - y;
             if (dy >= -1.0) best = Math.min(best, dy);
+            // (an examine of something high up — a wall clock — works from a floor with nothing between: World.reachUp)
+            if (!lookUp && it.kind === 'examine' && dy > 2.6 && dy <= 5.5 && lookUpOK(rb.floors, it.pos, x, z, y, outage)) lookUp = true;
           }
         }
       }
       if (!any) continue;                                        // no floor around it at all (a set piece the player never walks)
-      if (best > 2.6) warnOnce(`reach:${rid}:${it.id}`, `[Kit] room ${rid}: ${it.kind} "${it.id}" at (${r2(it.pos.x)}, ${r2(it.pos.y)}, ${r2(it.pos.z)}) is ${best === Infinity ? 'below every floor around it' : r2(best) + ' m above the floor beneath it'} — Aidan can't use it from there (World.nearestInteractable ignores anything over 2.6 m above his feet or 1 m below); lower it or give it a yBand on the level it belongs to`);
+      if (best > 2.6 && !lookUp) warnOnce(`reach:${rid}:${it.id}`, `[Kit] room ${rid}: ${it.kind} "${it.id}" at (${r2(it.pos.x)}, ${r2(it.pos.y)}, ${r2(it.pos.z)}) is ${best === Infinity ? 'below every floor around it' : r2(best) + ' m above the floor beneath it'} — Aidan can't use it from there (World.nearestInteractable ignores anything over 2.6 m above his feet — 5.5 m for an examine with no floor between — or 1 m below); lower it or give it a yBand on the level it belongs to`);
     }
     // examines competing with a door (or a payphone / ladder — things that stay) for the same E press; interactables
     // whose when() is false at build time (decorative doors, conditional lines) are left out, and so are pickups (the
@@ -2814,7 +2827,7 @@ const Kit = (() => {
     prop: propDetached,
     // CONTRACT+ helpers
     get last() { return last; },                      // the most recent RoomBuild (debugging)
-    floorAt, floorLayers, collide, inBox, matchWorld,  // pure helpers for World
+    floorAt, floorLayers, lookUpOK, collide, inBox, matchWorld,  // pure helpers for World
     mat: (spec) => resolveMat(spec).mat,              // resolve a material spec (see header)
     itemModel: (item) => { const d = ITEMS[item]; try { if (d && typeof d.model === 'function') return d.model(); } catch (e) { console.error(e); } return genericItem(item); },
     clock: makeClock,                                 // Kit.clock([h, m]) → wall clock Object3D with userData.setTime/addMinutes

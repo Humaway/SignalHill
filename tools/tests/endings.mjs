@@ -21,6 +21,7 @@
 // Exports (for chain.mjs / ch8.mjs): playEnding(h, name, o) — continue an ending already under way (SH.mode 'ending' …)
 // to the title and check it (flow, credits music, fate cards, results, EXTRA; the spec lines only when spy(h) was
 // installed before the ending began — o.since = the recorder's mark then); o.skip skips every scene, o.shots = a dir;
+// o.deal: the Follow Up Tomorrow ending reached through the Closer's deal (8-2A — no E-FT0);
 // startEnding(h, name) — a fresh game at the transmitter room with the preset, then SH.ending(name); titleCheck(h, notes);
 // spy(h) — the line recorder (UI.subtitle / card / titleText / textOnBlack, Phone.display, ending canvases).
 import { ev, advance, advanceUntil, mustReach, report } from './lib.mjs';
@@ -248,7 +249,9 @@ export async function playEnding(h, name, o = {}) {
   }
   // ---- the spec's lines, in order (only when played: a skipped scene shows no lines)
   if (!o.skip && spied && o.lines !== false) {
-    const miss = await linesInOrder(h, SPEC.lines[name], since);
+    // (after the Closer's deal, 8-2A: E-FT0 — the automated voice — never plays)
+    const lines = o.deal ? SPEC.lines[name].filter((l) => l !== 'Your callback has been scheduled for: tomorrow.') : SPEC.lines[name];
+    const miss = await linesInOrder(h, lines, since);
     if (miss.length) bad(`lines missing / out of order: ${miss.join(' / ')}`);
   }
   // ---- recorded, and the title offers EXTRA

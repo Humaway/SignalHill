@@ -151,11 +151,15 @@ italic, slanted fallback so it still reads as written (`Tex.handFontPresent(stac
   `{prio}`. `{crawl:true}` makes an interactable usable in crawl mode (only those are). Two traps remain, and the
   build warns about both (below): an examine **on** a door (a note taped to it) never wins, and one ~0.5 m **in front
   of** a door out-scores it when he faces both — keep examines ≥ 0.6 m off a door's line, or give one `{prio}`.
+* **Height reach:** `World.nearestInteractable` ignores anything more than 1 m below his feet or 2.6 m above them
+  ("another level": a balcony, a ladder top) — except an **examine** of something high up (a wall clock, power lines
+  overhead), usable up to 5.5 m above his feet as long as no floor layer lies between his feet and it, under it or
+  under him (`Kit.lookUpOK`).
 * **Build-time warnings** (`[Kit] room …`, once per session): an interactable no floor lets him use (more than 2.6 m
-  above every floor layer within its radius — `World.nearestInteractable` drops it as "another level" — or more than
-  1 m below); an examine within 0.6 m of a door / payphone / ladder (both live at build time); an unwalkable seam
-  (0.02–0.5 m) between two floors of about the same height with nothing walkable or solid in it (`K.floor` beside
-  `K.road` that don't quite meet); more than 8 real point lights within 14 m.
+  above every floor layer within its radius — 5.5 m for a look-up examine, as above — or more than 1 m below); an
+  examine within 0.6 m of a door / payphone / ladder (both live at build time); an unwalkable seam (0.02–0.5 m)
+  between two floors of about the same height with nothing walkable or solid in it (`K.floor` beside `K.road` that
+  don't quite meet); more than 8 real point lights within 14 m.
 * `K.interact(x,y,z, fn, {id, r, hold, holdText, when})`, `K.examine(…)`, `K.pickup(item, x,y,z, {id, n, msg,
   extraOnEasy, rot, glint})` (heal pickups obey `DIFF.pickup`; Hard removes ~30% deterministically by id), `K.doc(docId,
   x,y,z, {id, model:'paper'|'sticky'|'binder'|'board'|'none', wall, glint})` — no markers: `glint` is opt-in
@@ -172,7 +176,8 @@ italic, slanted fallback so it still reads as written (`Tex.handFontPresent(stac
   still switches with `lightsOut` and the Outage banks. `bank` orders the Outage blackout (banks die toward the
   camera). `G.light(name)` → handle `{on(bool), isOn, set(o), setWorld}`. Fluoro tubes and LEDs switch properly even
   inside static props (their emissive parts never merge).
-* `K.collider` / `K.colliderRot` records are marked `bare` (no geometry of their own).
+* Room-level `K.collider` / `K.colliderRot` records are marked `bare` (no geometry of their own: `Cam.check`'s lens test
+  ignores them); one a prop builds for itself (a car's body box) stands for the prop's solid and isn't.
 * `K.fogOnly(fn) / K.outageOnly(fn) / K.world(w, fn)` — tag everything inside (meshes, colliders, lights, floors,
   interactables, triggers). `K.animate(fn(dt,t))` for per-frame behaviour; `K.mark / K.region / K.obj`; `K.dress(kind,
   box, n, {seed, world})` kinds `papers leaves boxes receipts cables contracts cups`.
@@ -281,9 +286,12 @@ name); `switchboard/lamp_panel.setLamp`;
   Hand props: `phone tablet bar coffee clipboard candybar flip headset keys box_cutter extinguisher pen box jumper_tool
   pendant handset card`. `offer` takes `target` (an actor — the hand goes a hand's width short of his chest, at his
   hand height — or a point), clamped to the arm's reach; without it the hand goes out at chest height. `phone_ear`
-  keeps the elbow down in front of the chest (the arm never crosses his face from the far side); `phone_look` keeps
-  the fingers on the phone's back. Wai's reading glasses have no cord; `glassesState('hang')` hooks them into the shirt
-  placket. Chase's earbud cords run down each side of the neck and chest to a splitter at the waist. Idle "habit" gestures fire on their own — set `A.raw.idleLife = false` for long still beats.
+  raises the elbow out to his side and a little back (seen from the far side the arm stays behind his head and never
+  crosses his face; from the front his mouth is clear; the rig's forearm is too short for a dropped elbow with the phone
+  at the ear, so frame phone-side close-ups from the front quarter); `phone_look` keeps the fingers on the phone's back.
+  Wai's reading glasses have no cord; `glassesState('hang')` hooks them into the shirt placket. Chase's earbud cords
+  run down each side of the neck and chest to a splitter at the waist. Idle "habit" gestures fire on their own — set
+  `A.raw.idleLife = false` for long still beats.
 * Camera: `G.cam({pos, target, fov, roll, far, to:{…}, dur, ease, follow, keys:[{t,pos,target,fov,roll}]})` — pos/target
   may be `[x,y,z]`, a mark name, an Object3D or an actor (its head). Returns at once; `await G.camDone()`; the camera
   holds its last frame until `G.camRelease()` (automatic when the scene ends).
@@ -340,11 +348,15 @@ name); `switchboard/lamp_panel.setLamp`;
     `'fogged'` (`dist`, `max`) — the lens is more than 1.6 / density from his chest (FogExp2 ≈ 92 %: a faint ghost;
     21 m in 0.075 street fog, 32 m at 0.05). The density is the room's (fog / outageFog / env, else Render's preset),
     the room's `fogAt(x, y, z, outage)`, or the camera def's `fog: density | false | (x, y, z, outage) => density`;
-    `'lens-inside'` (`hit`, `frame`) — the lens sits inside a closed shell (most rays from it first meet back faces)
-    and the shot shows the shell's insides (≥ 2 of 25 rays through the frame meet a drawn surface inside it: a camera
-    in a parked car), or clutter covers 65 % of the frame within 1.2 m of the lens (opaque surfaces, foliage and
-    sheeting by their opacity: a camera buried in a shrub, behind a curtain). A lens inside a plain single-sided box
-    looking out through its culled side passes (the stair-core / cutaway tricks), and so does foreground dressing;
+    `'lens-inside'` (`hit`, `frame`, `inside`) — the lens sits inside a closed shell (most rays from it first meet back
+    faces) and the shot shows the shell's insides (≥ 2 of 25 rays through the frame meet a drawn surface inside it: a
+    camera at the edge of a parked car); or the lens is ≥ 5 cm inside a prop's own collider (in its height band) and
+    ≥ 2 of the 25 frame rays first meet a drawn surface ≥ 3 cm inside that collider (`inside: 'prop collider'` — a
+    camera in the middle of a car sees its underbody, wheels and the undersides of its glass; room-level `bare`
+    colliders, blockers, exits, doors and enemy bodies don't count); or clutter covers 65 % of the frame within 1.2 m of
+    the lens (opaque surfaces, foliage and sheeting by their opacity: a camera buried in a shrub, behind a curtain). A
+    lens inside a plain single-sided box looking out through its culled side passes (the stair-core / cutaway tricks —
+    the floor, ceiling and walls on the box's boundary don't count as its insides), and so does foreground dressing;
     ladder samples (`ladder: id`) — Aidan on every `K.ladder` (where `Player.climb` holds him, every 0.5 m) against the
     camera whose volume and `y` band hold his feet there (a height no camera contains keeps the camera he climbed in
     with, so it isn't checked).

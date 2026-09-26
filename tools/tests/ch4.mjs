@@ -438,7 +438,7 @@ export async function play(h, opts = {}) {
   const start = await snap(h);
   if (start.chapter !== 4) throw new Error('ch4.play: not at Chapter 4: ' + JSON.stringify(start));
   await settle(h, P, notes);
-  if ((await ev(h, 'return SH.mod.World.room')) !== 'c4_wirelane') throw new Error('ch4.play: expected to start on Wire Lane');
+  if (!opts.resume && (await ev(h, 'return SH.mod.World.room')) !== 'c4_wirelane') throw new Error('ch4.play: expected to start on Wire Lane');
   const F0 = start.F, A0 = start.A;
   const riddle = opts.riddle || (await ev(h, "return (SH.S.difficulty && SH.S.difficulty.riddle) || 'normal'"));
   const flag = (n) => ev(h, `return !!(SH.S.flags && SH.S.flags[${JSON.stringify(n)}])`);
@@ -592,7 +592,10 @@ export async function play(h, opts = {}) {
         await mustReach(h, "SH.mod.World.room === 'c4_oldstore' && !SH.mod.World.transitioning", 10, 'the side door into Chase\'s old store');
       }
       // CUTSCENE 4-2 "Hit 'Em First" → BOSS: the Escalation → CUTSCENE 4-3 "Safe Room"
-      if (P.play) {
+      // (a CONTINUE from the autosave before the fight goes straight back into it: 4-2 is not played again)
+      if (opts.resume && (await done('cs:4-2'))) {
+        await mustReach(h, "SH.mod.Script.list().some((c) => c.name === 'boss:escalation')", 10, 'the Escalation again after CONTINUE');
+      } else if (P.play) {
         await mustReach(h, 'SH.mod.Script.cutscene', 8, '4-2 starting');
         await shot(h, opts, '42_start');
         await playUntil(h, "!SH.mod.Script.cutscene && SH.mod.Player.control !== false", 120, '4-2 playing through');

@@ -386,7 +386,7 @@ export async function play(h, opts = {}) {
   const start = await snap(h);
   if (start.chapter !== 3) throw new Error('ch3.play: not at Chapter 3: ' + JSON.stringify(start));
   await settle(h, P, notes);
-  if ((await ev(h, 'return SH.mod.World.room')) !== 'c3_exchangerd') throw new Error('ch3.play: expected to start on Exchange Road');
+  if (!opts.resume && (await ev(h, 'return SH.mod.World.room')) !== 'c3_exchangerd') throw new Error('ch3.play: expected to start on Exchange Road');
   const F0 = start.F, A0 = start.A;
   const riddle = opts.riddle || (await ev(h, "return (SH.S.difficulty && SH.S.difficulty.riddle) || 'normal'"));
   const flag = (n) => ev(h, `return !!(SH.S.flags && SH.S.flags[${JSON.stringify(n)}])`);

@@ -6786,6 +6786,15 @@ const Kit = (() => {
     }
     return ys.sort((a, b) => a - b);
   }
+  // lookUpOK(floors, itemPos, x, z, feetY, outage) — an examine up to 5.5 m above the feet at (x, z) is usable ("look up
+  // at the clock") when no floor layer lies between the feet and it, under the item or under him (that would make it
+  // another level: a balcony, a landing). World.nearestInteractable and the build-time reach check share it.
+  function lookUpOK(floors, p, x, z, feet, outage) {
+    for (const [fx, fz] of [[p.x, p.z], [x, z]]) {
+      for (const y of floorLayers(floors, fx, fz, outage)) if (y > feet + 0.6 && y < p.y + 0.3) return false;
+    }
+    return true;
+  }
   function boxPush(x, z, x0, z0, x1, z1, r) {
     const qx = clamp(x, x0, x1), qz = clamp(z, z0, z1);
     const dx = x - qx, dz = z - qz, d2 = dx * dx + dz * dz;
@@ -7037,9 +7046,10 @@ const Kit = (() => {
       }
       return obj;
     };
-    // (bare: an invisible collider with no geometry of its own — Cam.check's lens test ignores it)
-    K.collider = (x0, z0, x1, z1, o = {}) => { const b = normBox([x0, z0, x1, z1]); const r = collRec((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, (b[2] - b[0]) / 2, (b[3] - b[1]) / 2, 0, { ...o, world: W(o) }); r.bare = true; return r; };
-    K.colliderRot = (cx, cz, w, d, rotDeg = 0, o = {}) => { const r = collRec(cx, cz, w / 2, d / 2, rotDeg, { ...o, world: W(o) }); r.bare = true; return r; };
+    // (bare: an invisible room-level collider with no geometry of its own — Cam.check's lens test ignores it; one a prop
+    // builds for itself (a car's body box) stands for that prop's solid and isn't bare)
+    K.collider = (x0, z0, x1, z1, o = {}) => { const b = normBox([x0, z0, x1, z1]); const r = collRec((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, (b[2] - b[0]) / 2, (b[3] - b[1]) / 2, 0, { ...o, world: W(o) }); r.bare = !ctx.inProp; return r; };
+    K.colliderRot = (cx, cz, w, d, rotDeg = 0, o = {}) => { const r = collRec(cx, cz, w / 2, d / 2, rotDeg, { ...o, world: W(o) }); r.bare = !ctx.inProp; return r; };
     K.blocker = (x0, z0, x1, z1, msg, o = {}) => K.collider(x0, z0, x1, z1, { h: 3, ...o, blocker: msg ?? "I can't go that way." });
     K.ambient = (color, intensity) => { rb.ambient = { color, intensity }; return rb.ambient; };
 
@@ -8502,8 +8512,9 @@ const Kit = (() => {
   }
   // Build-time authoring checks (warnings, once per room and thing):
   //  * an interactable Aidan can't reach — no floor (any layer) within its use radius from which it is no more than
-  //    2.6 m above his feet (World.nearestInteractable drops anything higher as "another level") and no more than 1 m
-  //    below (a yBand limits the layers);
+  //    2.6 m above his feet (World.nearestInteractable drops anything higher as "another level"; an examine may be up
+  //    to 5.5 m above a floor with no other floor between — lookUpOK) and no more than 1 m below (a yBand limits the
+  //    layers);
   //  * an examine within 0.6 m (XZ) of a door, payphone or ladder: the two compete for the same E press — the
   //    nearer / better-faced one always wins, so one of them can't be used head-on (move it, or give one {prio});
   //  * a seam: two walkable floors of about the same height whose edges run side by side less than 0.5 m apart, with
@@ -8519,7 +8530,7 @@ const Kit = (() => {
     for (const it of rb.interactables) {
       if (it.kind === 'ladder' || !it.pos) continue;
       const outage = outOf(it.world), lim = (it.r ?? 1.2) + 0.1;
-      let best = Infinity, any = false;
+      let best = Infinity, any = false, lookUp = false;
       for (const rr of [0, 0.3, 0.6, 0.9, 1.2, 1.6, 2.0]) {
         if (rr > lim) break;
         const n = rr === 0 ? 1 : 12;
@@ -8530,11 +8541,13 @@ const Kit = (() => {
             any = true;
             const dy = it.pos.y - y;
             if (dy >= -1.0) best = Math.min(best, dy);
+            // (an examine of something high up — a wall clock — works from a floor with nothing between: World.reachUp)
+            if (!lookUp && it.kind === 'examine' && dy > 2.6 && dy <= 5.5 && lookUpOK(rb.floors, it.pos, x, z, y, outage)) lookUp = true;
           }
         }
       }
       if (!any) continue;                                        // no floor around it at all (a set piece the player never walks)
-      if (best > 2.6) warnOnce(`reach:${rid}:${it.id}`, `[Kit] room ${rid}: ${it.kind} "${it.id}" at (${r2(it.pos.x)}, ${r2(it.pos.y)}, ${r2(it.pos.z)}) is ${best === Infinity ? 'below every floor around it' : r2(best) + ' m above the floor beneath it'} — Aidan can't use it from there (World.nearestInteractable ignores anything over 2.6 m above his feet or 1 m below); lower it or give it a yBand on the level it belongs to`);
+      if (best > 2.6 && !lookUp) warnOnce(`reach:${rid}:${it.id}`, `[Kit] room ${rid}: ${it.kind} "${it.id}" at (${r2(it.pos.x)}, ${r2(it.pos.y)}, ${r2(it.pos.z)}) is ${best === Infinity ? 'below every floor around it' : r2(best) + ' m above the floor beneath it'} — Aidan can't use it from there (World.nearestInteractable ignores anything over 2.6 m above his feet — 5.5 m for an examine with no floor between — or 1 m below); lower it or give it a yBand on the level it belongs to`);
     }
     // examines competing with a door (or a payphone / ladder — things that stay) for the same E press; interactables
     // whose when() is false at build time (decorative doors, conditional lines) are left out, and so are pickups (the
@@ -8634,7 +8647,7 @@ const Kit = (() => {
     prop: propDetached,
     // CONTRACT+ helpers
     get last() { return last; },                      // the most recent RoomBuild (debugging)
-    floorAt, floorLayers, collide, inBox, matchWorld,  // pure helpers for World
+    floorAt, floorLayers, lookUpOK, collide, inBox, matchWorld,  // pure helpers for World
     mat: (spec) => resolveMat(spec).mat,              // resolve a material spec (see header)
     itemModel: (item) => { const d = ITEMS[item]; try { if (d && typeof d.model === 'function') return d.model(); } catch (e) { console.error(e); } return genericItem(item); },
     clock: makeClock,                                 // Kit.clock([h, m]) → wall clock Object3D with userData.setTime/addMinutes
@@ -15548,9 +15561,11 @@ const Rig = (() => {
     // curl 0.42 laid four blocky fingers across the screen in every insert)
     phone_look: (T) => AP([0.04, -0.07, T.chestD + 0.16], [1, -1, -0.2], [-0.35, 0.6, 0.75], [-0.15, 0.5, -0.9], 0.12, 0.3),
     phone_up: (T) => AP([0.075, 0.17, T.chestD + 0.22], [1, -1, 0], [0, 1, 0.1], [0.05, 0.05, 1], 0.6, 0.45),
-    // (the elbow down in front of the chest, the forearm up beside the jaw, the phone's screen to the ear: seen from the
-    // far side the arm stays behind his face, seen from the front it doesn't cover his mouth. The old pole [0.8,-1,0.3]
-    // held the elbow out at shoulder height, 45° forward — the upper arm crossed his face in every close side shot)
+    // (the forearm up beside the jaw, the phone's screen to the ear, the elbow raised out to his side and a little back,
+    // about 0.14 m above the shoulder joint: seen from the far side the whole arm stays behind his head, seen from the
+    // front the elbow is out to his side and his mouth is clear. With the phone at the ear the rig's forearm is too short
+    // for a dropped elbow: every elbow-down pole ends at shoulder height and forward, the forearm across his jaw from the
+    // far side — as the old pole [0.8,-1,0.3] did, the upper arm crossing his face in every close side shot)
     phone_ear: (T) => AP([0.08, 0.12, -0.01], [0.6, -1.5, 0.2], [-0.2, 1, 0.1], [-1, 0, 0.15], 0.6, 0.45),
     cup: (T) => AP([0.08, -0.15, T.chestD + 0.09], [1, -0.8, -0.3], [-0.6, 0, 0.8], [-1, 0.1, -0.2], 0.75, 0.5),
     bar: (T) => AP([0.125, -0.35, 0.035], [0.3, 0, -1], [0, -1, 0.12], [-1, 0, 0], 0.95, 0.7),
@@ -17543,11 +17558,27 @@ const Cam = (() => {
   // its culled side sees nothing of the box and passes — the stair-core and cutaway-wall tricks — and so does a lens
   // tucked into a cupboard shooting past foreground dressing outside it. Also flagged: clutter against the glass — 65 % of
   // the frame (the 25 rays, a drawn opaque surface counting 1, foliage / sheeting their combined opacity) covered within
-  // 1.2 m of the lens (a camera inside a tree canopy or a shrub, behind a curtain). → {x, y, z, hit, frame} | null
+  // 1.2 m of the lens (a camera inside a tree canopy or a shrub, behind a curtain). Also flagged: the lens inside a prop's
+  // collider (in its height band, ≥ 5 cm in) while at least 2 of the 25 frame rays first meet a drawn surface inside that
+  // collider's box (≥ 3 cm in: not the floor, ceiling or walls around it) — a lens in the middle of a parked car sees its
+  // underbody, wheels and the undersides of its glass, but its bodywork is one extruded shell, so the back-face count
+  // above can stay under 9. Room-level K.collider / K.colliderRot records (bare: invisible), blockers, exits, doors and
+  // enemy bodies don't count; a lens inside a plain solid K.box still passes (it sees out through the culled faces).
+  // → {x, y, z, hit, frame, inside?} | null
   const DIRS = (() => { const a = []; for (const v of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) a.push(V(...v)); for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) a.push(V(x, y, z).normalize()); return a; })();
   const FRAME = []; for (const nx of [-0.9, -0.45, 0, 0.45, 0.9]) for (const ny of [-0.9, -0.45, 0, 0.45, 0.9]) FRAME.push([nx, ny]);
   const _n = V(), _fd = V(), _shell = new THREE.Box3(), _sp = V(), NEAR_CLUTTER = 1.2;
-  function lensInside(c, occ, aspect) {
+  const solidCol = (col, outage) => col && !col.bare && !col.blocker && !col.soft && !col.exit && !col.dynamic && !col.enemy && !col.door
+    && col.enabled !== false && matchWorld(col.world, outage) && col.h > 0;
+  // p at least m inside the collider (3D: its footprint and its height band) — a floor, ceiling or wall face on the
+  // collider's boundary (the stair-core trick: the lens inside a solid K.box looking out through its culled side over
+  // the floor under it) is not "inside"
+  const insideCol = (col, p, m) => {
+    if (p.y < (col.y || 0) + m || p.y > (col.y || 0) + col.h - m) return false;
+    const q = Kit.collide(col, p.x, p.z, 0.001);
+    return !!q && Math.hypot(q.x, q.z) >= m + 0.001;
+  };
+  function lensInside(c, occ, aspect, cols = null, outage = false) {
     if (!occ || !occ.length) return null;
     // (a rail camera only ever sits where Aidan's projection onto the rail puts it: the stretch the volume covers)
     const v = c.vol, rp = (x, z) => railPos(c, x, z, V());
@@ -17576,6 +17607,17 @@ const Cam = (() => {
         // (where it looks: the key's target, else the def's target — by default the volume's middle)
         const tgt = c.type === 'scripted' && c.keys && c.keys[i] ? c.keys[i].target : c.target;
         probe.fov = c.fovV; probe.aspect = aspect; orient(probe, p, tgt, c.roll); probe.updateMatrixWorld(true);
+        // the lens inside a prop's solid (its collider, ≥ 5 cm in, within its height band) and the shot shows its insides
+        if (cols) for (const col of cols) {
+          if (!solidCol(col, outage) || !insideCol(col, p, 0.05)) continue;
+          let seen = 0, what = null;
+          for (const [nx, ny] of FRAME) {
+            _fd.set(nx, ny, 0.5).unproject(probe).sub(p).normalize();
+            const f = along(p, _fd, cam.near * 1.2, 8).find((qq) => !qq.culled);
+            if (f && insideCol(col, f.h.point, 0.03)) { seen++; what = what || f.h.object; }
+          }
+          if (seen >= 2) return { x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2), hit: nameOf(what, occ.root), frame: +(seen / FRAME.length).toFixed(2), inside: col.name || 'prop collider' };
+        }
         // clutter against the glass: half the frame is hidden by something within 1.2 m of the lens (a tree canopy, a
         // curtain, a shelf the lens is buried in): per ray, 1 for a drawn opaque surface, else 1 − Π(1 − α) of the veils
         let cover = 0, nearWhat = null;
@@ -17646,8 +17688,8 @@ const Cam = (() => {
         // the lens: once per camera per world
         if (o.lens !== false) for (const c of cams) {
           if (!matchWorld(c.world, outage)) continue;
-          const r = lensInside(c, all, aspect);
-          if (r) problems.push({ cam: c.id, x: r.x, z: r.z, y: r.y, why: 'lens-inside', hit: r.hit, frame: r.frame, world: w });
+          const r = lensInside(c, all, aspect, rb.colliders, outage);
+          if (r) problems.push({ cam: c.id, x: r.x, z: r.z, y: r.y, why: 'lens-inside', hit: r.hit, frame: r.frame, ...(r.inside ? { inside: r.inside } : {}), world: w });
         }
         // one sample (feet at y) against the camera that shows it
         const sample = (c, xx, y, zz, extra) => {
@@ -19417,10 +19459,21 @@ const World = (() => {
     return safeWhen(it.when);
   }
   // nearestInteractable(pos, yawRadians, maxDist=3, {cone (deg, default 100), use (within its own r), look (skip
-  // look:false), crawl (only crawl:true ones)}). Score = distance + angle off the facing + the kind's priority (m):
+  // look:false), crawl (only crawl:true ones)}) — at most 1 m below his feet and 2.6 m above them (5.5 m for an examine
+  // with no floor between: see reachUp). Score = distance + angle off the facing + the kind's priority (m):
   // doors, pickups, payphones, ladders 0 · docs, stickers 0.1 · interacts 0.15 · people (npc) 0.35 · examines 0.6 —
   // an examine or a person beside a door or a pickup no longer takes the E press meant for it. it.prio overrides.
   const KIND_PRIO = { door: 0, pickup: 0, payphone: 0, break: 0, ladder: 0, doc: 0.1, sticker: 0.1, interact: 0.15, npc: 0.35, examine: 0.6 };
+  // Height: an interactable more than 2.6 m above his feet is on another level (a balcony, a ladder top) — except an
+  // examine of something high up (a wall clock, the power lines overhead): up to LOOK_UP m, as long as no floor lies
+  // between his feet and it (under it or under him). Kit's build-time reach check uses the same rule (Kit.lookUpOK).
+  const LOOK_UP = 5.5;
+  function reachUp(it, pos) {
+    const dy = it.pos.y - (pos.y || 0);
+    if (dy <= 2.6) return true;
+    if (it.kind !== 'examine' || dy > LOOK_UP) return false;
+    return Kit.lookUpOK(build.floors, it.pos, pos.x, pos.z, pos.y || 0, !!S.outage);
+  }
   function nearestInteractable(pos, yaw, maxDist = 3, o = {}) {
     if (!build) return null;
     const cone = (o.cone ?? (o.use ? 95 : 100)) * D2R;
@@ -19432,9 +19485,10 @@ const World = (() => {
       if (!inBand(it.yBand, pos.y)) continue;
       const dx = it.pos.x - pos.x, dz = it.pos.z - pos.z, d = Math.hypot(dx, dz);
       const dy = it.pos.y - (pos.y || 0);
-      if (dy < -1.0 || dy > 2.6) continue;                          // another level (ladder top, balcony)
+      if (dy < -1.0) continue;                                      // another level (below)
       const lim = o.use ? Math.min(maxDist, (it.r ?? 1.2) + 0.15) : maxDist;
       if (d > lim) continue;
+      if (dy > 2.6 && !reachUp(it, pos)) continue;                  // another level (ladder top, balcony)
       const ang = d < 0.35 ? 0 : Math.abs(U.angleDiff(yaw, Math.atan2(dx, dz)));
       if (ang > cone) continue;
       const s = d + ang * 0.9 + (it.prio ?? KIND_PRIO[it.kind] ?? 0);

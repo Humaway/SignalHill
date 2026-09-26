@@ -2262,6 +2262,23 @@
       // the building's back wall (south), the side door
       K.wall(-0.2, 10.2, 20.2, 10.2, 7.5, { tex: 'brick', color: '#735c4b' }, { openings: [{ at: YD.door + 0.2, w: 1.0, h: 2.2 }], thick: 0.4, grime: true });
       for (let i = 0; i < 6; i++) K.plane(2 + i * 3.2, 4.6, 9.98, 1.1, 2.1, winTex(i + 5), { rotY: 180 });
+      // the building behind that wall: a solid rear wing (a dark recess behind the side door for its leaf to swing into),
+      // the main block set back and higher, parapet caps — the wall is never a card with the fog behind it
+      {
+        const BR = { tex: 'brick', color: '#735c4b' }, CAP = { tex: 'concrete', color: '#76786f' }, NS = { shadow: false };
+        K.box((-12 + 15.3) / 2, 0, 18.2, 27.3, 7.5, 15.6, BR, NS);
+        K.box((16.7 + 34) / 2, 0, 18.2, 17.3, 7.5, 15.6, BR, NS);
+        K.box(16, 0, 19, 1.4, 7.5, 14, BR, NS);
+        K.box(16, 2.4, 11.2, 1.4, 5.1, 1.6, BR, NS);
+        K.plane(16, 1.2, 11.98, 1.4, 2.4, { color: '#0a0c0b', roughness: 1 }, { rotY: 180 });
+        K.box(-6.1, 0, 10.2, 11.8, 7.5, 0.4, BR, NS);
+        K.box(27.1, 0, 10.2, 13.8, 7.5, 0.4, BR, NS);
+        K.box(11, 7.5, 10.25, 46.2, 0.35, 0.6, CAP, NS);
+        K.box(11, 7.5, 21, 46, 2.4, 10, { tex: 'brick', color: '#6d5a4c' }, NS);
+        K.box(11, 9.9, 21, 46.3, 0.3, 10.3, CAP, NS);
+        for (let i = 0; i < 4; i++) { K.plane(-12.02, 4.6, 12.5 + i * 3.4, 1.1, 2.1, winTex(i + 2), { rotY: -90 }); K.plane(34.02, 4.6, 12.5 + i * 3.4, 1.1, 2.1, winTex(i + 4), { rotY: 90 }); }
+        for (const x of [-11.9, 33.9]) K.cyl(x, 0, 10.1, 0.06, 7.5, { tex: 'metal', color: '#4a4f4c' }, { seg: 6 });
+      }
       K.door({ id: 'c3_yard:frame', x: YD.door, z: 10.2, rot: 0, w: 0.9, style: 'metal', to: 'c3_frame', entry: 'yard', color: '#5a6660', sign: 'EXCHANGE — STAFF ONLY' });
       // chain-link and barbed wire round the yard; the gate in the west fence
       K.prop('chainlink', 10, 0.1, 0, { len: 20, h: 2.4, barbed: true });
@@ -2293,10 +2310,29 @@
       }, { id: 'c3yd:gate', r: 1.6 });
       // beyond the gate: the lane dropping away west into the fog (walkable a few metres out, so the gate's trigger / the
       // exit to Wire Lane can be reached — without a floor there Aidan stops at the yard's edge, short of the box)
-      K.box(-6, -0.4, YD.gateZ, 12, 0.4, 5.0, 'gravel');
+      K.box(-1.7, -0.4, YD.gateZ, 3.4, 0.4, 5.0, 'gravel');
       K.floor(-3.4, YD.gateZ - 2.0, 0, YD.gateZ + 2.0, 'gravel', { visible: false });
       K.blocker(-3.6, YD.gateZ - 2.2, -3.2, YD.gateZ + 2.2, null);
       K.prop('power_pole', -4, 2.2, 0, { h: 9, span: 0 });
+      // ... and on: Wire Lane's bitumen falling west between the cable depot's chain-link (north) and the substation's
+      // (south); the ground all round the yard (the yard never floats in the white)
+      {
+        const lY = (x) => Math.min(0, x + 3.4) * 0.036, t = Math.atan(0.036);
+        C3_ground(K, -60, 1, -3.4, 9, (x) => lY(x), 'bitumen');
+        C3_ground(K, -60, -40, -3.4, 1, (x) => lY(x) - 0.05, 'grass');
+        C3_ground(K, -60, 9, -3.4, 40, (x) => lY(x) - 0.05, 'grass');
+        C3_ground(K, -3.4, -40, 60, 40, () => -0.05, 'grass');
+        for (let x = -3.6; x > -44; x -= 5) {
+          const cx = x - 2.5;
+          for (const [z, rot, tl] of [[0.9, 0, t], [9.1, 180, -t]]) {
+            const f = K.prop('chainlink', cx, z, rot, { len: 5.02, h: 2.1, barbed: z < 5, y: lY(cx) - 0.02, collide: false });
+            if (f) { f.rotation.order = 'YXZ'; f.rotation.set(0, rot * D2R, tl); }
+          }
+        }
+        for (const [x, z, r] of [[-9, -2.2, 10], [-12.5, -1.6, 70], [-16, -3.0, 0]]) K.prop('cable_drum', x, z, r, { variant: 'standing', y: lY(x) - 0.05 });
+        K.prop('substation', -17.5, 13.5, 0, { y: lY(-17.5) - 0.05 });
+        K.prop('gum_tree', 9, -9, 200, { y: -0.05, seed: 32 });
+      }
       // the yard: cable drums, a stack of pallets, a skip, the old lines truck, a smokers' bench, a dead floodlight
       K.prop('cable_drum', 5.2, 2.2, 20, { variant: 'standing' });
       K.prop('cable_drum', 7.0, 1.6, 80, {});

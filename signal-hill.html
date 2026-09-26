@@ -30922,8 +30922,8 @@ const Debug = (() => {
 // §12 (endings flow, fate cards, credits, New Game+), §14 (acceptance).
 //
 // Boot: Render / Input / UI / Menus / Snd (the AudioContext resumes on the first gesture) / Debug, the main loop,
-//   LOADING while Tex.preload + Kit.preload generate every texture, then the title. SH.ready = true once the title
-//   screen is up.
+//   LOADING while Tex.preload + Kit.preload generate every texture, then (CONTRACT+, audioGate: only while the browser
+//   still locks Web Audio) PRESS ANY KEY TO BEGIN on black, then the title. SH.ready = true once the title screen is up.
 // Main loop (requestAnimationFrame; contract §13 order): Input.update → Menus.update (while open) → Script.update →
 //   (pause / Tab / M / C) → Player.update → Enemies.update → World.update → Phone.update → Rig.update → Cam.update →
 //   Snd.update → UI.update → Render.update + render → Debug.update. Real dt is clamped to 0.05; Time.dt is 0 while a
@@ -31356,7 +31356,41 @@ const Game = (() => {
     bootText('LOADING', 1);
     await wait(0.1);
     bootText(null);
+    await audioGate();
     await title({ intro: true });
+  }
+  // Browsers keep Web Audio silent until the player first presses something, so the title's 3 s of static and the phone
+  // that rings the whole time (§2A steps 1 and 4) would play to nobody. If sound is still locked when loading ends, one
+  // quiet line on black asks for a key first; the title then starts with its sound. (A page allowed to play sound —
+  // a site the browser trusts, the test harness — never sees it. Gamepad buttons don't count as a gesture for the
+  // browser: the line then goes on the first key or click, or after 20 s.)
+  async function audioGate() {
+    const t0 = performance.now();
+    while (!safe('Snd.ready', () => Snd.ready) && performance.now() - t0 < 500) await new Promise((r) => setTimeout(r, 25));
+    if (safe('Snd.ready', () => Snd.ready)) return;
+    const el = document.createElement('div');
+    el.style.cssText = 'position:absolute;inset:0;z-index:9800;background:#000;display:flex;align-items:center;justify-content:center;'
+      + "color:#77766f;font:clamp(12px,1.5vh,18px) Georgia,'Times New Roman',serif;letter-spacing:.3em;padding-left:.3em;opacity:0;transition:opacity .5s linear;";
+    el.textContent = 'PRESS ANY KEY TO BEGIN';
+    (document.getElementById('app') || document.body).appendChild(el);
+    requestAnimationFrame(() => { el.style.opacity = '1'; });
+    window.SH.gate = true;
+    await new Promise((res) => {
+      let done = false;
+      const go = () => { if (done) return; done = true; for (const ev of ['keydown', 'mousedown', 'pointerdown', 'touchend']) window.removeEventListener(ev, go, true); res(); };
+      for (const ev of ['keydown', 'mousedown', 'pointerdown', 'touchend']) window.addEventListener(ev, go, true);
+      const t1 = performance.now();
+      const poll = () => { if (done) return; if (safe('Snd.ready', () => Snd.ready) || performance.now() - t1 > 20000) go(); else setTimeout(poll, 100); };
+      poll();
+    });
+    // (the key that unlocked the sound is not the title's key: it is swallowed with the gate)
+    const t2 = performance.now();
+    while (!safe('Snd.ready', () => Snd.ready) && performance.now() - t2 < 1000) await new Promise((r) => setTimeout(r, 25));
+    safe('Input.consume', () => { Input.releaseAll(); });
+    el.style.opacity = '0';
+    await new Promise((r) => setTimeout(r, 550));
+    el.remove();
+    window.SH.gate = false;
   }
   async function title(o = {}) {
     const tok = ++flowTok;

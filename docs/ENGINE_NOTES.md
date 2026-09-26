@@ -317,7 +317,9 @@ name); `switchboard/lamp_panel.setLamp`;
   crosses his face; from the front his mouth is clear; the rig's forearm is too short for a dropped elbow with the phone
   at the ear, so frame phone-side close-ups from the front quarter); `phone_look` keeps the fingers on the phone's back.
   Wai's reading glasses have no cord; `glassesState('hang')` hooks them into the shirt placket. Chase's earbud cords
-  run down each side of the neck and chest to a splitter at the waist. Idle "habit" gestures fire on their own — set
+  run down each side of the neck and chest to a splitter at the waist. Nan's alarm pendant ("on a cord", §5) hangs on
+  a short cord loop from a clip on her blouse front — never round her neck (§1 wins over §5: nothing round a neck but a
+  lanyard resting on the chest; `tools/tests/lineup.mjs` checks every figure's neck band). Idle "habit" gestures fire on their own — set
   `A.raw.idleLife = false` for long still beats.
 * Camera: `G.cam({pos, target, fov, roll, far, to:{…}, dur, ease, follow, keys:[{t,pos,target,fov,roll}]})` — pos/target
   may be `[x,y,z]`, a mark name, an Object3D or an actor (its head). Returns at once; `await G.camDone()`; the camera
@@ -569,6 +571,10 @@ defineChapter({ n: 1, id: 'ch1', title: 'THE PLAZA', card: 'SIGNAL HILL PLAZA', 
   Never call `G.ending` from inside one of the ending cutscenes (it would wait for itself); call it once, from Ch 8.
   The first room of each chapter pays for first-use texture generation (up to ~0.6 s in headless SwiftShader) — it
   happens behind the chapter card / black, so keep chapter starts on black.
+* **Sound before the title.** Browsers keep Web Audio locked until the player presses something. If it is still locked
+  when LOADING ends, `Game.boot` shows one line on black — PRESS ANY KEY TO BEGIN (`SH.gate` is true meanwhile) — and
+  starts the title after that key, so its 3 s of static and the ringing phone are heard; a page allowed to play sound
+  (the test harness) never sees it. `tools/tests/audiogate.mjs` (needs `SH_CHROME_ARGS="--autoplay-policy=document-user-activation-required"`).
 * **Title backdrop:** `ROOMS.t_title` is built on its own — no player, spawns, triggers or `onEnter`; its `animated`
   callbacks run; its first camera is used with a slow push (a `keys` camera plays as is). Without it a built-in fog
   vista shows. **Attract (60 s idle):** `defineScript('title:attract', async (G, {signal, show}) => { await show(
@@ -689,6 +695,56 @@ each scene (163 runs) · `SH_CHOICE=1` the other option of every choice · `SH_R
 (by default a mismatch is retried once with a reload before each run: only one that survives counts) · `SH_VERBOSE=1`
 each run's timeline and the room it left. Prints a row per scene (game seconds played / skipped, the S changes the scene
 made, the differences) and `PASS skipall`.
+
+**Polish checks (spec §14 and §2A)** — each prints its evidence and ends `PASS <name>`:
+```
+node tools/run.mjs --file .build/x.html --size 640x360  --quiet --script tools/tests/content.mjs   # ~1 min
+node tools/run.mjs --file .build/x.html --size 1280x720 --quiet --script tools/tests/lineup.mjs    # ~3 min
+node tools/run.mjs --file .build/x.html --size 1280x720 --quiet --script tools/tests/title.mjs     # ~4 min
+node tools/run.mjs --file .build/x.html --size 1280x720 --quiet --script tools/tests/ui.mjs        # ~16 min
+node tools/run.mjs --file .build/x.html --size 960x540  --quiet --script tools/tests/options.mjs   # ~2 min
+node tools/run.mjs --file .build/x.html --size 960x540  --quiet --script tools/tests/gamepad.mjs   # ~1 min
+SH_CHROME_ARGS="--autoplay-policy=document-user-activation-required" \
+  node tools/run.mjs --file .build/x.html --size 960x540 --ready 3 --quiet --script tools/tests/audiogate.mjs
+```
+* `content.mjs` — (1) the network: every URL and network API in the built file (only the import map's
+  cdn.jsdelivr.net/npm/three@… entries; a `data:` favicon keeps the browser from asking the server for /favicon.ico),
+  then every request from a fresh load through a room load (the page and seven three.js modules); (2) every room built
+  on its own (`Kit.build`, its chapter's chapter-select state) and its examine interactables counted per world — every
+  walkable room ≥ 5 (cutscene sets, the title backdrop, the ending sets and the dev rooms listed, not failed; the Outage
+  frame hall is the Restructure fight only); (3) nothing that hangs from a ceiling within 1.5 m of an overturned chair.
+* `lineup.mjs` — every Rig preset and every monster that stands on its own (the Escalation at Level 3, the Closer at
+  30 %, the Returns Cage risen) in a bright fog-free studio, front / side / back head-and-shoulders PNGs in
+  `.build/lineup/`, and each figure's meshes crossing the neck band listed (a cord, tether, strap, wire or lead there
+  fails; lanyards pass).
+* `title.mjs` — §2A steps 1–5 at normal speed: a probe installed before the page's scripts logs every title frame (the
+  menu clock the fades run on, the wall clock, the stage, each element's opacity, the hiss and the ring, the audio
+  clock); the 3D view is not drawn in that pass so frames come at a desktop's pace. Checked in game time: 3 s of black
+  with the hiss, the vista fading up, SIGNAL HILL, PRESS ANY KEY 2 s after it is in, a real key stopping the ring
+  **inside a burst** (the cadence is 0–0.4 s and 0.6–1.0 s of every 3 s; a key pressed in the quiet cuts the next burst
+  0.2 s in, ≤ 2.3 s later — `Snd` handles expose `t0`), the menu within 1.2 s (no EXTRA before an ending), 60 idle
+  seconds → the four attract shots with no text → back. Then screenshots of each step, of EXTRA in the menu after an
+  ending and of the EXTRA screen, in `.build/title/`.
+* `ui.mjs` — ~55 overlays and screens (subtitles at the three sizes, thoughts, phone voices, a subtitle under a
+  message, prompts, holds, choices, the call prompt, cards, text on black, the four keypads, the CRM and phone screens,
+  pause, items, the examine view, the maps at each zoom, memos, every paper type, the phone tabs, options, calibration,
+  save / load, new game, EXTRA, death, results, fates, credits) photographed at 1280×720 and 1920×1080 into
+  `.build/ui/<size>/`, and every visible DOM text audited: smaller than 12 px (720p) / 15 px (1080p), off-screen, cut by
+  a box with overflow hidden (a scrolling list and the credit roll excepted), or overlapping another text block. The UI
+  keeps a 12 px floor on small print (legends, tabs, card subtitles, the pause area name, the items status, the memo
+  groups, the save rows' area, NO SIGNAL, the keypad legend, the skip hint). Canvas text (the paper map, the document
+  papers, LCDs) is in the screenshots only. Zoomed in, the map's floor tabs and legend fade off the paper 2.5 s after the
+  last zoom / floor change.
+* `options.mjs` — every Options entry changed with real keys from the pause menu, its effect measured in the running
+  game (the post chain's uniforms — `Render.uniforms`, CONTRACT+ —, a frame's mean luminance, the subtitle's font size,
+  tank vs camera-relative walking, the camera's shake offset, the audio bus gains — `Snd.stats().volumes / buses`,
+  CONTRACT+ —, the examine model's turn, rumble on a synthesised pad), META.options in localStorage after each change,
+  a page reload restoring and applying them at boot, and a first-time NEW GAME going setup → calibration → the game.
+* `gamepad.mjs` — a synthesised standard-mapping pad (`navigator.getGamepads` overridden) plays the title (A, the
+  D-pad and the stick, OPTIONS, B), NEW GAME → setup → calibration → the Prologue skipped by holding Start, then walks,
+  runs (RT), examines (A), torch (Y), quick turn (B), ready / attack (LT / X), pause (Start, D-pad, A, B, Start), map
+  (Select), phone (D-pad up, LB), inventory (RB, R3, D-pad down; LB/RB tabs; the right stick turns an examined model),
+  checks the prompts name the pad's buttons and that rumble reaches it (the phone buzz, the heartbeat at Danger).
 
 **Performance** — `tools/tests/perf.mjs` (spec §2: 60 fps target, never below 30; §14: the Chapter 8 summit road holds
 60 fps on a mid-range laptop):

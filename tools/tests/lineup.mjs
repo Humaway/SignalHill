@@ -65,7 +65,8 @@ function studioPage() {
         if (box.isEmpty()) return;
         if (box.min.y < chinY && box.max.y > collarY + 0.005) {
           const w = Math.max(box.max.x - box.min.x, box.max.z - box.min.z);
-          out.push({ name: o.name || o.parent && o.parent.name || '?', w: Math.round(w * 100) / 100, y0: Math.round(box.min.y * 100) / 100, y1: Math.round(box.max.y * 100) / 100 });
+          let nm = o.name; for (let a = o.parent; !nm && a; a = a.parent) nm = a.name ? a.name + '>' + (o.geometry && o.geometry.type || 'mesh') : '';
+          out.push({ name: nm || '?', w: Math.round(w * 100) / 100, y0: Math.round(box.min.y * 100) / 100, y1: Math.round(box.max.y * 100) / 100 });
         }
       });
       void headY;

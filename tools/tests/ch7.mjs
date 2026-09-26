@@ -436,7 +436,9 @@ async function store(h, P, notes, opts) {
   if (left < 25 || left > 31) notes.push(`BUG: the page clears the doorways for ${left}s (spec: 30 s)`);
   if (inDoors) notes.push('BUG: Smiles still stand in the Ward 3 doors after the page');
   await shot(h, opts, 'nurses_paged');
-  // through the middle door (real keys)
+  // through the middle door (real keys): square in front of it first — a straight line from where the page left him can
+  // clip a security-gate pillar beside the door (the store) and pin him in its corner with the wall
+  await walkTo(h, 4.0, 1.3, { maxSec: 8, tol: 0.3 });
   await walkTo(h, 4.0, -1.2, { maxSec: 10, until: "SH.mod.World.room === 'c7_ward3'" });
   await mustReach(h, "SH.mod.World.room === 'c7_ward3' && !SH.mod.World.transitioning", 10, 'Ward 3 through the cleared door');
 }

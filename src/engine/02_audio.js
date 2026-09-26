@@ -219,6 +219,7 @@ const Snd = (() => {
         setVol: (x, tc) => v.setVol(x, tc),
         set: (params) => { Object.assign(v.params, params || {}); },
         get playing() { return !v.ended && !v.stopping; },
+        get t0() { return v.t0; },                   // CONTRACT+: the audio-clock time it started (loop phase)
         dur: 0,
         done: this.done,
       };
@@ -2041,7 +2042,9 @@ const Snd = (() => {
   // CONTRACT+: Snd.stats() → { state, voices, nodes, loops, bed, world, music, static } (nodes = live per-sound nodes)
   function stats() {
     return { state: ctx ? ctx.state : 'none', voices: voices.size, nodes: liveNodes, loops: loops.size, bed: bed.name,
-      outageBed: !!outBed, world, music: !!(curMusic && !curMusic.ended), static: staticTarget, dimmed: worldDimmed() };
+      outageBed: !!outBed, world, music: !!(curMusic && !curMusic.ended), static: staticTarget, dimmed: worldDimmed(),
+      // (the Options volumes as set, and the bus gains they drive now — tests)
+      volumes: { ...vol }, buses: B && B.master ? { master: B.master.gain.value, effects: B.fx.gain.value, music: B.music.gain.value } : null };
   }
   // CONTRACT+: Snd.names() → { sfx:[…], beds:[…], music:[…], murmur:[…], surfaces:[…] }
   function names() {

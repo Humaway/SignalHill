@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Signal Hill</title>
+<link rel="icon" href="data:,">
 <style>
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
   body { color: #d9d6cc; font-family: Georgia, 'Times New Roman', serif; user-select: none; -webkit-user-select: none; cursor: default; }
@@ -867,6 +868,7 @@ const Snd = (() => {
         setVol: (x, tc) => v.setVol(x, tc),
         set: (params) => { Object.assign(v.params, params || {}); },
         get playing() { return !v.ended && !v.stopping; },
+        get t0() { return v.t0; },                   // CONTRACT+: the audio-clock time it started (loop phase)
         dur: 0,
         done: this.done,
       };
@@ -2689,7 +2691,9 @@ const Snd = (() => {
   // CONTRACT+: Snd.stats() → { state, voices, nodes, loops, bed, world, music, static } (nodes = live per-sound nodes)
   function stats() {
     return { state: ctx ? ctx.state : 'none', voices: voices.size, nodes: liveNodes, loops: loops.size, bed: bed.name,
-      outageBed: !!outBed, world, music: !!(curMusic && !curMusic.ended), static: staticTarget, dimmed: worldDimmed() };
+      outageBed: !!outBed, world, music: !!(curMusic && !curMusic.ended), static: staticTarget, dimmed: worldDimmed(),
+      // (the Options volumes as set, and the bus gains they drive now — tests)
+      volumes: { ...vol }, buses: B && B.master ? { master: B.master.gain.value, effects: B.fx.gain.value, music: B.music.gain.value } : null };
   }
   // CONTRACT+: Snd.names() → { sfx:[…], beds:[…], music:[…], murmur:[…], surfaces:[…] }
   function names() {
@@ -5819,6 +5823,7 @@ const Render = (() => {
     resetPost() { Object.assign(api.post, POST_DEFAULTS); },
     setScale(s) { scale = U.clamp(s, 0.2, 1); resize(); },
     get renderer() { return renderer; },
+    get uniforms() { return postU; },           // CONTRACT+ (tests): the post chain's uniforms (uBright, uGrain …), read-only
     get grade() { return gradeName; },
     get frozen() { return frozen; },
     get env() { return { outdoor: env.outdoor, outage: env.outage, noFog: env.noFog, density: fog.density, sheets: env.sheets }; },
@@ -13278,7 +13283,8 @@ const Kit = (() => {
 //   pants {kind:'work'|'jeans'|'track'|'slacks'|'suit'|'skirt'|'none', color, belt}   shoes {kind:'sneaker'|'boot'|
 //        'dress'|'flat'|'sock'|'slipper', color, sole}
 //   lanyard {color, card:'TEXT' (Tex.label card), role, keys:false, pins:0, badge:'TEXT'} — rests on the chest in a V
-//   badge 'TEXT' (pinned name badge)   visitor 'TEXT' (hospital visitor sticker)   pendant {color, cord} (on the chest)
+//   badge 'TEXT' (pinned name badge)   visitor 'TEXT' (hospital visitor sticker)   pendant {color, cord, x, y} (on the chest: a short
+//            cord loop through a clip on the blouse front — never round the neck, spec §1)
 //   glasses {style:'reading'|'round'|'square', color, low:false (on the nose tip), cord:false (don't: spec §1),
 //            state:'on'|'hang' ('hang' = hooked into the shirt placket)}
 //   earbuds 'in'|'out'|null   toolroll true   beltPhone true (candy-bar phone in a belt pouch)   hands {scraped, rings, wristband, extraKnuckles}   face {…canvas params}
@@ -15090,16 +15096,32 @@ const Rig = (() => {
       this._orientDecal(me, B.chest, c.p, c.n);
       if (isV) me.rotateZ(-0.09);
     }
+    // The alarm pendant hangs on a short cord looped through a clip on the blouse front — NEVER round the neck (spec §1:
+    // no cords around necks; only lanyards rest on the chest). pd {color, cord (colour), y (pendant height, chest units),
+    // x (offset from the centre line)}.
     _pendant(pd) {
-      const H = this.H, B = this.bones;
-      const origin = new THREE.Vector3(0, 0.098 * H, 0);
-      const y1 = pd.y ?? 0.02;
-      const piv = this._dangle(B.chest, [0, 0.098 * H, 0], { limit: [-1.3, 0, -0.6, 0.6], stiff: 18, damp: 3.5, hang: this._chestPt(0, y1).p.sub(origin) });
+      const B = this.bones;
+      const y1 = pd.y ?? 0.02, x1 = pd.x ?? 0.01, clipY = y1 + 0.052;
+      const origin = this._chestPt(x1, clipY, 0.004).p;
+      const piv = this._dangle(B.chest, [origin.x, origin.y, origin.z], { limit: [-0.9, 0, -0.5, 0.5], stiff: 18, damp: 3.5, hang: this._chestPt(x1, y1).p.sub(origin) });
+      // the clip on the placket
+      const cc = this._chestPt(x1, clipY, 0.0035);
+      const clip = new THREE.Group(); clip.position.copy(cc.p).sub(origin); piv.add(clip);
+      clip.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), cc.n);
+      this._mesh(clip, geo('pendant_clip', () => new THREE.BoxGeometry(0.009, 0.014, 0.004)), this.plain('#9a9c9e', { rough: 0.35, metal: 0.85 }), { s: 1, shadow: false, name: 'pendantClip' });
+      // the cord: a narrow loop from the clip down to the pendant's top (5 cm)
       const g = [];
-      for (const sx of [1, -1]) { const pth = this._strapPath(sx, y1 + 0.006, sx * 0.002, origin, -0.001); g.push(ribbon(pth.pts, pth.ns, 0.003)); }
+      for (const sx of [1, -1]) {
+        const pts = [], ns = [];
+        for (let k = 0; k <= 5; k++) {
+          const t = k / 5, c = this._chestPt(x1 + sx * 0.0045 * Math.sin(PI * (0.15 + 0.85 * t)), lerp(clipY - 0.004, y1 + 0.012, t), 0.0045);
+          pts.push(c.p.sub(origin)); ns.push(c.n);
+        }
+        g.push(ribbon(pts, ns, 0.0028));
+      }
       const cord = merge(g); this.disposables.push(cord);
-      this._mesh(piv, cord, this.plain(pd.cord || '#1b1b1d', { rough: 0.7, side: 'double' }), { s: 1, shadow: false, name: 'cord' });
-      const cp = this._chestPt(0, y1, 0.009);
+      this._mesh(piv, cord, this.plain(pd.cord || '#1b1b1d', { rough: 0.7, side: 'double' }), { s: 1, shadow: false, name: 'pendantLoop' });
+      const cp = this._chestPt(x1, y1, 0.009);
       const pg = new THREE.Group(); pg.position.copy(cp.p).sub(origin); piv.add(pg);
       pg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), cp.n);
       this._mesh(pg, geo('pendant_body', () => tube([[-0.024, 0, 0], [-0.022, 0.014, 0.005, 0, 0, 3], [0.0, 0.017, 0.006, 0, 0, 3], [0.018, 0.014, 0.005, 0, 0, 3], [0.021, 0, 0]], { seg: 12 })), this.plain(pd.color || '#e4e2dc', { rough: 0.4 }), { s: 1, p: [0, -0.012, 0], shadow: false, name: 'pendant' });
@@ -20295,14 +20317,14 @@ const UI = (() => {
 /* cards / titles / text on black / NO SIGNAL */
 #ui .ui-card,#ui .ui-titlet,#ui .ui-tob,#ui .ui-nosig{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;visibility:hidden;}
 #ui .ui-card-t{font-size:clamp(20px,3.3vh,46px);letter-spacing:.3em;padding-left:.3em;color:#d9d6cc;text-transform:uppercase;line-height:1.5;}
-#ui .ui-card-s{margin-top:2.6vh;font-size:clamp(11px,1.45vh,19px);letter-spacing:.3em;padding-left:.3em;color:#6f6f6a;text-transform:uppercase;}
+#ui .ui-card-s{margin-top:2.6vh;font-size:clamp(13px,1.6vh,21px);letter-spacing:.3em;padding-left:.3em;color:#8a877e;text-transform:uppercase;}
 #ui .ui-titlet .ui-card-t{font-size:clamp(26px,5.2vh,74px);letter-spacing:.3em;padding-left:.3em;text-shadow:0 0 .6em rgba(0,0,0,.55),0 0 2em rgba(0,0,0,.35);}
 #ui .ui-titlet .ui-card-s{text-shadow:0 0 .6em rgba(0,0,0,.7)}
 #ui .ui-tob-t{font-size:clamp(16px,2.5vh,32px);line-height:1.62;color:#d9d6cc;max-width:62vw;}
-#ui .ui-nosig-t{font-size:clamp(11px,1.6vh,20px);letter-spacing:.42em;padding-left:.42em;color:#d9d6cc;}
+#ui .ui-nosig-t{font-size:clamp(12px,1.6vh,20px);letter-spacing:.42em;padding-left:.42em;color:#d9d6cc;}
 /* skip */
 #ui .ui-skip{position:absolute;right:3vw;bottom:max(2.4vh,calc(var(--lbh) / 2 - .9em));visibility:hidden;text-align:right;}
-#ui .ui-skip-t{font-size:clamp(10px,1.25vh,15px);letter-spacing:.32em;color:#6f6f6a;}
+#ui .ui-skip-t{font-size:clamp(12px,1.4vh,17px);letter-spacing:.32em;color:#77766f;}
 #ui .ui-skip-l{position:relative;height:1px;width:5.5vw;min-width:52px;background:rgba(111,111,106,.3);margin-top:.55em;margin-left:auto;}
 #ui .ui-skip-f{position:absolute;inset:0;background:#8f8e87;transform-origin:0 50%;transform:scaleX(0);}
 /* Unread badges, stamps, signatures */
@@ -20319,7 +20341,7 @@ const UI = (() => {
 #ui .ui-kp-hint{position:absolute;left:0;right:0;bottom:16vh;text-align:center;font-style:italic;font-size:clamp(14px,2vh,26px);color:#f0ede4;text-shadow:${SHADOW};}
 #ui .ui-kp.term .ui-kp-hint{top:2.4vh;bottom:auto}
 #ui .ui-root.kpo .ui-subz{bottom:4.6vh;height:9.5vh}
-#ui .ui-kp-keys{position:absolute;left:0;right:0;bottom:2.6vh;text-align:center;font-size:clamp(10px,1.3vh,16px);letter-spacing:.24em;padding-left:.24em;color:#6f6f6a;white-space:pre;}
+#ui .ui-kp-keys{position:absolute;left:0;right:0;bottom:2.6vh;text-align:center;font-size:clamp(12px,1.45vh,18px);letter-spacing:.24em;padding-left:.24em;color:#77766f;white-space:pre;}
 /* in-world screens: CRT monitor (crm / case / terminal) and the phone */
 #ui .ui-scr{position:absolute;inset:0;background:#000;display:flex;align-items:center;justify-content:center;pointer-events:auto;visibility:hidden;--sh:min(86vh,63vw);}
 #ui .ui-scr-bezel{position:relative;height:var(--sh);width:calc(var(--sh) * 4 / 3);padding:calc(var(--sh) * .045);background:#191b1a;box-shadow:inset 0 0 0 1px #2c302e,inset 0 0 calc(var(--sh) * .03) #060707,0 0 8vh rgba(0,0,0,.9);}
@@ -22456,8 +22478,8 @@ const Menus = (() => {
 #ui .mn-it>span{display:inline-block;padding-bottom:.14em;border-bottom:1px solid transparent;}
 #ui .mn-it.sel{color:${COL.sel}}#ui .mn-it.sel>span{border-bottom-color:rgba(232,228,216,.72)}
 #ui .mn-it.off{color:${COL.off}}#ui .mn-it.off.sel{color:#55554f}#ui .mn-it.off.sel>span{border-bottom-color:rgba(85,85,79,.6)}
-#ui .mn-h{font-size:clamp(11px,1.38vh,17px);letter-spacing:.34em;color:${COL.dim};text-transform:uppercase;white-space:nowrap;}
-#ui .mn-legend{position:absolute;left:0;right:0;bottom:3.3vh;text-align:center;font-size:clamp(10px,1.2vh,14px);letter-spacing:.26em;color:${COL.faint};text-transform:uppercase;white-space:pre;text-shadow:0 0 .4em rgba(0,0,0,.9);}
+#ui .mn-h{font-size:clamp(13px,1.6vh,20px);letter-spacing:.34em;color:${COL.dim};text-transform:uppercase;white-space:nowrap;}
+#ui .mn-legend{position:absolute;left:0;right:0;bottom:3.3vh;text-align:center;font-size:clamp(12px,1.45vh,17px);letter-spacing:.26em;color:#66655f;text-transform:uppercase;white-space:pre;text-shadow:0 0 .4em rgba(0,0,0,.9);}
 #ui .mn-msg{position:absolute;left:8vw;right:8vw;text-align:center;font-size:clamp(16px,2.4vh,30px);line-height:1.4;color:${COL.text};text-shadow:${SH_};}
 #ui .mn-list.mn-row,#ui .mn-row{display:flex;flex-direction:row;justify-content:center;gap:3.2em;}
 #ui .mn-dot{display:inline-block;width:.34em;height:.34em;border-radius:50%;background:#b9b5a8;margin-right:.9em;vertical-align:.18em;}
@@ -22470,7 +22492,7 @@ const Menus = (() => {
 #ui .tt-cover{position:absolute;inset:0;background:#000;}
 #ui .tt-shade{position:absolute;inset:0;background:radial-gradient(ellipse 75% 46% at 50% 100%,rgba(0,0,0,.88),rgba(0,0,0,.46) 55%,rgba(0,0,0,0) 100%),radial-gradient(ellipse 60% 22% at 50% 40%,rgba(0,0,0,.22),rgba(0,0,0,0) 100%);}
 #ui .tt-name{position:absolute;left:0;right:0;top:36%;text-align:center;font-size:clamp(28px,5.6vh,80px);letter-spacing:.3em;padding-left:.3em;color:${COL.title};text-shadow:0 0 .5em rgba(0,0,0,.6),0 0 1.6em rgba(0,0,0,.4);}
-#ui .tt-press{position:absolute;left:0;right:0;top:49%;text-align:center;font-size:clamp(11px,1.5vh,19px);letter-spacing:.44em;padding-left:.44em;color:#a8a59b;text-shadow:${SH_};}
+#ui .tt-press{position:absolute;left:0;right:0;top:49%;text-align:center;font-size:clamp(13px,1.7vh,21px);letter-spacing:.44em;padding-left:.44em;color:#bfbbb0;text-shadow:0 0 .45em rgba(0,0,0,.75),0 0 1.3em rgba(0,0,0,.5);}
 #ui .tt-menu{left:0;right:0;bottom:8vh;align-items:center;}
 #ui .tt-menu .mn-it{padding:.26em 0;color:${COL.dim}}
 #ui .tt-menu .mn-it.sel{color:${COL.sel}}
@@ -22493,7 +22515,7 @@ const Menus = (() => {
 #ui .cb-t{position:absolute;left:0;right:0;top:58%;text-align:center;font-size:clamp(15px,2.2vh,28px);color:${COL.text};}
 /* pause */
 #ui .ps-list{left:11vw;top:50%;transform:translateY(-50%);}
-#ui .ps-area{position:absolute;right:4.2vw;top:5.2vh;font-size:clamp(11px,1.4vh,17px);letter-spacing:.3em;color:${COL.title};text-shadow:${SH_};white-space:nowrap;}
+#ui .ps-area{position:absolute;right:4.2vw;top:5.2vh;font-size:clamp(12px,1.5vh,19px);letter-spacing:.3em;color:${COL.title};text-shadow:${SH_};white-space:nowrap;}
 #ui .mn-ask{position:absolute;left:0;right:0;bottom:17vh;display:flex;flex-direction:column;align-items:center;visibility:hidden;opacity:0;}
 #ui .mn-ask-t{font-size:clamp(15px,2.1vh,26px);color:${COL.text};margin-bottom:.4em;text-shadow:${SH_};}
 #ui .mn-ask-s{font-size:clamp(12px,1.55vh,19px);font-style:italic;color:#8d8b83;margin-bottom:1.4em;}
@@ -22504,9 +22526,9 @@ const Menus = (() => {
 #ui .it-sep{display:inline-block;margin:0 1.1em;color:${COL.off}}
 #ui .it-status{position:absolute;left:4.4vw;top:5vh;}
 #ui .it-status canvas{display:block;margin:1vh 0 .8vh;}
-#ui .it-word{font-size:clamp(10px,1.3vh,16px);letter-spacing:.34em;}
+#ui .it-word{font-size:clamp(12px,1.45vh,18px);letter-spacing:.34em;}
 #ui .it-eq{position:absolute;right:4.4vw;top:19.5vh;width:17vw;text-align:center;}
-#ui .it-eq-n{font-size:clamp(10px,1.3vh,16px);letter-spacing:.28em;color:${COL.title};white-space:nowrap;}
+#ui .it-eq-n{font-size:clamp(12px,1.45vh,18px);letter-spacing:.28em;color:${COL.title};white-space:nowrap;}
 #ui .it-eq-a{margin-top:.5em;font-size:clamp(12px,1.55vh,19px);letter-spacing:.12em;color:${COL.dim};}
 #ui .it-name{position:absolute;left:0;right:0;top:73.5vh;text-align:center;font-size:clamp(17px,2.35vh,29px);letter-spacing:.22em;padding-left:.22em;color:${COL.sel};text-shadow:${SH_};white-space:nowrap;}
 #ui .it-qty{letter-spacing:.06em;color:${COL.dim};margin-left:.6em}
@@ -22514,7 +22536,7 @@ const Menus = (() => {
 #ui .it-msg{position:absolute;left:10vw;right:10vw;top:84.5vh;text-align:center;font-size:clamp(14px,1.95vh,24px);color:${COL.text};text-shadow:${SH_};visibility:hidden;opacity:0;}
 #ui .it-cmd{left:62vw;top:40vh;visibility:hidden;opacity:0;}
 #ui .it-cmd .mn-it{font-size:clamp(15px,1.8vh,22px);padding:.26em 0}
-#ui .it-comb{position:absolute;left:0;right:0;top:67.5vh;text-align:center;font-size:clamp(11px,1.4vh,17px);letter-spacing:.34em;color:#a8a59b;visibility:hidden;opacity:0;}
+#ui .it-comb{position:absolute;left:0;right:0;top:67.5vh;text-align:center;font-size:clamp(12px,1.5vh,19px);letter-spacing:.34em;color:#a8a59b;visibility:hidden;opacity:0;}
 #ui .it-none{position:absolute;left:0;right:0;top:52vh;text-align:center;font-style:italic;font-size:clamp(14px,1.9vh,23px);color:${COL.faint};}
 #ui .it-row2d{position:absolute;left:0;right:0;top:55vh;display:flex;justify-content:center;gap:4vw;font-size:clamp(13px,1.6vh,20px);letter-spacing:.2em;color:${COL.dim};}
 #ui .it-row2d .sel{color:${COL.sel}}
@@ -22528,12 +22550,12 @@ const Menus = (() => {
 #ui .mm-head{position:absolute;left:6vw;top:6vh;}
 #ui .mm-view{position:absolute;left:9vw;top:13vh;bottom:11vh;width:52vw;overflow:hidden;}
 #ui .mm-list{position:absolute;left:0;right:0;top:0;}
-#ui .mm-list .mn-it.mm-g{font-size:clamp(10px,1.3vh,16px);letter-spacing:.36em;color:${COL.faint};padding:2.2vh 0 .5vh;text-shadow:none;}
+#ui .mm-list .mn-it.mm-g{font-size:clamp(12px,1.45vh,18px);letter-spacing:.36em;color:#66655f;padding:2.2vh 0 .5vh;text-shadow:none;}
 #ui .mm-list .mn-it.mm-g:first-child{padding-top:0}
 #ui .mm-list .mn-it{padding:.22em 0;font-size:clamp(16px,1.9vh,24px)}
 #ui .mm-count{position:absolute;right:6vw;top:6vh;}
 /* doc */
-#ui .dc-page{position:absolute;left:0;right:0;bottom:2.2vh;text-align:center;font-size:clamp(10px,1.25vh,15px);letter-spacing:.3em;color:${COL.faint};}
+#ui .dc-page{position:absolute;left:0;right:0;bottom:2.2vh;text-align:center;font-size:clamp(12px,1.4vh,17px);letter-spacing:.3em;color:#66655f;}
 /* phone */
 #ui .ph-wrap{position:absolute;inset:0;}
 #ui .ph-wrap canvas{position:absolute;display:block;}
@@ -22549,13 +22571,13 @@ const Menus = (() => {
 #ui .sv-row{display:grid;grid-template-columns:9em 1fr 6.5em 6.5em;align-items:baseline;padding:1.5vh 0;border-bottom:1px solid transparent;color:${COL.dim};cursor:default;font-size:clamp(15px,1.85vh,23px);letter-spacing:.1em;text-shadow:${SH_};}
 #ui .sv-row.sel{color:${COL.sel};border-bottom-color:rgba(232,228,216,.35)}
 #ui .sv-slot{letter-spacing:.24em;font-size:.82em}
-#ui .sv-a{display:block;font-size:.78em;letter-spacing:.2em;color:${COL.faint};margin-top:.35em}
+#ui .sv-a{display:block;font-size:.86em;letter-spacing:.2em;color:${COL.faint};margin-top:.35em}
 #ui .sv-row.sel .sv-a{color:#8f8c83}
 #ui .sv-t,#ui .sv-n{text-align:right;font-size:.86em}
 #ui .sv-empty{font-style:italic;letter-spacing:.06em;color:${COL.off}}
 #ui .sv-row.sel .sv-empty{color:${COL.dim}}
 /* death */
-#ui .dt-ns{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;font-size:clamp(11px,1.6vh,20px);letter-spacing:.42em;padding-left:.42em;color:${COL.title};}
+#ui .dt-ns{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;font-size:clamp(12px,1.6vh,20px);letter-spacing:.42em;padding-left:.42em;color:${COL.title};}
 #ui .dt-list{left:0;right:0;top:61%;align-items:center;}
 /* results */
 #ui .rs-name{position:absolute;left:0;right:0;top:9vh;text-align:center;font-size:clamp(20px,3.3vh,44px);letter-spacing:.3em;padding-left:.3em;color:${COL.title};}
@@ -22568,11 +22590,11 @@ const Menus = (() => {
 /* credits / fates */
 #ui .cr-roll{position:absolute;left:0;right:0;top:0;text-align:center;}
 #ui .cr-title{font-size:clamp(24px,4.4vh,62px);letter-spacing:.3em;padding-left:.3em;color:${COL.title};margin:2vh 0;}
-#ui .cr-head{font-size:clamp(10px,1.35vh,17px);letter-spacing:.38em;padding-left:.38em;color:${COL.dim};margin:5vh 0 1.4vh;text-transform:uppercase;}
+#ui .cr-head{font-size:clamp(12px,1.45vh,18px);letter-spacing:.38em;padding-left:.38em;color:${COL.dim};margin:5vh 0 1.4vh;text-transform:uppercase;}
 #ui .cr-line{font-size:clamp(14px,2.1vh,27px);line-height:1.7;color:${COL.title};letter-spacing:.06em;}
 #ui .cr-line.it{font-style:italic;color:#b3afa4;letter-spacing:.02em}
 #ui .cr-pair{display:flex;justify-content:center;gap:2.4em;font-size:clamp(13px,1.95vh,25px);line-height:1.75;letter-spacing:.1em;}
-#ui .cr-pair span:first-child{flex:1;text-align:right;color:${COL.dim};font-size:.8em;letter-spacing:.26em;}
+#ui .cr-pair span:first-child{flex:1;text-align:right;color:${COL.dim};font-size:.86em;letter-spacing:.26em;}
 #ui .cr-pair span:last-child{flex:1;text-align:left;color:${COL.title};}
 #ui .cr-gap{height:4.5vh}
 #ui .ft-card{position:absolute;left:14vw;right:14vw;top:50%;transform:translateY(-50%);text-align:center;font-size:clamp(16px,2.55vh,33px);line-height:1.62;color:${COL.title};}
@@ -23020,7 +23042,8 @@ const Menus = (() => {
       if (st.stage === 'black' && st.t >= st.blackDur) { st.stage = 'fade'; st.coverF.to(0, 3.2); titleHiss(st, false, 2.8); st.at = st.t + 3.6; }
       else if (st.stage === 'fade' && st.t >= st.at) { st.stage = 'name'; st.nameF.to(1, 2.2); st.shadeF.to(1, 2.2); st.at = st.t + 4.2; }
       else if (st.stage === 'name' && st.t >= st.at) { st.stage = 'press'; st.pressF.to(1, 1.4); st.at = st.t + 1.4; }
-      else if (st.stage === 'press' && st.t >= st.at && !st.pressF.busy) st.press.style.opacity = (0.62 + 0.38 * Math.cos((st.t - st.at) * 1.9)).toFixed(3);
+      else if (st.stage === 'press' && st.t >= st.at && !st.pressF.busy) st.press.style.opacity = (0.78 + 0.22 * Math.cos((st.t - st.at) * 1.9)).toFixed(3);   // a slow pulse, never below 56 %
+      if (st.ringCutAt != null && (!Snd.ctx || Snd.ctx.currentTime >= st.ringCutAt)) { titleRingStop(st, 0); st.ringCutAt = null; }
       if (st.fakeRing && st.t >= st.fakeRing.at) { titleRingStop(st, 0); st.fakeRing = null; }
       if (st.fakeRing === null && st.fakeWait != null) {
         st.fakeWait -= dt;
@@ -23051,12 +23074,23 @@ const Menus = (() => {
     st.hissStarted = true;
   }
   function titleRingStart(st) { st.ring = sfx('ring', { far: true, lp: 1150, vol: 0.2, pan: -0.32, verb: 0.85 }); }
-  function titleRingStop(st, fade) { if (st.ring) { st.ring.stop(fade); st.ring = null; } }
+  function titleRingStop(st, fade) { st.ringCutAt = null; if (st.ring) { st.ring.stop(fade); st.ring = null; } }
+  // §2A step 4: "a distant phone that's been ringing the whole time stops mid-ring". The ring's cadence (every 3 s): a
+  // burst 0–0.4 s, a gap, a burst 0.6–1.0 s, then 2 s of quiet — a key pressed in the quiet would stop nothing you can
+  // hear, so the ring is cut dead inside a burst: at once when one is sounding, else 0.2 s into the next (≤ 2.3 s on).
+  function titleRingCut(st) {
+    const r = st.ring, ctx = Snd.ctx;
+    if (!r || !ctx || !Number.isFinite(r.t0)) { titleRingStop(st, 0); return; }
+    const ph = (((ctx.currentTime - r.t0) % 3) + 3) % 3;
+    if ((ph >= 0.08 && ph <= 0.34) || (ph >= 0.68 && ph <= 0.94)) { titleRingStop(st, 0); return; }
+    const cut = [0.2, 0.8, 3.2].find((c) => c > ph);
+    st.ringCutAt = ctx.currentTime + (cut - ph);
+  }
   function titleToMenu(sc) {
     const st = sc.st;
     // "a distant phone that's been ringing the whole time stops mid-ring" — if audio was still waiting for this first
     // gesture, the ring is heard for a moment and cut dead mid-burst.
-    if (st.ring) { titleRingStop(st, 0); st.ringDone = true; }
+    if (st.ring) { if (st.ringCutAt == null) titleRingCut(st); st.ringDone = true; }
     else if (!st.ringDone) { st.ringDone = true; st.fakeRing = null; st.fakeWait = 0.8; }
     titleHiss(st, false, 0.3);
     st.stage = 'menu'; st.menuSeen = true; st.idle = 0;
@@ -24286,6 +24320,10 @@ const Menus = (() => {
       mapLoadFloor(sc, st.floor);
       st.view = { ...st.goal };
       legend(sc, () => [st.zoom ? ['W A S D', 'L STICK', 'MOVE'] : null, ['E', 'A', st.zoom === 2 ? 'AREA' : 'CLOSER'], tg.floors.length > 1 ? ['Q R', 'LB RB', 'FLOOR'] : null, ['ESC', 'B', 'BACK']]);
+      // zoomed in, the paper fills the window: the floor tabs and the legend would sit on its printing, so they fade out
+      // 2.5 s after the last zoom / floor change and come back at the whole-sheet view
+      st.chromeT = 0;
+      st.chromeF = new Tw((v) => { for (const e of [st.floorsEl, st.legendEl]) if (e) { e.style.opacity = v.toFixed(3); e.style.visibility = v <= 0.01 ? 'hidden' : ''; } }, 1);
       mapResize(sc);
     },
     show(sc) { if (!sc.st.none) { sfx('paper', { vol: 0.9 }); sc.st.dirty = true; } },
@@ -24298,6 +24336,9 @@ const Menus = (() => {
         return;
       }
       if (sc.ready && !st.busy) mapInput(sc, dt);
+      st.chromeT += dt;
+      const chrome = !st.zoom || st.chromeT < 2.5 ? 1 : 0;
+      if (st.chromeF.target !== chrome) st.chromeF.to(chrome, chrome ? 0.25 : 0.6);
       const v = st.view, g = st.goal;
       const k = 1 - Math.exp(-11 * dt);
       const before = v.cx + v.cy * 7 + v.s * 1000;
@@ -24352,6 +24393,7 @@ const Menus = (() => {
     const st = sc.st;
     if (f === st.floor || st.busy) return;
     st.busy = true;
+    st.chromeT = 0;
     sfx('paper', { vol: 0.8 });
     await st.cvF.to(0, 0.16);
     mapLoadFloor(sc, f);
@@ -24367,6 +24409,7 @@ const Menus = (() => {
     const conf = K.confirm();
     if (conf || (wh < 0 && st.zoom < 2) || (wh > 0 && st.zoom)) {
       st.zoom = conf ? (st.zoom + 1) % 3 : clamp(st.zoom + (wh < 0 ? 1 : -1), 0, 2);
+      st.chromeT = 0;
       sfx('paper', { vol: 0.45, dur: 0.3 }); mapGoal(sc, true);
     }
     if (fl.length > 1) {
@@ -37213,7 +37256,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
     for (let b = 0; b < 5; b++) tor.push([SPH(0.035, 8, 6), M4(0.2, 0.38 + b * 0.27, 0.72, 0, 0, 0), M.button]);
     tor.push([BX(0.56, 1.1, 0.12), M4(0, 0.95, 0.5), M.cavity]);                                                   // the dark in her chest
     for (const [y, rx, rz] of [[0.3, 0.8, 0.66], [0.75, 0.8, 0.64], [1.25, 0.76, 0.66]]) tor.push([tapeBand(rx, rz, y, 0.06), M4(0, 0, -0.06), M.tape]);
-    tor.push([helix(1.3, 0.7, 3, 0.022), M4(0, 1.6, -0.08), M.tether]);
+    tor.push([helix(1.15, 0.7, 3, 0.022), M4(0, 1.45, -0.08), M.tether]);   // round the body, starting under the shoulders
     C1_merge(hips, tor);
     // boxes, satchels and phones pushing out through the knit
     for (let i = 0; i < 14; i++) {
@@ -37234,7 +37277,8 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
     // ---- neck → head: a grey returns satchel, drooping forward, the handwritten note pinned to it ------------------
     const neck = new THREE.Group(); neck.name = 'cg_neck'; neck.position.set(0, 1.64, 0.36); neck.scale.setScalar(1.22); hips.add(neck);
     const hd = [];
-    hd.push([new THREE.CylinderGeometry(0.13, 0.17, 0.34, 10), M4(0, 0.12, 0.02, 0.35, 0, 0), M.tape]);
+    // (the satchel's gathered mouth is its neck — satchel plastic, never a band of tape or tether: spec §1, nothing round a neck)
+    hd.push([new THREE.CylinderGeometry(0.13, 0.17, 0.34, 10), M4(0, 0.12, 0.02, 0.35, 0, 0), M.satchel]);
     { const g = SPH(0.36, 18, 12); const pa = g.attributes.position;                                            // a crumpled mailer
       for (let i = 0; i < pa.count; i++) { const x = pa.getX(i), y = pa.getY(i), z = pa.getZ(i); const k = 1 + Math.sin(x * 23 + z * 17) * 0.04 + Math.sin(y * 29 + x * 11) * 0.03; pa.setXYZ(i, x * k, y * k * (y > 0 ? 0.85 : 1), z * k); }
       g.computeVertexNormals(); hd.push([g, M4(0, 0.42, 0.2, 0.3, 0, 0.08, [1.15, 0.62, 0.95]), M.satchel]); }
@@ -59972,6 +60016,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.prop('streetlight', 1.0, 6.2, 90, { bank: 1 });
       K.prop('streetlight', 9.0, 16.4, -90, { light: false });
       K.prop('power_pole', 0.9, 12.6, 0);
+      K.examine(1.3, 1.4, 12.6, ['A power pole. The wires run off into the fog and don\'t come back.', 'No birds on them. [beat] Nothing\'s sat up there in a long time.'], { id: 't2:pole', r: 1.2 });
       K.prop('letterbox', 9.0, 4.2, -90, { examine: ['A red letterbox. Last collection: 5 pm. There is no date.'] });
       K.prop('bench', 1.05, 15.2, 90, { examine: 'Somebody carved a phone number into the bench. Seven digits. Too few.' });
       K.payphone(1.2, 18.7, 90, { id: 'test_room2:payphone' });

@@ -47,7 +47,8 @@
 //   pants {kind:'work'|'jeans'|'track'|'slacks'|'suit'|'skirt'|'none', color, belt}   shoes {kind:'sneaker'|'boot'|
 //        'dress'|'flat'|'sock'|'slipper', color, sole}
 //   lanyard {color, card:'TEXT' (Tex.label card), role, keys:false, pins:0, badge:'TEXT'} — rests on the chest in a V
-//   badge 'TEXT' (pinned name badge)   visitor 'TEXT' (hospital visitor sticker)   pendant {color, cord} (on the chest)
+//   badge 'TEXT' (pinned name badge)   visitor 'TEXT' (hospital visitor sticker)   pendant {color, cord, x, y} (on the chest: a short
+//            cord loop through a clip on the blouse front — never round the neck, spec §1)
 //   glasses {style:'reading'|'round'|'square', color, low:false (on the nose tip), cord:false (don't: spec §1),
 //            state:'on'|'hang' ('hang' = hooked into the shirt placket)}
 //   earbuds 'in'|'out'|null   toolroll true   beltPhone true (candy-bar phone in a belt pouch)   hands {scraped, rings, wristband, extraKnuckles}   face {…canvas params}
@@ -1859,16 +1860,32 @@ const Rig = (() => {
       this._orientDecal(me, B.chest, c.p, c.n);
       if (isV) me.rotateZ(-0.09);
     }
+    // The alarm pendant hangs on a short cord looped through a clip on the blouse front — NEVER round the neck (spec §1:
+    // no cords around necks; only lanyards rest on the chest). pd {color, cord (colour), y (pendant height, chest units),
+    // x (offset from the centre line)}.
     _pendant(pd) {
-      const H = this.H, B = this.bones;
-      const origin = new THREE.Vector3(0, 0.098 * H, 0);
-      const y1 = pd.y ?? 0.02;
-      const piv = this._dangle(B.chest, [0, 0.098 * H, 0], { limit: [-1.3, 0, -0.6, 0.6], stiff: 18, damp: 3.5, hang: this._chestPt(0, y1).p.sub(origin) });
+      const B = this.bones;
+      const y1 = pd.y ?? 0.02, x1 = pd.x ?? 0.01, clipY = y1 + 0.052;
+      const origin = this._chestPt(x1, clipY, 0.004).p;
+      const piv = this._dangle(B.chest, [origin.x, origin.y, origin.z], { limit: [-0.9, 0, -0.5, 0.5], stiff: 18, damp: 3.5, hang: this._chestPt(x1, y1).p.sub(origin) });
+      // the clip on the placket
+      const cc = this._chestPt(x1, clipY, 0.0035);
+      const clip = new THREE.Group(); clip.position.copy(cc.p).sub(origin); piv.add(clip);
+      clip.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), cc.n);
+      this._mesh(clip, geo('pendant_clip', () => new THREE.BoxGeometry(0.009, 0.014, 0.004)), this.plain('#9a9c9e', { rough: 0.35, metal: 0.85 }), { s: 1, shadow: false, name: 'pendantClip' });
+      // the cord: a narrow loop from the clip down to the pendant's top (5 cm)
       const g = [];
-      for (const sx of [1, -1]) { const pth = this._strapPath(sx, y1 + 0.006, sx * 0.002, origin, -0.001); g.push(ribbon(pth.pts, pth.ns, 0.003)); }
+      for (const sx of [1, -1]) {
+        const pts = [], ns = [];
+        for (let k = 0; k <= 5; k++) {
+          const t = k / 5, c = this._chestPt(x1 + sx * 0.0045 * Math.sin(PI * (0.15 + 0.85 * t)), lerp(clipY - 0.004, y1 + 0.012, t), 0.0045);
+          pts.push(c.p.sub(origin)); ns.push(c.n);
+        }
+        g.push(ribbon(pts, ns, 0.0028));
+      }
       const cord = merge(g); this.disposables.push(cord);
-      this._mesh(piv, cord, this.plain(pd.cord || '#1b1b1d', { rough: 0.7, side: 'double' }), { s: 1, shadow: false, name: 'cord' });
-      const cp = this._chestPt(0, y1, 0.009);
+      this._mesh(piv, cord, this.plain(pd.cord || '#1b1b1d', { rough: 0.7, side: 'double' }), { s: 1, shadow: false, name: 'pendantLoop' });
+      const cp = this._chestPt(x1, y1, 0.009);
       const pg = new THREE.Group(); pg.position.copy(cp.p).sub(origin); piv.add(pg);
       pg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), cp.n);
       this._mesh(pg, geo('pendant_body', () => tube([[-0.024, 0, 0], [-0.022, 0.014, 0.005, 0, 0, 3], [0.0, 0.017, 0.006, 0, 0, 3], [0.018, 0.014, 0.005, 0, 0, 3], [0.021, 0, 0]], { seg: 12 })), this.plain(pd.color || '#e4e2dc', { rough: 0.4 }), { s: 1, p: [0, -0.012, 0], shadow: false, name: 'pendant' });

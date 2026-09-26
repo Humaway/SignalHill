@@ -154,14 +154,14 @@ const UI = (() => {
 /* cards / titles / text on black / NO SIGNAL */
 #ui .ui-card,#ui .ui-titlet,#ui .ui-tob,#ui .ui-nosig{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;visibility:hidden;}
 #ui .ui-card-t{font-size:clamp(20px,3.3vh,46px);letter-spacing:.3em;padding-left:.3em;color:#d9d6cc;text-transform:uppercase;line-height:1.5;}
-#ui .ui-card-s{margin-top:2.6vh;font-size:clamp(11px,1.45vh,19px);letter-spacing:.3em;padding-left:.3em;color:#6f6f6a;text-transform:uppercase;}
+#ui .ui-card-s{margin-top:2.6vh;font-size:clamp(13px,1.6vh,21px);letter-spacing:.3em;padding-left:.3em;color:#8a877e;text-transform:uppercase;}
 #ui .ui-titlet .ui-card-t{font-size:clamp(26px,5.2vh,74px);letter-spacing:.3em;padding-left:.3em;text-shadow:0 0 .6em rgba(0,0,0,.55),0 0 2em rgba(0,0,0,.35);}
 #ui .ui-titlet .ui-card-s{text-shadow:0 0 .6em rgba(0,0,0,.7)}
 #ui .ui-tob-t{font-size:clamp(16px,2.5vh,32px);line-height:1.62;color:#d9d6cc;max-width:62vw;}
-#ui .ui-nosig-t{font-size:clamp(11px,1.6vh,20px);letter-spacing:.42em;padding-left:.42em;color:#d9d6cc;}
+#ui .ui-nosig-t{font-size:clamp(12px,1.6vh,20px);letter-spacing:.42em;padding-left:.42em;color:#d9d6cc;}
 /* skip */
 #ui .ui-skip{position:absolute;right:3vw;bottom:max(2.4vh,calc(var(--lbh) / 2 - .9em));visibility:hidden;text-align:right;}
-#ui .ui-skip-t{font-size:clamp(10px,1.25vh,15px);letter-spacing:.32em;color:#6f6f6a;}
+#ui .ui-skip-t{font-size:clamp(12px,1.4vh,17px);letter-spacing:.32em;color:#77766f;}
 #ui .ui-skip-l{position:relative;height:1px;width:5.5vw;min-width:52px;background:rgba(111,111,106,.3);margin-top:.55em;margin-left:auto;}
 #ui .ui-skip-f{position:absolute;inset:0;background:#8f8e87;transform-origin:0 50%;transform:scaleX(0);}
 /* Unread badges, stamps, signatures */
@@ -178,7 +178,7 @@ const UI = (() => {
 #ui .ui-kp-hint{position:absolute;left:0;right:0;bottom:16vh;text-align:center;font-style:italic;font-size:clamp(14px,2vh,26px);color:#f0ede4;text-shadow:${SHADOW};}
 #ui .ui-kp.term .ui-kp-hint{top:2.4vh;bottom:auto}
 #ui .ui-root.kpo .ui-subz{bottom:4.6vh;height:9.5vh}
-#ui .ui-kp-keys{position:absolute;left:0;right:0;bottom:2.6vh;text-align:center;font-size:clamp(10px,1.3vh,16px);letter-spacing:.24em;padding-left:.24em;color:#6f6f6a;white-space:pre;}
+#ui .ui-kp-keys{position:absolute;left:0;right:0;bottom:2.6vh;text-align:center;font-size:clamp(12px,1.45vh,18px);letter-spacing:.24em;padding-left:.24em;color:#77766f;white-space:pre;}
 /* in-world screens: CRT monitor (crm / case / terminal) and the phone */
 #ui .ui-scr{position:absolute;inset:0;background:#000;display:flex;align-items:center;justify-content:center;pointer-events:auto;visibility:hidden;--sh:min(86vh,63vw);}
 #ui .ui-scr-bezel{position:relative;height:var(--sh);width:calc(var(--sh) * 4 / 3);padding:calc(var(--sh) * .045);background:#191b1a;box-shadow:inset 0 0 0 1px #2c302e,inset 0 0 calc(var(--sh) * .03) #060707,0 0 8vh rgba(0,0,0,.9);}

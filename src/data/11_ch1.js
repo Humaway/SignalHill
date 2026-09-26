@@ -2360,7 +2360,7 @@
     for (let b = 0; b < 5; b++) tor.push([SPH(0.035, 8, 6), M4(0.2, 0.38 + b * 0.27, 0.72, 0, 0, 0), M.button]);
     tor.push([BX(0.56, 1.1, 0.12), M4(0, 0.95, 0.5), M.cavity]);                                                   // the dark in her chest
     for (const [y, rx, rz] of [[0.3, 0.8, 0.66], [0.75, 0.8, 0.64], [1.25, 0.76, 0.66]]) tor.push([tapeBand(rx, rz, y, 0.06), M4(0, 0, -0.06), M.tape]);
-    tor.push([helix(1.3, 0.7, 3, 0.022), M4(0, 1.6, -0.08), M.tether]);
+    tor.push([helix(1.15, 0.7, 3, 0.022), M4(0, 1.45, -0.08), M.tether]);   // round the body, starting under the shoulders
     C1_merge(hips, tor);
     // boxes, satchels and phones pushing out through the knit
     for (let i = 0; i < 14; i++) {
@@ -2381,7 +2381,8 @@
     // ---- neck → head: a grey returns satchel, drooping forward, the handwritten note pinned to it ------------------
     const neck = new THREE.Group(); neck.name = 'cg_neck'; neck.position.set(0, 1.64, 0.36); neck.scale.setScalar(1.22); hips.add(neck);
     const hd = [];
-    hd.push([new THREE.CylinderGeometry(0.13, 0.17, 0.34, 10), M4(0, 0.12, 0.02, 0.35, 0, 0), M.tape]);
+    // (the satchel's gathered mouth is its neck — satchel plastic, never a band of tape or tether: spec §1, nothing round a neck)
+    hd.push([new THREE.CylinderGeometry(0.13, 0.17, 0.34, 10), M4(0, 0.12, 0.02, 0.35, 0, 0), M.satchel]);
     { const g = SPH(0.36, 18, 12); const pa = g.attributes.position;                                            // a crumpled mailer
       for (let i = 0; i < pa.count; i++) { const x = pa.getX(i), y = pa.getY(i), z = pa.getZ(i); const k = 1 + Math.sin(x * 23 + z * 17) * 0.04 + Math.sin(y * 29 + x * 11) * 0.03; pa.setXYZ(i, x * k, y * k * (y > 0 ? 0.85 : 1), z * k); }
       g.computeVertexNormals(); hd.push([g, M4(0, 0.42, 0.2, 0.3, 0, 0.08, [1.15, 0.62, 0.95]), M.satchel]); }

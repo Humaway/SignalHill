@@ -323,6 +323,7 @@
       K.prop('streetlight', 1.0, 6.2, 90, { bank: 1 });
       K.prop('streetlight', 9.0, 16.4, -90, { light: false });
       K.prop('power_pole', 0.9, 12.6, 0);
+      K.examine(1.3, 1.4, 12.6, ['A power pole. The wires run off into the fog and don\'t come back.', 'No birds on them. [beat] Nothing\'s sat up there in a long time.'], { id: 't2:pole', r: 1.2 });
       K.prop('letterbox', 9.0, 4.2, -90, { examine: ['A red letterbox. Last collection: 5 pm. There is no date.'] });
       K.prop('bench', 1.05, 15.2, 90, { examine: 'Somebody carved a phone number into the bench. Seven digits. Too few.' });
       K.payphone(1.2, 18.7, 90, { id: 'test_room2:payphone' });

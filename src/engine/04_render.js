@@ -921,6 +921,7 @@ const Render = (() => {
     resetPost() { Object.assign(api.post, POST_DEFAULTS); },
     setScale(s) { scale = U.clamp(s, 0.2, 1); resize(); },
     get renderer() { return renderer; },
+    get uniforms() { return postU; },           // CONTRACT+ (tests): the post chain's uniforms (uBright, uGrain …), read-only
     get grade() { return gradeName; },
     get frozen() { return frozen; },
     get env() { return { outdoor: env.outdoor, outage: env.outage, noFog: env.noFog, density: fog.density, sheets: env.sheets }; },

@@ -887,6 +887,8 @@ const World = (() => {
       checkExits(p, ctl);
       if (build && !transitioning) checkTriggers(p, ctl);
     }
+    // the room's skinned batches (Kit → Rig.batch): parts that changed drop out, bounds follow what moved
+    if (build && build.batch) { try { build.batch.check(); } catch (e) { console.error('[World] room batch', e); build.batch = null; } }
   }
 
   const api = {

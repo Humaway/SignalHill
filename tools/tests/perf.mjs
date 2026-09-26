@@ -27,6 +27,7 @@
 //    pool lights (+ the torch), and the actors in the frustum. The room's build time (Kit.build) is recorded.
 //    Budget per view: ≤ 400 draw calls and ≤ 250 000 triangles; ≤ 11 real lights (8 point + 2 spot + the torch — the
 //    pool is fixed). Printed: one row per room / world sorted by its worst view's calls, then every view over budget.
+//    The developer test rooms (test_room, test_room2: debug panel only, deliberately overstuffed) are listed, not failed.
 // 2. SHADER PROGRAMS. The renderer's programs are recorded after each room's first visit (a room / world adds the
 //    programs its materials need the first time); a revisit (part 3) must compile none: no new program id.
 // 3. MEMORY. After every room has been seen once, 30 room transitions (World.goto — a door's transition — through rooms
@@ -40,24 +41,31 @@
 //      SH_MEM     0 — skip part 3
 //      SH_VERBOSE 1 — print every view
 //      SH_EXPLAIN 1 — what every room's worst view draws, by owner (always printed for a view over budget)
+//      SH_SHOTS   a directory: a full-resolution screenshot of every room's worst view (and of each view explained)
 // Prints `PASS perf` (or FAIL lines) at the end.
+import fs from 'node:fs';
 import { ev, report } from './lib.mjs';
 
 const BUDGET = { calls: 400, tris: 250000, lights: 11 };
+// the developer's feature test rooms (src/data/99_testroom.js — reached only from the debug panel, deliberately
+// overstuffed: ~45 props, five doors, one of every monster, two worlds) are measured and listed, never failed: the
+// budget is the game's (spec §2, §14)
+const DEV = (id) => /^test_/.test(id);
 const ONLY = process.env.SH_ONLY ? process.env.SH_ONLY.split(',').map((s) => s.trim()).filter(Boolean) : null;
 const WORLDS = process.env.SH_WORLDS || '';
 const MAXPTS = process.env.SH_POINTS ? Number(process.env.SH_POINTS) : 0;
 const VERBOSE = process.env.SH_VERBOSE === '1';
 const MEM = process.env.SH_MEM !== '0';
 const EXPLAIN = process.env.SH_EXPLAIN === '1';
+const SHOTS = process.env.SH_SHOTS || '';
 
 // flags that bring in the people a room only has later in its chapter (K.npc placements decided at build time)
 const ROOM_EXTRA = {
   c7_carpark: { flags: { c7_standoff: true, lukeSaved: true, chaseSaved: true } },
 };
 
-// ---- the page side ---------------------------------------------------------------------------------------------------
-function perfPage(ROOM_EXTRA, MAXPTS) {
+// ---- the page side (exported for one-off probes: `(${perfPage})(ROOM_EXTRA, 0)` in the page, then __perf.load / explain)
+export function perfPage(ROOM_EXTRA, MAXPTS) {
   if (window.__perf) return;
   const M = SH.mod, T = M.THREE;
   const adv = (s) => SH.advance(s);
@@ -217,7 +225,7 @@ function perfPage(ROOM_EXTRA, MAXPTS) {
       return o.type;
     };
     const tally = new Map();
-    const add = (k, calls, tris, sh) => { let t = tally.get(k); if (!t) { t = { k, calls: 0, tris: 0, shadow: 0 }; tally.set(k, t); } t.calls += calls; t.tris += tris; t.shadow += sh; };
+    const add = (k, calls, tris, sh, stris) => { let t = tally.get(k); if (!t) { t = { k, calls: 0, tris: 0, shadow: 0, stris: 0 }; tally.set(k, t); } t.calls += calls; t.tris += tris; t.shadow += sh; t.stris += stris; };
     const sph = new T.Sphere();
     const walk = (o) => {
       if (!o.visible) return;
@@ -231,14 +239,14 @@ function perfPage(ROOM_EXTRA, MAXPTS) {
         const n = g.index ? g.index.count : (g.attributes.position ? g.attributes.position.count : 0);
         const inst = o.isInstancedMesh ? o.count : 1;
         const tris = o.isMesh ? Math.round(Math.min(n, g.drawRange.count) / 3) * inst : 0;
-        if (inMain || inShadow) add(owner(o), inMain ? groups : 0, inMain ? tris : 0, inShadow ? groups : 0);
+        if (inMain || inShadow) add(owner(o), inMain ? groups : 0, inMain ? tris : 0, inShadow ? groups : 0, inShadow ? tris : 0);
       }
       for (const c of o.children) walk(c);
     };
     walk(M.Render.scene);
     const list = [...tally.values()];
-    const sum = list.reduce((a, t) => ({ calls: a.calls + t.calls, shadow: a.shadow + t.shadow, tris: a.tris + t.tris }), { calls: 0, shadow: 0, tris: 0 });
-    return { sum, byCalls: list.sort((a, b) => b.calls + b.shadow - a.calls - a.shadow).slice(0, top), byTris: [...list].sort((a, b) => b.tris - a.tris).slice(0, top) };
+    const sum = list.reduce((a, t) => ({ calls: a.calls + t.calls, shadow: a.shadow + t.shadow, tris: a.tris + t.tris, stris: a.stris + t.stris }), { calls: 0, shadow: 0, tris: 0, stris: 0 });
+    return { sum, byCalls: list.sort((a, b) => b.calls + b.shadow - a.calls - a.shadow).slice(0, top), byTris: [...list].sort((a, b) => b.tris + b.stris - a.tris - a.stris).slice(0, top) };
   };
   // every camera of the loaded room in its world: → [{cam, type, pt, calls, tris, lights, actors, culled}]
   P.views = async () => {
@@ -280,6 +288,13 @@ function perfPage(ROOM_EXTRA, MAXPTS) {
       return { calls: st.calls, tris: st.triangles, ...P.breakdown() };
     } finally { c.when = when; }
   };
+  // the first point views() would take for a camera (for probes: explain(cam, P.pointOf(cam)))
+  P.pointOf = (camId) => {
+    const c = M.Cam.defs.find((d) => d.id === camId);
+    if (!c) return null;
+    const p = pointsFor(c, M.World.build, M.ROOMS[M.World.room], !!M.S.outage)[0];
+    return p ? [p.x, p.y, p.z] : null;
+  };
   // a real door transition (World.goto, as a door or G.goto does) to `id` in `world`; → true when it landed
   P.go = async (id, world) => {
     await M.Game.debugRoom(id, null);
@@ -299,7 +314,7 @@ export default async function (page, h) {
   const fails = [];
   await ev(h, `(${perfPage.toString()})(${JSON.stringify(ROOM_EXTRA)}, ${MAXPTS}); return true;`);
   const rooms = ONLY || (await ev(h, 'return Object.keys(SH.mod.ROOMS)'));
-  const rows = [], over = [], progLog = [];
+  const rows = [], over = [], devOver = [], progLog = [];
   let progIds = new Set((await ev(h, 'return __perf.progs()')).map((p) => p.id));
   const t0 = Date.now();
   const runs = [];
@@ -317,14 +332,20 @@ export default async function (page, h) {
         const w0 = V.filter((v) => !v.none).reduce((a, v) => (!a || v.calls > a.calls ? v : a), null);
         const tmax = V.filter((v) => !v.none).reduce((a, v) => (!a || v.tris > a.tris ? v : a), null);
         const explain = [];
-        if (w0 && (EXPLAIN || w0.calls > BUDGET.calls)) explain.push(w0);
+        if (w0 && (EXPLAIN || w0.calls > BUDGET.calls || w0.tris > BUDGET.tris)) explain.push(w0);
         if (tmax && tmax !== w0 && (EXPLAIN || tmax.tris > BUDGET.tris)) explain.push(tmax);
+        if (SHOTS && w0 && !explain.includes(w0)) explain.push(w0);
         for (const v of explain) {
           const X = await ev(h, `return await __perf.explain(${JSON.stringify(v.cam)}, ${JSON.stringify(v.pt)})`);
           if (!X) continue;
-          console.log(`  ${id} (${world}${variant !== 'play' ? ', ' + variant : ''}) ${v.cam} at ${v.pt}: ${X.calls} calls ${X.tris} tris — counted ${X.sum.calls} main + ${X.sum.shadow} shadow, ${X.sum.tris} tris`);
+          if (SHOTS) {
+            const png = await ev(h, 'SH.mod.Render.setScale(1); const d = SH.mod.Render.capture(); SH.mod.Render.setScale(0.55); return d');
+            fs.mkdirSync(SHOTS, { recursive: true });
+            fs.writeFileSync(`${SHOTS}/${id}${variant !== 'play' ? '_' + variant : ''}_${world}_${v.cam.replace(/^[^:]*:/, '')}.png`, Buffer.from(png.split(',')[1], 'base64'));
+          }
+          console.log(`  ${id} (${world}${variant !== 'play' ? ', ' + variant : ''}) ${v.cam} at ${v.pt}: ${X.calls} calls ${X.tris} tris — counted ${X.sum.calls} + ${X.sum.shadow} shadow calls, ${X.sum.tris} + ${X.sum.stris} shadow tris`);
           console.log('    calls: ' + X.byCalls.map((t) => `${t.k} ${t.calls}+${t.shadow}`).join(', '));
-          console.log('    tris:  ' + X.byTris.map((t) => `${t.k} ${t.tris}`).join(', '));
+          console.log('    tris:  ' + X.byTris.map((t) => `${t.k} ${t.tris}+${t.stris}`).join(', '));
         }
         await ev(h, 'await __perf.release(); return true');
         const progs = await ev(h, 'return __perf.progs()');
@@ -337,7 +358,7 @@ export default async function (page, h) {
         const row = { id, world, variant, cams: new Set(V.map((v) => v.cam)).size, views: good.length, worst, maxT, maxL, build: L.buildMs, forced: L.forced, notes: L.notes, newProgs: fresh.length, none: V.filter((v) => v.none) };
         rows.push(row);
         runs.push({ id, world, variant });
-        for (const v of good) if (v.calls > BUDGET.calls || v.tris > BUDGET.tris || v.lights > BUDGET.lights) over.push({ id, world, variant, ...v });
+        for (const v of good) if (v.calls > BUDGET.calls || v.tris > BUDGET.tris || v.lights > BUDGET.lights) (DEV(id) ? devOver : over).push({ id, world, variant, ...v });
         for (const v of row.none) fails.push(`${id} (${world}) ${v.cam}: ${v.none}`);
         const tag = `${id}${variant !== 'play' ? ' [' + variant + ']' : ''} (${world})`;
         if (VERBOSE) for (const v of V) console.log(`  ${tag} ${v.cam} ${v.none ? v.none : `calls ${v.calls} tris ${v.tris} lights ${v.lights} actors ${v.actors} culled ${v.culled} at ${v.pt}`}`);
@@ -351,7 +372,7 @@ export default async function (page, h) {
   console.log('\nroom (world)                              views  worst calls  camera                        triangles  lights  actors  build ms');
   for (const w of rows) {
     const tag = `${w.id}${w.variant !== 'play' ? ' [' + w.variant + ']' : ''} (${w.world})`;
-    const flag = w.worst && (w.worst.calls > BUDGET.calls || w.maxT > BUDGET.tris || w.maxL > BUDGET.lights) ? ' OVER' : '';
+    const flag = w.worst && (w.worst.calls > BUDGET.calls || w.maxT > BUDGET.tris || w.maxL > BUDGET.lights) ? (DEV(w.id) ? ' over (dev room)' : ' OVER') : '';
     console.log(`${pad(tag, 42)}${lpad(w.views, 5)}  ${lpad(w.worst ? w.worst.calls : '-', 11)}  ${pad(w.worst ? w.worst.cam.replace(/^[^:]*:/, '') : '-', 28)}  ${lpad(w.maxT, 9)}  ${lpad(w.maxL, 6)}  ${lpad(w.worst ? w.worst.actors : '-', 6)}  ${lpad(w.build, 8)}${flag}`);
   }
   const allViews = rows.reduce((a, w) => a + w.views, 0);
@@ -361,6 +382,7 @@ export default async function (page, h) {
     console.log(`\n${over.length} views over budget (≤ ${BUDGET.calls} calls, ≤ ${BUDGET.tris} triangles, ≤ ${BUDGET.lights} lights):`);
     for (const v of over.sort((a, b) => b.calls - a.calls)) console.log(`  ${v.id} (${v.world}${v.variant !== 'play' ? ', ' + v.variant : ''}) ${v.cam}: ${v.calls} calls, ${v.tris} tris, ${v.lights} lights, ${v.actors} actors in view (Aidan at ${v.pt})`);
   }
+  if (devOver.length) console.log(`\n(the developer test rooms — ${[...new Set(devOver.map((v) => v.id))].join(', ')}, reachable only from the debug panel and deliberately overstuffed (ENGINE_NOTES §0.10) — have ${devOver.length} views over the game's budget, worst ${Math.max(...devOver.map((v) => v.calls))} calls: listed, not failed)`);
   report('perf views', !over.length && !fails.length, over.length ? `${over.length} views over budget` : fails.length ? fails.slice(0, 5).join(' | ') : `${allViews} views within ${BUDGET.calls} calls / ${BUDGET.tris} triangles / ${BUDGET.lights} lights`);
 
   // ---- memory + program stability across 30 transitions ----

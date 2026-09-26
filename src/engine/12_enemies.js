@@ -230,6 +230,8 @@ const Enemies = (() => {
     });
   }
   // coiled security tether: a unit helix along +Y (0 → 1); a mesh scaled on Y stretches the coil like the real cord
+  // (a 3-sided tube — it is 1 cm thick, the coil's 9 samples a turn carry its look — so a Tethered's four tethers cost
+  // ~6.6k triangles instead of ~8.8k)
   function helixGeo(turns, rad, tube, key) {
     return shared('helix' + key, () => {
       const pts = [], n = Math.max(16, Math.round(turns * 9));
@@ -237,7 +239,7 @@ const Enemies = (() => {
         const t = i / n, a = t * turns * TAU, e = Math.min(1, t * 14, (1 - t) * 14);
         pts.push(V(Math.cos(a) * rad * e, t, Math.sin(a) * rad * e));
       }
-      const g = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), n, tube, 4, false);
+      const g = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), n, tube, 3, false);
       g.userData.shared = true;
       return g;
     });

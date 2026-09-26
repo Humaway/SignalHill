@@ -2609,6 +2609,9 @@ const Kit = (() => {
       if (!g.attributes.position || !g.attributes.normal || (!g.index && g.attributes.position.count % 3)) continue;
       const p = plan.get(m), mat = p ? p.mat : m.material;
       const world = effWorld(m, root), col = p ? p.col : !!g.attributes.color && m.material.vertexColors;
+      // a tiny part (under ~8 cm across: a caster, a button, a key, a plug) casts no torch shadow — a speck in the
+      // 1024 map that costs the shadow pass its triangles
+      if (m.castShadow) { if (!g.boundingSphere) g.computeBoundingSphere(); if (g.boundingSphere.radius * m.matrixWorld.getMaxScaleOnAxis() < 0.04) m.castShadow = false; }
       const key = `${mat.uuid}|${world}|${m.castShadow ? 1 : 0}${m.receiveShadow ? 1 : 0}|${col ? 'c' : ''}`;
       let b = buckets.get(key);
       if (!b) { b = { mat, world, cast: m.castShadow, recv: m.receiveShadow, col, list: [] }; buckets.set(key, b); }
@@ -2617,11 +2620,19 @@ const Kit = (() => {
     let merged = 0, removed = 0;
     for (const b of buckets.values()) {
       if (b.list.length < 2) continue;
-      // keep batches spatially bounded so frustum culling still helps on long streets (≈ 40 m cells)
+      // keep batches spatially bounded so frustum culling (and Game's fog culling) still helps: a light bucket (< 6k
+      // triangles) is one mesh for the whole room — a wide view pays one draw call for it, not one per cell; ≈ 40 m
+      // cells for the rest (long streets); ≈ 16 m cells for a heavy one (≥ 40k: an exchange hall of switchboards) and
+      // 10 m for the heaviest (≥ 80k: a floor of 144 cubicles), so a view — and the torch's shadow pass, which draws
+      // every casting batch its 12 m cone touches — draws the part it sees, not the whole room
+      let tris = 0;
+      for (const it of b.list) tris += (it.geo.index ? it.geo.index.count : it.geo.attributes.position.count) / 3;
+      // (a casting bucket goes one step finer: the torch's shadow pass only needs the cells near Aidan)
+      const cell = tris < 6000 ? Infinity : b.cast ? (tris < 20000 ? 20 : 10) : tris < 40000 ? 40 : tris < 80000 ? 16 : 10;
       const cells = new Map();
       for (const it of b.list) {
         _v.setFromMatrixPosition(it.m);
-        const k = Math.floor(_v.x / 40) + ',' + Math.floor(_v.z / 40);
+        const k = cell === Infinity ? '*' : Math.floor(_v.x / cell) + ',' + Math.floor(_v.z / cell);
         if (!cells.has(k)) cells.set(k, []);
         cells.get(k).push(it);
       }
@@ -2661,6 +2672,7 @@ const Kit = (() => {
     rb.dispose = () => {
       if (rb.disposed) return;
       rb.disposed = true;
+      if (rb.batch) { rb.batch.dispose(); rb.batch = null; }
       for (const l of rb.lights) try { l.handle.free(); } catch (e) { /* already freed */ }
       for (const a of Object.values(rb.npcs)) try { if (a && typeof a.dispose === 'function') a.dispose(); } catch (e) { console.error('[Kit] actor dispose', e); }
       const seen = new Set();
@@ -2680,6 +2692,22 @@ const Kit = (() => {
       for (const o of ctx.removed) kill(o);
       root.removeFromParent();
     };
+    // everything else that shares a material — door leaves, pickups, live props' parts, clocks, LEDs … (they move, hide,
+    // switch or get taken, so they are not in the static batches) — is drawn by skinned batches in 16 m cells
+    // (Rig.batch: each part keeps moving / hiding on its own; one that changes material or leaves the room drops out and
+    // draws itself). World.update calls rb.batch.check() every frame.
+    if (!ctx.detached && typeof Rig !== 'undefined' && Rig.batch && Rig.batching !== false) {
+      try {
+        rb.batch = Rig.batch(root, {
+          cell: 16, keepHidden: true, noOcclude: true, restoreMask: 1, groupKey: (m) => effWorld(m, root),
+          filter: (m) => {
+            if (m.userData.merged || /^kit:/.test(m.name) || m.frustumCulled === false) return false;
+            for (let q = m; q && q !== root; q = q.parent) if (/^(actor|player|enemy|enemyfx):/.test(q.name) || (q.userData && (q.userData.actor || q.userData.noBatch))) return false;
+            return true;
+          },
+        });
+      } catch (e) { console.error('[Kit] room batch', e); rb.batch = null; }
+    }
     rb.stats = {
       ms: Math.round((performance.now() - ctx.t0) * 10) / 10, merged, mergedFrom: removed,
       meshes: (() => { let n = 0; root.traverse((c) => { if (c.isMesh || c.isSprite || c.isPoints) n++; }); return n; })(),

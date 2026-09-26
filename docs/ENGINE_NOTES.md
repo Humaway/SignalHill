@@ -19,8 +19,14 @@ from it.
 3. **Static geometry is merged** at the end of the build (walls, floors, room-level `K.box/cyl/sphere/plane`, static
    props). Materials that differ only in colour are batched through vertex colours, and static canvas labels (plates,
    signs, posters, notes) are packed into a per-room atlas, so a room's colours and labels cost a handful of draw calls.
-   Anything you will change later needs `{name}` (→ `G.obj(name)`) or `{static:false}`; a named prop still merges its
-   own static parts inside itself (it stays movable as one piece; `{merge:false}` keeps every part separate). Prop setters (`setOpen`, `setRinging`, `screen`,
+   A light batch (< 6k triangles) is one mesh for the room; heavier ones are split into cells (40 m, 16 m / 10 m for
+   the heaviest, one step finer for torch-shadow casters) so frustum culling and the torch's shadow pass draw only
+   what is near; a part under ~8 cm across casts no torch shadow. Anything you will change later needs `{name}` (→
+   `G.obj(name)`) or `{static:false}`; a named prop still merges its own static parts — and its static sub-props'
+   (a named pod's chair and phone) — inside itself (it stays movable as one piece; `{merge:false}` keeps every part
+   separate). A kind whose `name` opt is printed text (`shopfront`'s sign, `cubicle`'s name card: `textName`) is not
+   named by it — `objName` names it. What stays live (door leaves, pickups, live parts) is batched per material in 16 m
+   cells by `Rig.batch` (see §0.10). Prop setters (`setOpen`, `setRinging`, `screen`,
    `fuse_board.setSwitch` …) need `name`, `live:true` or the matching opt (`open`, `ringing`, `state`, `on` …),
    otherwise they only warn once.
 4. **`K.examine` with an array shows ONE line per press**, in order, then repeats the last. For several lines in one
@@ -43,14 +49,24 @@ from it.
 9. **Indoor Fog-world fog is the grey spec colour `#8e9996`** — dark interiors look milky. Give interiors
    `fog:{density:0.03–0.035, color:'#3b4543'}` (darker teal-grey). Outdoor fog 0.075 ≈ 15 m: keep street cameras
    within ~10 m of Aidan, or lighten the room with `fog:{density:0.05}`.
-10. **Rig actors are the draw-call budget.** Aidan ≈ 55–60 calls, each human/monster 39–66 (Tethered ≈ 49, Reach ≈
-    66, `detail:'low'` ≈ 39), plus ≈ 12 more each for the torch's shadow pass when the torch is on (one caster per
-    body segment — `actor.trimShadows()`; held props and small parts don't cast; the torch shadow reaches 12 m). There
-    is no occlusion culling: actors behind walls still draw if they're in the camera frustum. Keep ≤ 3–4 actors in
-    any camera's frustum. Room geometry measures ~140–240 calls per view in `test_room` (it is deliberately
-    overstuffed: ~45 props, 5 doors, dressing in both worlds); its yard view still totals ~520 because five actors
-    (four of them behind walls) are in that frustum. Game skips actors the fog already hides (beyond ≈
-    2.45 / density m: 33 m outdoors, 80 m indoors — `Game.culled`), so long foggy streets full of figures are fine.
+10. **The draw-call budget (spec §2 / §14: ≤ 400 calls and ≤ 250k triangles per view — `tools/tests/perf.mjs`).**
+    Every Rig figure is drawn by **one skinned batch per material** (`Rig.batch`, below): Aidan ≈ 28–30 calls, a
+    person / monster ≈ 16–22 (was 39–66), + ≈ 3–4 in the torch's shadow pass (one caster per major body segment —
+    `actor.trimShadows()`; held props and small parts don't cast; the torch shadow reaches 12 m). There is no
+    occlusion culling: figures behind walls still draw if they're in the camera frustum — keep ≤ ~8 in any frustum.
+    Game skips figures the fog already hides (beyond ≈ 2.45 / density m: 33 m outdoors, 80 m indoors — `Game.culled`)
+    and every piece of the room wholly beyond 3 / density (`Game.staticCulled`), so long foggy streets full of figures
+    are fine. The rest of the room: the static batches (§3 above) in cells sized by their weight, and everything that
+    moves or switches (door leaves, pickups, live props' parts) in skinned room batches — together ~100–250 calls per
+    view in the game's rooms. The developer `test_room` stays over budget by design (~45 props, 5 doors, one of every
+    monster, two worlds; its yard view ≈ 430 calls with five figures in frame — perf.mjs lists it, never fails it).
+    **Batching, what to know:** `Rig.batch(root, {filter, cell, keepHidden})` draws the meshes under `root` that share
+    a material as one `SkinnedMesh` whose bones are the meshes themselves (each keeps its own transform, animation and
+    `visible`; a hidden one collapses to a point). The originals stay in the scene graph on layer 30 (no camera draws
+    it; `userData.rigHidden`). A part whose material, geometry, shadow flags, render order or vertices change, or that
+    leaves the group, drops out of the batch and draws itself again (swap a material freely); a part added later
+    (`hold`, `wear` → `rebatch()`) draws itself until the next rebatch. Transparent parts and a part alone with its
+    material are left alone. Never set `layers` on a figure's or a room's parts yourself (Game's culling owns layers).
 
 ---
 
@@ -445,8 +461,9 @@ other dead enemies aren't spawned again.
 
 * `tethered` — `anchor:[x,z]`, `sit:true|'floor'`, `seat:{pos,rot,h}` (where it sits once freed: it walks past the
   seat's own low collider — a bench — and shuffles the rest of the way if held short), `watching:true`, `voice:false`,
-  `noticeRange`, `threat:false`, `detail:'low'` (or `rig:{detail:'low'}`, ≈ 39 calls instead of 49 — figures seen at a
-  distance; the Reach takes it too). `e.alert()` starts its turn; `e.alert({voice:true})` also plays the muffled
+  `noticeRange`, `threat:false`, `detail:'low'` (or `rig:{detail:'low'}`, ≈ 16 batched calls instead of 20 — figures
+  seen at a distance; the Reach takes it too). Its tethers and pucks (the fx group) are one batch too (`e.fxBatch`,
+  Rig.batch; checked after its `post`). `e.alert()` starts its turn; `e.alert({voice:true})` also plays the muffled
   "I only came in to..." whatever the 25 s voice throttle says (reset each chapter). Cut free = hold E 2 s with the
   box cutter on a downed or unaware one (F+1); stomp = A+1.
 * `e.pinned` — hits never push it back and other bodies never shove it; default `def.pinned ?? def.static ??
@@ -671,6 +688,26 @@ each scene (163 runs) · `SH_CHOICE=1` the other option of every choice · `SH_R
 (by default a mismatch is retried once with a reload before each run: only one that survives counts) · `SH_VERBOSE=1`
 each run's timeline and the room it left. Prints a row per scene (game seconds played / skipped, the S changes the scene
 made, the differences) and `PASS skipall`.
+
+**Performance** — `tools/tests/perf.mjs` (spec §2: 60 fps target, never below 30; §14: the Chapter 8 summit road holds
+60 fps on a mid-range laptop):
+```
+node tools/build.mjs --out .build/perf.html
+node tools/run.mjs --file .build/perf.html --size 640x360 --quiet --script tools/tests/perf.mjs
+```
+Every room in ROOMS, in both worlds where it has an Outage, is loaded as a save is, with its chapter's `debugState`
+(chapter select's state), every spawn of that world (one whose `when()` is off in that state is spawned anyway), the
+torch on, and the summit road once more with every Tethered of the Prologue–Chapter 7 freed and seated along it; then
+every camera (Cam.lock, `when` ignored) is rendered with Aidan at points of its volume (static: middle + far end; pan /
+rail: + the four extremes) and `Render.stats()` read: draw calls (incl. the torch's shadow pass), triangles, real
+lights, build time. Budget per view: ≤ 400 calls, ≤ 250k triangles, ≤ 11 lights. A view over budget (or every room's
+worst with `SH_EXPLAIN=1`) prints what it draws by owner (figure, prop, batch, fx — main + shadow calls and
+triangles); `SH_SHOTS=dir` saves each room's worst view. Then shader programs (none compiled again on a revisit —
+Render keeps every program it has made) and memory (30 real door transitions through every chapter and both worlds:
+geometries, textures, scene objects, figures, enemies and virtual lights back to the baseline). ~7 min;
+`SH_ONLY=c8_summit,c3_hall`, `SH_WORLDS=fog|outage`, `SH_MEM=0`. Ends `PASS perf`. Judge performance by these
+numbers, never by SwiftShader's frame rate. `perfPage` (exported) is the page helper for one-off probes:
+`__perf.load(room, world)`, `__perf.pointOf(cam)`, `__perf.explain(cam, point)`, `__perf.breakdown()`.
 The Action level changes what is in the rooms: Easy adds the `extraOnEasy` heal pickups (one can be the nearest thing
 to an E press meant for an examine, a door or a sticker next to it: `press(h, 'interact')` in `tools/tests/lib.mjs` then
 takes the pickup first and presses again, as a player would), Hard leaves out a fixed ~30 % of the

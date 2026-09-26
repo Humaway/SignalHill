@@ -2202,7 +2202,7 @@
   // office_chair: 5-star base on castors, gas lift, fabric seat and back, arms. opts color, turn (seat yaw offset)
   def('office_chair', { collide: 'auto' }, (K, o, g) => {
     const r = rngOf(K, o, 'oc'), fab = { tex: 'fabric_knit', color: o.color || pick(['#2f3438', '#34404a', '#3a3a3e'], r), roughness: 0.95 };
-    for (let i = 0; i < 5; i++) { const a = (i / 5) * TAU + 0.3; bar(g, [0, 0.09, 0], [Math.cos(a) * 0.32, 0.06, Math.sin(a) * 0.32], 0.035, 0.03, M.darkPlastic); sph(g, Math.cos(a) * 0.32, 0.03, Math.sin(a) * 0.32, 0.03, M.black, { seg: 6 }); }
+    for (let i = 0; i < 5; i++) { const a = (i / 5) * TAU + 0.3; bar(g, [0, 0.09, 0], [Math.cos(a) * 0.32, 0.06, Math.sin(a) * 0.32], 0.035, 0.03, M.darkPlastic); sph(g, Math.cos(a) * 0.32, 0.03, Math.sin(a) * 0.32, 0.03, M.black, { seg: 5 }); }
     cyl(g, 0, 0.08, 0, 0.03, 0.3, M.chrome, { seg: 8 });
     const s = grp(g, 0, 0, 0, o.turn ?? (r() - 0.5) * 40);
     box(s, 0, 0.37, 0, 0.3, 0.05, 0.3, M.darkPlastic);
@@ -2245,7 +2245,7 @@
     const v = o.variant || 'operator', H = v === 'bar' ? 0.75 : v === 'kitchen' ? 0.62 : 0.66;
     const legM = v === 'kitchen' ? M.pine : M.chrome;
     for (let i = 0; i < 4; i++) { const a = (i / 4) * TAU + Math.PI / 4; rod(g, [Math.cos(a) * 0.22, 0, Math.sin(a) * 0.22], [Math.cos(a) * 0.14, H - 0.03, Math.sin(a) * 0.14], 0.013, legM, { seg: 6 }); }
-    add(g, gTorus(0.19, 0.01, 4, 20), legM, 0, H * 0.35, 0, { rx: 90 });
+    add(g, gTorus(0.19, 0.01, 3, 16), legM, 0, H * 0.35, 0, { rx: 90 });
     cyl(g, 0, H - 0.04, 0, 0.19, 0.07, v === 'kitchen' ? M.pine : { tex: 'fabric_knit', color: v === 'operator' ? '#5a3a2a' : '#2a2a2a', roughness: 0.9 }, { seg: 16 });
     if (v === 'operator') { rod(g, [0, H - 0.02, -0.16], [0, H + 0.28, -0.2], 0.014, M.chrome, { seg: 6 }); box(g, 0, H + 0.2, -0.22, 0.3, 0.14, 0.04, { tex: 'fabric_knit', color: '#5a3a2a', roughness: 0.9 }, { rx: -8 }); }
   });
@@ -2684,7 +2684,7 @@
     const hs = grp(g, -0.075, 0.075, -0.0, 0, 'handset'); hs.rotation.x = R(-15);
     handsetBuild(hs, col);
     if (dynamic(o)) live(hs);
-    tube(g, [[-0.1, 0.03, 0.06], [-0.12, 0.01, 0.1], [-0.08, 0.004, 0.14], [-0.02, 0.004, 0.13], [0.02, 0.01, 0.08]], 0.005, TM(coilTex('#3a3e40'), { roughness: 0.5 }), { key: 'deskcord', radial: 4, seg: 16, cast: false });
+    tube(g, [[-0.1, 0.03, 0.06], [-0.12, 0.01, 0.1], [-0.08, 0.004, 0.14], [-0.02, 0.004, 0.13], [0.02, 0.01, 0.08]], 0.005, TM(coilTex('#3a3e40'), { roughness: 0.5 }), { key: 'deskcord', radial: 3, seg: 10, cast: false });
     // the message LED gets its own material only when the phone may ring (rows of dead phones stay one batch)
     if (dynamic(o, 'ringing')) {
       const led = lampMat('#402020', '#ff2a1c', 0);
@@ -3040,10 +3040,10 @@
     const hg = grp(g, 0, y, hook ? 0.03 : 0);
     if (hook) { box(g, 0, y + 0.02, 0.01, 0.03, 0.04, 0.03, M.greyPlastic); hg.rotation.x = R(0); }
     else hg.rotation.x = R(-90);
-    add(hg, gTorus(0.085, 0.008, 4, 16, Math.PI * 1.1), M.darkPlastic, 0, hook ? -0.09 : 0.004, 0, { rz: hook ? 190 : 0 });
-    for (const s of [-1, 1]) cylc(hg, s * 0.085, hook ? -0.1 : 0.0, 0, 0.03, 0.02, M.black, { rz: 90, seg: 12 });
+    add(hg, gTorus(0.085, 0.008, 3, 12, Math.PI * 1.1), M.darkPlastic, 0, hook ? -0.09 : 0.004, 0, { rz: hook ? 190 : 0 });
+    for (const s of [-1, 1]) cylc(hg, s * 0.085, hook ? -0.1 : 0.0, 0, 0.03, 0.02, M.black, { rz: 90, seg: 9 });
     rod(hg, [-0.085, hook ? -0.1 : 0, 0.0], [-0.02, hook ? -0.2 : 0.0, hook ? 0.06 : 0.1], 0.004, M.black, { seg: 4 });
-    tube(g, hook ? [[-0.085, y - 0.12, 0.03], [-0.08, y - 0.4, 0.05], [-0.02, y - 0.62, 0.05], [0.1, y - 0.7, 0.1]] : [[-0.085, 0.01, 0], [-0.15, 0.005, 0.1], [-0.25, 0.005, 0.08], [-0.35, 0.005, 0.0]], 0.003, M.black, { key: 'hscord' + (hook ? q3(y) : 'd'), radial: 4, seg: 12, cast: false });
+    tube(g, hook ? [[-0.085, y - 0.12, 0.03], [-0.08, y - 0.4, 0.05], [-0.02, y - 0.62, 0.05], [0.1, y - 0.7, 0.1]] : [[-0.085, 0.01, 0], [-0.15, 0.005, 0.1], [-0.25, 0.005, 0.08], [-0.35, 0.005, 0.0]], 0.003, M.black, { key: 'hscord' + (hook ? q3(y) : 'd'), radial: 3, seg: 8, cast: false });
   });
 
   // =================================================================================================================
@@ -3079,7 +3079,8 @@
     UNITS.set(key, u);
     return u;
   }
-  const placeUnit = (p, u, mats, x = 0, y = 0, z = 0, ry = 0) => { for (const k of Object.keys(u)) add(p, u[k], mats[k], x, y, z, { ry }); };
+  // (mats.noCast: the unit keys that cast no torch shadow — rows of plugs and tips: specks in the shadow map)
+  const placeUnit = (p, u, mats, x = 0, y = 0, z = 0, ry = 0) => { for (const k of Object.keys(u)) add(p, u[k], mats[k], x, y, z, { ry, cast: !(mats.noCast && mats.noCast.includes(k)) }); };
 
   // jack field: rows of jack holes with lamp caps above each, designation strips. One tile = one 0.9 m position.
   const jackTex = () => ctex('jackfield', 256, 320, (ctx, w, h, r) => {
@@ -3108,17 +3109,19 @@
     for (let k = 0; k < 20; k++) { ctx.fillStyle = `rgba(220,200,170,${r() * 0.15})`; ctx.fillRect(r() * w, r() * h, 10 + r() * 30, 1); }
   }, { wrap: true, size: 0.9 });
   const SWB = { wood: { tex: 'wood', light: '#6e4a30', dark: '#48301f' }, bake: { color: '#141210', roughness: 0.35 }, brass: { tex: 'metal', color: '#b89a52', roughness: 0.3, metalness: 0.8 } };
+  SWB.plug = SWB.bake; SWB.tip = SWB.brass; SWB.noCast = ['plug', 'tip'];
   const swUnit = () => unit('switchpos', (u) => {
     u.box('wood', -0.448, 0, -0.1, 0.02, 0.76, 0.8);                  // position divider
     u.box('wood', -0.448, 0.78, -0.38, 0.02, 1.17, 0.18);             // upright divider
-    // cord plugs standing in two rows: open 5-sided bodies + tips (they are 16 per position × hundreds of positions)
-    for (let i = 0; i < 8; i++) { const x = -0.38 + i * 0.1; for (const z of [-0.06, 0.02]) { u.geo('bake', gCyl(0.009, 0.009, 0.07, 5, 0, true), x, 0.8, z); u.geo('brass', gCyl(0.006, 0.003, 0.03, 4, 0, false), x, 0.85, z); } }
-    for (let i = 0; i < 8; i++) { const x = -0.38 + i * 0.1; u.box('bake', x, 0.77, 0.14, 0.012, 0.04, 0.02, { rx: -20 }); }
+    // cord plugs standing in two rows: open 4-sided bodies + open tips (they are 16 per position × hundreds of
+    // positions); the plugs, the lever keys and the little headset cast no torch shadow ('plug' / 'tip': specks)
+    for (let i = 0; i < 8; i++) { const x = -0.38 + i * 0.1; for (const z of [-0.06, 0.02]) { u.geo('plug', gCyl(0.009, 0.009, 0.07, 4, 0, true), x, 0.8, z); u.geo('tip', gCyl(0.006, 0.003, 0.03, 4, 0, true), x, 0.85, z); } }
+    for (let i = 0; i < 8; i++) { const x = -0.38 + i * 0.1; u.box('plug', x, 0.77, 0.14, 0.012, 0.04, 0.02, { rx: -20 }); }
     // headset hook + hanging headset under the key shelf edge
     u.box('brass', 0.3, 0.62, 0.31, 0.012, 0.012, 0.06);
-    u.geo('bake', gTorus(0.07, 0.006, 3, 8, Math.PI), 0.3, 0.56, 0.35, { rz: 180 });
-    u.cylc('bake', 0.23, 0.5, 0.35, 0.025, 0.02, { rz: 90, seg: 7 }); u.cylc('bake', 0.37, 0.5, 0.35, 0.025, 0.02, { rz: 90, seg: 7 });
-    u.rod('bake', [0.23, 0.5, 0.36], [0.26, 0.42, 0.42], 0.004);
+    u.geo('plug', gTorus(0.07, 0.006, 3, 6, Math.PI), 0.3, 0.56, 0.35, { rz: 180 });
+    u.cylc('plug', 0.23, 0.5, 0.35, 0.025, 0.02, { rz: 90, seg: 6 }); u.cylc('plug', 0.37, 0.5, 0.35, 0.025, 0.02, { rz: 90, seg: 6 });
+    u.rod('plug', [0.23, 0.5, 0.36], [0.26, 0.42, 0.42], 0.004);
   });
   // switchboard: a row of 1960s cord switchboard positions (0.9 m each) along X, operator side +Z: key shelf with cord
   // plugs and lever keys, an upright jack field with lamp caps, cornice with position numbers, a headset per position.
@@ -3174,7 +3177,7 @@
       const x1 = -L / 2 + i * 0.9 + 0.05 + r() * 0.8, y1 = 0.95 + r() * 0.8;
       const loose = !o.lit && r() < 0.6;
       const pts = loose ? [[x0, 0.86, z0], [x0 + 0.02, 0.9, z0 + 0.15], [x0 + 0.03, 0.74, 0.32], [x0 + 0.03, 0.5, 0.36]] : [[x0, 0.86, z0], [(x0 + x1) / 2, 0.8, 0.05], [x1, y1 - 0.2, -0.2], [x1, y1, -0.268 + (y1 - 0.78) * 0.1]];
-      tube(g, pts, 0.0045, r() < 0.3 ? cordRed : cordM, { radial: 4, seg: 14, cast: false });
+      tube(g, pts, 0.0045, r() < 0.3 ? cordRed : cordM, { radial: 3, seg: 10, cast: false });
     }
     const setLamp = (key, v) => {
       const L0 = typeof key === 'number' ? named[key] : named.find((l) => l.label === key);
@@ -3360,6 +3363,7 @@
     for (let x = -len / 2 + 0.15; x < len / 2; x += 0.3) box(g, x, H, 0, 0.03, 0.02, w, M.galv);
     for (let x = -len / 2 + 0.3; x < len / 2; x += 1.5) for (const s of [-1, 1]) cyl(g, x, H - 0.02, s * (w / 2 + 0.03), 0.006, ceil - H + 0.02, M.galv, { seg: 5 });
     if (o.load !== false) for (let i = 0; i < 5; i++) cylc(g, 0, H + 0.04 + (i % 2) * 0.04, -w / 2 + 0.07 + i * (w - 0.14) / 4, 0.025 + r() * 0.02, len, { color: pick(['#1a1a1a', '#2a2a2a', '#5d5a4c', '#6a2a22'], r), roughness: 0.55 }, { rz: 90, seg: 7 });
+    g.traverse((m) => { if (m.isMesh) m.castShadow = false; });     // (up under the ceiling: its torch shadow lands on the tiles)
   });
 
   // --- ceiling / hanging --------------------------------------------------------------------------------------------

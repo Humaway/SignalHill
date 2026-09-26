@@ -1009,7 +1009,7 @@ const Rig = (() => {
   // is the part's live matrixWorld times the inverse of that transform), so every animation — bones, eyes, lids,
   // dangles, a part's own scale — carries on exactly as before, and a part hidden (its own or an ancestor's
   // `visible`) or taken out of the figure collapses to a point. The originals stay in the hierarchy (everything that
-  // moves, hides, reads or re-parents them works as before) but draw nothing (layers mask 0; Game's fog culling leaves
+  // moves, hides, reads or re-parents them works as before) but draw nothing (layer 30 only; Game's fog culling leaves
   // them alone: userData.rigHidden). check() (every Actor.update) keeps it honest: a part whose material, geometry,
   // shadow flags, render order or vertices change, or that leaves the figure, drops out of the batch and draws itself
   // again; it also refreshes the batch's bounds (frustum culling). Held props, transparent parts and parts that
@@ -1030,15 +1030,25 @@ const Rig = (() => {
     for (let q = m.parent; q && q !== root; q = q.parent) if (/^prop:/.test(q.name) || (q.userData && q.userData.noBatch)) return false;
     return !filter || !!filter(m);
   }
+  // o.filter(mesh) → bool; o.cell (m): parts are also grouped by the cell of their place when the batch is built (a
+  // room's batches stay spatially bounded, so frustum culling still helps); o.keepHidden: parts hidden at build time
+  // are batched too (a room's other-world pieces: the Outage shows them); o.noOcclude: the batch meshes are left out of
+  // Cam.check's line-of-sight tests (the originals stay there). Hidden originals sit on layer 30 (HIDDEN_LAYER), which
+  // no camera draws — raycasts that enable every layer (Cam.check) still see them.
+  const HIDDEN_LAYER = 30, HIDDEN_MASK = 1 << HIDDEN_LAYER;
   function batch(root, o = {}) {
     root.updateMatrixWorld(true);
-    const groups = new Map();
+    const groups = new Map(), inv0 = new THREE.Matrix4().copy(root.matrixWorld).invert(), _wp = new THREE.Vector3();
     root.traverse((m) => {
-      // (a part hidden when the batch is built — a lash, a spare prop — is left out: it draws itself when shown)
-      if (!batchable(m, root, o.filter) || !bShown(m, root)) return;
+      // (a part hidden when a figure's batch is built — a lash, a spare prop — is left out: it draws itself when shown)
+      if (!batchable(m, root, o.filter) || (!o.keepHidden && !bShown(m, root))) return;
       m.updateMatrix();
       if (Math.abs(m.matrix.determinant()) < 1e-12) return;
-      const key = m.material.uuid + '|' + (m.castShadow ? 1 : 0) + (m.receiveShadow ? 1 : 0);
+      let cell = '';
+      if (o.cell) { _wp.setFromMatrixPosition(m.matrixWorld).applyMatrix4(inv0); cell = '|' + Math.floor(_wp.x / o.cell) + ',' + Math.floor(_wp.z / o.cell); }
+      // (o.groupKey: more to keep apart — a room's worlds; parts hidden at build time batch apart from shown ones, so a
+      // batch whose parts are all hidden draws nothing at all instead of collapsed triangles)
+      const key = m.material.uuid + '|' + (m.castShadow ? 1 : 0) + (m.receiveShadow ? 1 : 0) + cell + (o.groupKey ? '|' + o.groupKey(m) : '') + (bShown(m, root) ? '' : '|h');
       let gr = groups.get(key);
       if (!gr) { gr = { mat: m.material, cast: m.castShadow, recv: m.receiveShadow, parts: [] }; groups.set(key, gr); }
       gr.parts.push(m);
@@ -1053,7 +1063,6 @@ const Rig = (() => {
     }
     const bones = recs.map((r) => r.part), inverses = recs.map((r) => r.L0.clone().invert());
     const skel = new THREE.Skeleton(bones, inverses);
-    const bound = new THREE.Sphere(new THREE.Vector3(), 2);
     // (the renderer calls this once per frame per skeleton, just before drawing: every part's live world matrix, or a
     // point for a hidden one)
     skel.update = function () {
@@ -1080,25 +1089,23 @@ const Rig = (() => {
       sm.castShadow = gr.cast; sm.receiveShadow = gr.recv;
       sm.bindMode = 'attached';
       sm.bind(skel, new THREE.Matrix4());
-      sm.boundingSphere = bound; sm.boundingBox = new THREE.Box3();
-      sm.layers.mask = root.layers.mask;
-      sm.userData.rigBatch = true; sm.userData.live = gr.parts.length;
+      sm.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1); sm.boundingBox = new THREE.Box3();
+      sm.layers.mask = root.layers.mask & ~HIDDEN_MASK || 1;
+      sm.userData.rigBatch = true; sm.userData.noOcclude = !!o.noOcclude; sm.userData.recs = [];
       root.add(sm);
       meshes.push(sm);
-      for (const k of idx) recs[k].mesh = sm;
+      for (const k of idx) { recs[k].mesh = sm; sm.userData.recs.push(recs[k]); }
     }
-    for (const r of recs) { r.part.layers.mask = 0; r.part.userData.rigHidden = true; }
-    const drop = (r) => {
-      if (r.off) return;
-      r.off = true;
-      r.part.layers.mask = root.layers.mask; delete r.part.userData.rigHidden;
-      r.mesh.userData.live--;
-      if (r.mesh.userData.live <= 0) r.mesh.visible = false;
-    };
+    for (const r of recs) { r.part.layers.mask = HIDDEN_MASK; r.part.userData.rigHidden = true; }
+    // (a part that leaves the batch goes back to its batch's layer — a figure's fog culling — or, o.restoreMask, to a
+    // fixed one: a room piece's own culling state is its piece's, not the cell's)
+    const restore = (r) => { r.part.layers.mask = o.restoreMask ?? r.mesh.layers.mask; delete r.part.userData.rigHidden; };
+    const drop = (r) => { if (r.off) return; r.off = true; restore(r); };
     const B = {
-      root, meshes, recs, skeleton: skel, bound,
+      root, meshes, recs, skeleton: skel,
       get parts() { return recs.filter((r) => !r.off).length; },
-      // every frame, after the figure's matrices are updated: parts that changed drop out; the bounds follow the pose
+      // every frame, after the matrices are updated: parts that changed drop out (they draw themselves again); each
+      // batch mesh's bounds follow its parts, and a batch with nothing shown draws nothing
       check(updateMatrices = false) {
         if (updateMatrices) root.updateMatrixWorld(true);        // (a group moved by code after its last matrix update)
         for (const r of recs) {
@@ -1107,17 +1114,22 @@ const Rig = (() => {
           if (p.material !== r.mat || p.geometry !== r.geo || p.castShadow !== r.cast || p.receiveShadow !== r.recv || p.renderOrder || r.geo.attributes.position.version !== r.ver || !bInside(p, root)) drop(r);
         }
         _bInv.copy(root.matrixWorld).invert();
-        let first = true;
-        for (const r of recs) {
-          if (r.off) continue;
-          _bS.copy(r.geo.boundingSphere).applyMatrix4(_bm.multiplyMatrices(_bInv, r.part.matrixWorld));
-          if (first) { bound.copy(_bS); first = false; } else bound.union(_bS);
+        for (const sm of meshes) {
+          const b = sm.boundingSphere;
+          let first = true;
+          for (const r of sm.userData.recs) {
+            if (r.off || !bShown(r.part, root)) continue;
+            _bS.copy(r.geo.boundingSphere).applyMatrix4(_bm.multiplyMatrices(_bInv, r.part.matrixWorld));
+            if (first) { b.copy(_bS); first = false; } else b.union(_bS);
+          }
+          sm.visible = !first;
+          if (first) continue;
+          b.radius += 0.12;                                      // (a frame of motion: eyes / dangles move after this)
+          sm.boundingBox.makeEmpty().expandByPoint(b.center).expandByScalar(b.radius);
         }
-        bound.radius += 0.12;                                    // (a frame of motion: eyes / dangles move after this)
-        for (const sm of meshes) sm.boundingBox.makeEmpty().expandByPoint(bound.center).expandByScalar(bound.radius);
       },
       dispose() {
-        for (const r of recs) if (!r.off) { r.part.layers.mask = root.layers.mask; delete r.part.userData.rigHidden; r.off = true; }
+        for (const r of recs) if (!r.off) { restore(r); r.off = true; }
         for (const sm of meshes) { sm.removeFromParent(); sm.geometry.dispose(); }
         skel.dispose();
         meshes.length = 0;
@@ -3909,7 +3921,7 @@ const Rig = (() => {
   const api = {
     human, create, PRESETS, update, definePreset, prop: standaloneProp,
     defineGesture: defGesture, defineAnim: defAnim,
-    batch, batching: true,                          // CONTRACT+ (see Rig.batch above)
+    batch, batching: true, HIDDEN_LAYER,            // CONTRACT+ (see Rig.batch above)
     get actors() { return LIVE; },
     get ANIMS() { return Object.keys(LOOPS); },
     get GESTURES() { return Object.keys(GEST); },

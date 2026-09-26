@@ -31,8 +31,8 @@
 //   (META.endingsSeen / results / completed → EXTRA and New Game+ unlock); Aidan's body is put back as a new game
 //   expects it (posture, the phone in his hand, nothing in the other), then the title.
 // Fog culling: Rig actors beyond the fog's cutoff (≈ 2.45 / density m) are skipped by the renderer (render layer 1),
-//   with the groups listed in actor.cullWith (an enemy's fx group), and so are the room's merged static batches (kit:*)
-//   wholly beyond 3 / density; it runs on SH.advance's manual ticks too.
+//   with the groups listed in actor.cullWith (an enemy's fx group), and so is every piece of the room wholly beyond
+//   3 / density; it runs on SH.advance's manual ticks too.
 // Debug jumps (Game.debugRoom = SH.goto) in play cancel a transition in flight and abort running blocking scripts.
 // CONTRACT+: Game.fps, Game.culled, Game.manual(on) (SH.advance), Game.autosave(), Game.goTitle(), Game.results(name) (the §2A results
 //   record + stars without showing it), Game.rank(stats), Game.stickerCount(S), Game.debugStart(n, o),
@@ -321,23 +321,47 @@ const Game = (() => {
     a.root.traverse(set);
     if (Array.isArray(a.cullWith)) for (const g of a.cullWith) if (g && g.traverse) g.traverse(set);
   }
-  // Static geometry too: the room's merged batches (kit:* — most of a room's triangles, in ≤ 40 m cells) whose nearest
-  // point lies beyond 3 / density (FogExp2 lets e^-9 ≈ 0.01 % through: nothing shows, even a bright emissive) go to
-  // layer 1 as well — a long street no longer draws the blocks the fog has swallowed. Only fogged materials; only the
-  // room's static batches (they never move). Game.staticCulled → how many this frame.
+  // Static geometry too: every piece of the room (its merged kit:* batches — most of its triangles —, props, doors,
+  // loose meshes; not the people in it, not what the fog doesn't touch: halos, glows with fog:false) whose bounds lie
+  // wholly beyond 3 / density (FogExp2 lets e^-9 ≈ 0.01 % through: nothing shows, even a bright emissive) goes to layer
+  // 1 as well — a long street no longer draws the blocks the fog has swallowed. Bounds follow a piece that moves (a
+  // door leaf, a car): each top-level piece keeps its local sphere (+ 2 m for its moving parts). Game.staticCulled →
+  // how many pieces this frame.
   let sBuild = null, sList = [], sCulled = 0;
+  const _sm = new THREE.Matrix4(), _sb = new THREE.Box3(), _sb2 = new THREE.Box3(), _ss = new THREE.Sphere();
   function staticList(rb) {
     const out = [];
-    for (const m of rb.group.children) {
-      if (!m.isMesh || !/^kit:/.test(m.name) || !m.geometry) continue;
-      const mats = Array.isArray(m.material) ? m.material : [m.material];
-      if (mats.some((q) => !q || q.fog === false)) continue;
-      if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
-      m.updateMatrixWorld(true);
-      out.push({ m, s: m.geometry.boundingSphere.clone().applyMatrix4(m.matrixWorld), off: false });
+    rb.group.updateMatrixWorld(true);
+    for (const top of rb.group.children) {
+      // a skinned batch (Rig.batch) of the room's moving parts: its bounds follow them (kept by batch.check())
+      if (top.userData && top.userData.rigBatch) {
+        const mats = Array.isArray(top.material) ? top.material : [top.material];
+        if (!mats.some((q) => !q || q.fog === false)) out.push({ top, meshes: [top], dyn: true, c: top.boundingSphere.center, r: 0, pad: 0, off: false });
+        continue;
+      }
+      const meshes = [];
+      let skip = false;
+      top.traverse((o) => {
+        if (skip) return;
+        if (/^(actor|player):/.test(o.name) || (o.userData && o.userData.actor)) { skip = true; return; }
+        if (!(o.isMesh || o.isLine || o.isPoints) || !o.geometry) return;
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        if (mats.some((q) => !q || q.fog === false)) { skip = true; return; }
+        meshes.push(o);
+      });
+      if (skip || !meshes.length) continue;
+      _sb.makeEmpty();
+      for (const m of meshes) { if (!m.geometry.boundingBox) m.geometry.computeBoundingBox(); _sb2.copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld); _sb.union(_sb2); }
+      if (_sb.isEmpty()) continue;
+      _sb.getBoundingSphere(_ss);
+      const kit = top.isMesh && /^kit:/.test(top.name);
+      _sm.copy(top.matrixWorld).invert();
+      const sc = top.matrixWorld.getMaxScaleOnAxis() || 1;
+      out.push({ top, meshes, c: _ss.center.clone().applyMatrix4(_sm), r: _ss.radius / sc, pad: kit ? 0 : 2, off: false });
     }
     return out;
   }
+  const _sc = new THREE.Vector3();
   function staticCull(d) {
     const rb = typeof World !== 'undefined' ? World.build : null;
     if (rb !== sBuild) { sBuild = rb; sList = rb && rb.group ? staticList(rb) : []; sCulled = 0; }
@@ -346,8 +370,10 @@ const Game = (() => {
     Render.camera.getWorldPosition(_cp);
     let n = 0;
     for (const it of sList) {
-      const off = far < Infinity && _cp.distanceTo(it.s.center) - it.s.radius > far;
-      if (off !== it.off) { it.off = off; it.m.layers.set(off ? CULL_LAYER : 0); }
+      const r = it.dyn ? it.top.boundingSphere.radius : it.r;
+      _sc.copy(it.dyn ? it.top.boundingSphere.center : it.c).applyMatrix4(it.top.matrixWorld);
+      const off = far < Infinity && it.top.visible && _cp.distanceTo(_sc) - r * it.top.matrixWorld.getMaxScaleOnAxis() - it.pad > far;
+      if (off !== it.off) { it.off = off; for (const m of it.meshes) if (!m.userData.rigHidden) m.layers.set(off ? CULL_LAYER : 0); }
       if (off) n++;
     }
     sCulled = n;

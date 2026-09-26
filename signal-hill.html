@@ -8440,6 +8440,9 @@ const Kit = (() => {
       if (!g.attributes.position || !g.attributes.normal || (!g.index && g.attributes.position.count % 3)) continue;
       const p = plan.get(m), mat = p ? p.mat : m.material;
       const world = effWorld(m, root), col = p ? p.col : !!g.attributes.color && m.material.vertexColors;
+      // a tiny part (under ~8 cm across: a caster, a button, a key, a plug) casts no torch shadow — a speck in the
+      // 1024 map that costs the shadow pass its triangles
+      if (m.castShadow) { if (!g.boundingSphere) g.computeBoundingSphere(); if (g.boundingSphere.radius * m.matrixWorld.getMaxScaleOnAxis() < 0.04) m.castShadow = false; }
       const key = `${mat.uuid}|${world}|${m.castShadow ? 1 : 0}${m.receiveShadow ? 1 : 0}|${col ? 'c' : ''}`;
       let b = buckets.get(key);
       if (!b) { b = { mat, world, cast: m.castShadow, recv: m.receiveShadow, col, list: [] }; buckets.set(key, b); }
@@ -8448,11 +8451,19 @@ const Kit = (() => {
     let merged = 0, removed = 0;
     for (const b of buckets.values()) {
       if (b.list.length < 2) continue;
-      // keep batches spatially bounded so frustum culling still helps on long streets (≈ 40 m cells)
+      // keep batches spatially bounded so frustum culling (and Game's fog culling) still helps: a light bucket (< 6k
+      // triangles) is one mesh for the whole room — a wide view pays one draw call for it, not one per cell; ≈ 40 m
+      // cells for the rest (long streets); ≈ 16 m cells for a heavy one (≥ 40k: an exchange hall of switchboards) and
+      // 10 m for the heaviest (≥ 80k: a floor of 144 cubicles), so a view — and the torch's shadow pass, which draws
+      // every casting batch its 12 m cone touches — draws the part it sees, not the whole room
+      let tris = 0;
+      for (const it of b.list) tris += (it.geo.index ? it.geo.index.count : it.geo.attributes.position.count) / 3;
+      // (a casting bucket goes one step finer: the torch's shadow pass only needs the cells near Aidan)
+      const cell = tris < 6000 ? Infinity : b.cast ? (tris < 20000 ? 20 : 10) : tris < 40000 ? 40 : tris < 80000 ? 16 : 10;
       const cells = new Map();
       for (const it of b.list) {
         _v.setFromMatrixPosition(it.m);
-        const k = Math.floor(_v.x / 40) + ',' + Math.floor(_v.z / 40);
+        const k = cell === Infinity ? '*' : Math.floor(_v.x / cell) + ',' + Math.floor(_v.z / cell);
         if (!cells.has(k)) cells.set(k, []);
         cells.get(k).push(it);
       }
@@ -8492,6 +8503,7 @@ const Kit = (() => {
     rb.dispose = () => {
       if (rb.disposed) return;
       rb.disposed = true;
+      if (rb.batch) { rb.batch.dispose(); rb.batch = null; }
       for (const l of rb.lights) try { l.handle.free(); } catch (e) { /* already freed */ }
       for (const a of Object.values(rb.npcs)) try { if (a && typeof a.dispose === 'function') a.dispose(); } catch (e) { console.error('[Kit] actor dispose', e); }
       const seen = new Set();
@@ -8511,6 +8523,22 @@ const Kit = (() => {
       for (const o of ctx.removed) kill(o);
       root.removeFromParent();
     };
+    // everything else that shares a material — door leaves, pickups, live props' parts, clocks, LEDs … (they move, hide,
+    // switch or get taken, so they are not in the static batches) — is drawn by skinned batches in 16 m cells
+    // (Rig.batch: each part keeps moving / hiding on its own; one that changes material or leaves the room drops out and
+    // draws itself). World.update calls rb.batch.check() every frame.
+    if (!ctx.detached && typeof Rig !== 'undefined' && Rig.batch && Rig.batching !== false) {
+      try {
+        rb.batch = Rig.batch(root, {
+          cell: 16, keepHidden: true, noOcclude: true, restoreMask: 1, groupKey: (m) => effWorld(m, root),
+          filter: (m) => {
+            if (m.userData.merged || /^kit:/.test(m.name) || m.frustumCulled === false) return false;
+            for (let q = m; q && q !== root; q = q.parent) if (/^(actor|player|enemy|enemyfx):/.test(q.name) || (q.userData && (q.userData.actor || q.userData.noBatch))) return false;
+            return true;
+          },
+        });
+      } catch (e) { console.error('[Kit] room batch', e); rb.batch = null; }
+    }
     rb.stats = {
       ms: Math.round((performance.now() - ctx.t0) * 10) / 10, merged, mergedFrom: removed,
       meshes: (() => { let n = 0; root.traverse((c) => { if (c.isMesh || c.isSprite || c.isPoints) n++; }); return n; })(),
@@ -10880,7 +10908,7 @@ const Kit = (() => {
   // office_chair: 5-star base on castors, gas lift, fabric seat and back, arms. opts color, turn (seat yaw offset)
   def('office_chair', { collide: 'auto' }, (K, o, g) => {
     const r = rngOf(K, o, 'oc'), fab = { tex: 'fabric_knit', color: o.color || pick(['#2f3438', '#34404a', '#3a3a3e'], r), roughness: 0.95 };
-    for (let i = 0; i < 5; i++) { const a = (i / 5) * TAU + 0.3; bar(g, [0, 0.09, 0], [Math.cos(a) * 0.32, 0.06, Math.sin(a) * 0.32], 0.035, 0.03, M.darkPlastic); sph(g, Math.cos(a) * 0.32, 0.03, Math.sin(a) * 0.32, 0.03, M.black, { seg: 6 }); }
+    for (let i = 0; i < 5; i++) { const a = (i / 5) * TAU + 0.3; bar(g, [0, 0.09, 0], [Math.cos(a) * 0.32, 0.06, Math.sin(a) * 0.32], 0.035, 0.03, M.darkPlastic); sph(g, Math.cos(a) * 0.32, 0.03, Math.sin(a) * 0.32, 0.03, M.black, { seg: 5 }); }
     cyl(g, 0, 0.08, 0, 0.03, 0.3, M.chrome, { seg: 8 });
     const s = grp(g, 0, 0, 0, o.turn ?? (r() - 0.5) * 40);
     box(s, 0, 0.37, 0, 0.3, 0.05, 0.3, M.darkPlastic);
@@ -10923,7 +10951,7 @@ const Kit = (() => {
     const v = o.variant || 'operator', H = v === 'bar' ? 0.75 : v === 'kitchen' ? 0.62 : 0.66;
     const legM = v === 'kitchen' ? M.pine : M.chrome;
     for (let i = 0; i < 4; i++) { const a = (i / 4) * TAU + Math.PI / 4; rod(g, [Math.cos(a) * 0.22, 0, Math.sin(a) * 0.22], [Math.cos(a) * 0.14, H - 0.03, Math.sin(a) * 0.14], 0.013, legM, { seg: 6 }); }
-    add(g, gTorus(0.19, 0.01, 4, 20), legM, 0, H * 0.35, 0, { rx: 90 });
+    add(g, gTorus(0.19, 0.01, 3, 16), legM, 0, H * 0.35, 0, { rx: 90 });
     cyl(g, 0, H - 0.04, 0, 0.19, 0.07, v === 'kitchen' ? M.pine : { tex: 'fabric_knit', color: v === 'operator' ? '#5a3a2a' : '#2a2a2a', roughness: 0.9 }, { seg: 16 });
     if (v === 'operator') { rod(g, [0, H - 0.02, -0.16], [0, H + 0.28, -0.2], 0.014, M.chrome, { seg: 6 }); box(g, 0, H + 0.2, -0.22, 0.3, 0.14, 0.04, { tex: 'fabric_knit', color: '#5a3a2a', roughness: 0.9 }, { rx: -8 }); }
   });
@@ -11362,7 +11390,7 @@ const Kit = (() => {
     const hs = grp(g, -0.075, 0.075, -0.0, 0, 'handset'); hs.rotation.x = R(-15);
     handsetBuild(hs, col);
     if (dynamic(o)) live(hs);
-    tube(g, [[-0.1, 0.03, 0.06], [-0.12, 0.01, 0.1], [-0.08, 0.004, 0.14], [-0.02, 0.004, 0.13], [0.02, 0.01, 0.08]], 0.005, TM(coilTex('#3a3e40'), { roughness: 0.5 }), { key: 'deskcord', radial: 4, seg: 16, cast: false });
+    tube(g, [[-0.1, 0.03, 0.06], [-0.12, 0.01, 0.1], [-0.08, 0.004, 0.14], [-0.02, 0.004, 0.13], [0.02, 0.01, 0.08]], 0.005, TM(coilTex('#3a3e40'), { roughness: 0.5 }), { key: 'deskcord', radial: 3, seg: 10, cast: false });
     // the message LED gets its own material only when the phone may ring (rows of dead phones stay one batch)
     if (dynamic(o, 'ringing')) {
       const led = lampMat('#402020', '#ff2a1c', 0);
@@ -11718,10 +11746,10 @@ const Kit = (() => {
     const hg = grp(g, 0, y, hook ? 0.03 : 0);
     if (hook) { box(g, 0, y + 0.02, 0.01, 0.03, 0.04, 0.03, M.greyPlastic); hg.rotation.x = R(0); }
     else hg.rotation.x = R(-90);
-    add(hg, gTorus(0.085, 0.008, 4, 16, Math.PI * 1.1), M.darkPlastic, 0, hook ? -0.09 : 0.004, 0, { rz: hook ? 190 : 0 });
-    for (const s of [-1, 1]) cylc(hg, s * 0.085, hook ? -0.1 : 0.0, 0, 0.03, 0.02, M.black, { rz: 90, seg: 12 });
+    add(hg, gTorus(0.085, 0.008, 3, 12, Math.PI * 1.1), M.darkPlastic, 0, hook ? -0.09 : 0.004, 0, { rz: hook ? 190 : 0 });
+    for (const s of [-1, 1]) cylc(hg, s * 0.085, hook ? -0.1 : 0.0, 0, 0.03, 0.02, M.black, { rz: 90, seg: 9 });
     rod(hg, [-0.085, hook ? -0.1 : 0, 0.0], [-0.02, hook ? -0.2 : 0.0, hook ? 0.06 : 0.1], 0.004, M.black, { seg: 4 });
-    tube(g, hook ? [[-0.085, y - 0.12, 0.03], [-0.08, y - 0.4, 0.05], [-0.02, y - 0.62, 0.05], [0.1, y - 0.7, 0.1]] : [[-0.085, 0.01, 0], [-0.15, 0.005, 0.1], [-0.25, 0.005, 0.08], [-0.35, 0.005, 0.0]], 0.003, M.black, { key: 'hscord' + (hook ? q3(y) : 'd'), radial: 4, seg: 12, cast: false });
+    tube(g, hook ? [[-0.085, y - 0.12, 0.03], [-0.08, y - 0.4, 0.05], [-0.02, y - 0.62, 0.05], [0.1, y - 0.7, 0.1]] : [[-0.085, 0.01, 0], [-0.15, 0.005, 0.1], [-0.25, 0.005, 0.08], [-0.35, 0.005, 0.0]], 0.003, M.black, { key: 'hscord' + (hook ? q3(y) : 'd'), radial: 3, seg: 8, cast: false });
   });
 
   // =================================================================================================================
@@ -11757,7 +11785,8 @@ const Kit = (() => {
     UNITS.set(key, u);
     return u;
   }
-  const placeUnit = (p, u, mats, x = 0, y = 0, z = 0, ry = 0) => { for (const k of Object.keys(u)) add(p, u[k], mats[k], x, y, z, { ry }); };
+  // (mats.noCast: the unit keys that cast no torch shadow — rows of plugs and tips: specks in the shadow map)
+  const placeUnit = (p, u, mats, x = 0, y = 0, z = 0, ry = 0) => { for (const k of Object.keys(u)) add(p, u[k], mats[k], x, y, z, { ry, cast: !(mats.noCast && mats.noCast.includes(k)) }); };
 
   // jack field: rows of jack holes with lamp caps above each, designation strips. One tile = one 0.9 m position.
   const jackTex = () => ctex('jackfield', 256, 320, (ctx, w, h, r) => {
@@ -11786,17 +11815,19 @@ const Kit = (() => {
     for (let k = 0; k < 20; k++) { ctx.fillStyle = `rgba(220,200,170,${r() * 0.15})`; ctx.fillRect(r() * w, r() * h, 10 + r() * 30, 1); }
   }, { wrap: true, size: 0.9 });
   const SWB = { wood: { tex: 'wood', light: '#6e4a30', dark: '#48301f' }, bake: { color: '#141210', roughness: 0.35 }, brass: { tex: 'metal', color: '#b89a52', roughness: 0.3, metalness: 0.8 } };
+  SWB.plug = SWB.bake; SWB.tip = SWB.brass; SWB.noCast = ['plug', 'tip'];
   const swUnit = () => unit('switchpos', (u) => {
     u.box('wood', -0.448, 0, -0.1, 0.02, 0.76, 0.8);                  // position divider
     u.box('wood', -0.448, 0.78, -0.38, 0.02, 1.17, 0.18);             // upright divider
-    // cord plugs standing in two rows: open 5-sided bodies + tips (they are 16 per position × hundreds of positions)
-    for (let i = 0; i < 8; i++) { const x = -0.38 + i * 0.1; for (const z of [-0.06, 0.02]) { u.geo('bake', gCyl(0.009, 0.009, 0.07, 5, 0, true), x, 0.8, z); u.geo('brass', gCyl(0.006, 0.003, 0.03, 4, 0, false), x, 0.85, z); } }
-    for (let i = 0; i < 8; i++) { const x = -0.38 + i * 0.1; u.box('bake', x, 0.77, 0.14, 0.012, 0.04, 0.02, { rx: -20 }); }
+    // cord plugs standing in two rows: open 4-sided bodies + open tips (they are 16 per position × hundreds of
+    // positions); the plugs, the lever keys and the little headset cast no torch shadow ('plug' / 'tip': specks)
+    for (let i = 0; i < 8; i++) { const x = -0.38 + i * 0.1; for (const z of [-0.06, 0.02]) { u.geo('plug', gCyl(0.009, 0.009, 0.07, 4, 0, true), x, 0.8, z); u.geo('tip', gCyl(0.006, 0.003, 0.03, 4, 0, true), x, 0.85, z); } }
+    for (let i = 0; i < 8; i++) { const x = -0.38 + i * 0.1; u.box('plug', x, 0.77, 0.14, 0.012, 0.04, 0.02, { rx: -20 }); }
     // headset hook + hanging headset under the key shelf edge
     u.box('brass', 0.3, 0.62, 0.31, 0.012, 0.012, 0.06);
-    u.geo('bake', gTorus(0.07, 0.006, 3, 8, Math.PI), 0.3, 0.56, 0.35, { rz: 180 });
-    u.cylc('bake', 0.23, 0.5, 0.35, 0.025, 0.02, { rz: 90, seg: 7 }); u.cylc('bake', 0.37, 0.5, 0.35, 0.025, 0.02, { rz: 90, seg: 7 });
-    u.rod('bake', [0.23, 0.5, 0.36], [0.26, 0.42, 0.42], 0.004);
+    u.geo('plug', gTorus(0.07, 0.006, 3, 6, Math.PI), 0.3, 0.56, 0.35, { rz: 180 });
+    u.cylc('plug', 0.23, 0.5, 0.35, 0.025, 0.02, { rz: 90, seg: 6 }); u.cylc('plug', 0.37, 0.5, 0.35, 0.025, 0.02, { rz: 90, seg: 6 });
+    u.rod('plug', [0.23, 0.5, 0.36], [0.26, 0.42, 0.42], 0.004);
   });
   // switchboard: a row of 1960s cord switchboard positions (0.9 m each) along X, operator side +Z: key shelf with cord
   // plugs and lever keys, an upright jack field with lamp caps, cornice with position numbers, a headset per position.
@@ -11852,7 +11883,7 @@ const Kit = (() => {
       const x1 = -L / 2 + i * 0.9 + 0.05 + r() * 0.8, y1 = 0.95 + r() * 0.8;
       const loose = !o.lit && r() < 0.6;
       const pts = loose ? [[x0, 0.86, z0], [x0 + 0.02, 0.9, z0 + 0.15], [x0 + 0.03, 0.74, 0.32], [x0 + 0.03, 0.5, 0.36]] : [[x0, 0.86, z0], [(x0 + x1) / 2, 0.8, 0.05], [x1, y1 - 0.2, -0.2], [x1, y1, -0.268 + (y1 - 0.78) * 0.1]];
-      tube(g, pts, 0.0045, r() < 0.3 ? cordRed : cordM, { radial: 4, seg: 14, cast: false });
+      tube(g, pts, 0.0045, r() < 0.3 ? cordRed : cordM, { radial: 3, seg: 10, cast: false });
     }
     const setLamp = (key, v) => {
       const L0 = typeof key === 'number' ? named[key] : named.find((l) => l.label === key);
@@ -12038,6 +12069,7 @@ const Kit = (() => {
     for (let x = -len / 2 + 0.15; x < len / 2; x += 0.3) box(g, x, H, 0, 0.03, 0.02, w, M.galv);
     for (let x = -len / 2 + 0.3; x < len / 2; x += 1.5) for (const s of [-1, 1]) cyl(g, x, H - 0.02, s * (w / 2 + 0.03), 0.006, ceil - H + 0.02, M.galv, { seg: 5 });
     if (o.load !== false) for (let i = 0; i < 5; i++) cylc(g, 0, H + 0.04 + (i % 2) * 0.04, -w / 2 + 0.07 + i * (w - 0.14) / 4, 0.025 + r() * 0.02, len, { color: pick(['#1a1a1a', '#2a2a2a', '#5d5a4c', '#6a2a22'], r), roughness: 0.55 }, { rz: 90, seg: 7 });
+    g.traverse((m) => { if (m.isMesh) m.castShadow = false; });     // (up under the ceiling: its torch shadow lands on the tiles)
   });
 
   // --- ceiling / hanging --------------------------------------------------------------------------------------------
@@ -14208,7 +14240,7 @@ const Rig = (() => {
   // is the part's live matrixWorld times the inverse of that transform), so every animation — bones, eyes, lids,
   // dangles, a part's own scale — carries on exactly as before, and a part hidden (its own or an ancestor's
   // `visible`) or taken out of the figure collapses to a point. The originals stay in the hierarchy (everything that
-  // moves, hides, reads or re-parents them works as before) but draw nothing (layers mask 0; Game's fog culling leaves
+  // moves, hides, reads or re-parents them works as before) but draw nothing (layer 30 only; Game's fog culling leaves
   // them alone: userData.rigHidden). check() (every Actor.update) keeps it honest: a part whose material, geometry,
   // shadow flags, render order or vertices change, or that leaves the figure, drops out of the batch and draws itself
   // again; it also refreshes the batch's bounds (frustum culling). Held props, transparent parts and parts that
@@ -14229,15 +14261,25 @@ const Rig = (() => {
     for (let q = m.parent; q && q !== root; q = q.parent) if (/^prop:/.test(q.name) || (q.userData && q.userData.noBatch)) return false;
     return !filter || !!filter(m);
   }
+  // o.filter(mesh) → bool; o.cell (m): parts are also grouped by the cell of their place when the batch is built (a
+  // room's batches stay spatially bounded, so frustum culling still helps); o.keepHidden: parts hidden at build time
+  // are batched too (a room's other-world pieces: the Outage shows them); o.noOcclude: the batch meshes are left out of
+  // Cam.check's line-of-sight tests (the originals stay there). Hidden originals sit on layer 30 (HIDDEN_LAYER), which
+  // no camera draws — raycasts that enable every layer (Cam.check) still see them.
+  const HIDDEN_LAYER = 30, HIDDEN_MASK = 1 << HIDDEN_LAYER;
   function batch(root, o = {}) {
     root.updateMatrixWorld(true);
-    const groups = new Map();
+    const groups = new Map(), inv0 = new THREE.Matrix4().copy(root.matrixWorld).invert(), _wp = new THREE.Vector3();
     root.traverse((m) => {
-      // (a part hidden when the batch is built — a lash, a spare prop — is left out: it draws itself when shown)
-      if (!batchable(m, root, o.filter) || !bShown(m, root)) return;
+      // (a part hidden when a figure's batch is built — a lash, a spare prop — is left out: it draws itself when shown)
+      if (!batchable(m, root, o.filter) || (!o.keepHidden && !bShown(m, root))) return;
       m.updateMatrix();
       if (Math.abs(m.matrix.determinant()) < 1e-12) return;
-      const key = m.material.uuid + '|' + (m.castShadow ? 1 : 0) + (m.receiveShadow ? 1 : 0);
+      let cell = '';
+      if (o.cell) { _wp.setFromMatrixPosition(m.matrixWorld).applyMatrix4(inv0); cell = '|' + Math.floor(_wp.x / o.cell) + ',' + Math.floor(_wp.z / o.cell); }
+      // (o.groupKey: more to keep apart — a room's worlds; parts hidden at build time batch apart from shown ones, so a
+      // batch whose parts are all hidden draws nothing at all instead of collapsed triangles)
+      const key = m.material.uuid + '|' + (m.castShadow ? 1 : 0) + (m.receiveShadow ? 1 : 0) + cell + (o.groupKey ? '|' + o.groupKey(m) : '') + (bShown(m, root) ? '' : '|h');
       let gr = groups.get(key);
       if (!gr) { gr = { mat: m.material, cast: m.castShadow, recv: m.receiveShadow, parts: [] }; groups.set(key, gr); }
       gr.parts.push(m);
@@ -14252,7 +14294,6 @@ const Rig = (() => {
     }
     const bones = recs.map((r) => r.part), inverses = recs.map((r) => r.L0.clone().invert());
     const skel = new THREE.Skeleton(bones, inverses);
-    const bound = new THREE.Sphere(new THREE.Vector3(), 2);
     // (the renderer calls this once per frame per skeleton, just before drawing: every part's live world matrix, or a
     // point for a hidden one)
     skel.update = function () {
@@ -14279,25 +14320,23 @@ const Rig = (() => {
       sm.castShadow = gr.cast; sm.receiveShadow = gr.recv;
       sm.bindMode = 'attached';
       sm.bind(skel, new THREE.Matrix4());
-      sm.boundingSphere = bound; sm.boundingBox = new THREE.Box3();
-      sm.layers.mask = root.layers.mask;
-      sm.userData.rigBatch = true; sm.userData.live = gr.parts.length;
+      sm.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1); sm.boundingBox = new THREE.Box3();
+      sm.layers.mask = root.layers.mask & ~HIDDEN_MASK || 1;
+      sm.userData.rigBatch = true; sm.userData.noOcclude = !!o.noOcclude; sm.userData.recs = [];
       root.add(sm);
       meshes.push(sm);
-      for (const k of idx) recs[k].mesh = sm;
+      for (const k of idx) { recs[k].mesh = sm; sm.userData.recs.push(recs[k]); }
     }
-    for (const r of recs) { r.part.layers.mask = 0; r.part.userData.rigHidden = true; }
-    const drop = (r) => {
-      if (r.off) return;
-      r.off = true;
-      r.part.layers.mask = root.layers.mask; delete r.part.userData.rigHidden;
-      r.mesh.userData.live--;
-      if (r.mesh.userData.live <= 0) r.mesh.visible = false;
-    };
+    for (const r of recs) { r.part.layers.mask = HIDDEN_MASK; r.part.userData.rigHidden = true; }
+    // (a part that leaves the batch goes back to its batch's layer — a figure's fog culling — or, o.restoreMask, to a
+    // fixed one: a room piece's own culling state is its piece's, not the cell's)
+    const restore = (r) => { r.part.layers.mask = o.restoreMask ?? r.mesh.layers.mask; delete r.part.userData.rigHidden; };
+    const drop = (r) => { if (r.off) return; r.off = true; restore(r); };
     const B = {
-      root, meshes, recs, skeleton: skel, bound,
+      root, meshes, recs, skeleton: skel,
       get parts() { return recs.filter((r) => !r.off).length; },
-      // every frame, after the figure's matrices are updated: parts that changed drop out; the bounds follow the pose
+      // every frame, after the matrices are updated: parts that changed drop out (they draw themselves again); each
+      // batch mesh's bounds follow its parts, and a batch with nothing shown draws nothing
       check(updateMatrices = false) {
         if (updateMatrices) root.updateMatrixWorld(true);        // (a group moved by code after its last matrix update)
         for (const r of recs) {
@@ -14306,17 +14345,22 @@ const Rig = (() => {
           if (p.material !== r.mat || p.geometry !== r.geo || p.castShadow !== r.cast || p.receiveShadow !== r.recv || p.renderOrder || r.geo.attributes.position.version !== r.ver || !bInside(p, root)) drop(r);
         }
         _bInv.copy(root.matrixWorld).invert();
-        let first = true;
-        for (const r of recs) {
-          if (r.off) continue;
-          _bS.copy(r.geo.boundingSphere).applyMatrix4(_bm.multiplyMatrices(_bInv, r.part.matrixWorld));
-          if (first) { bound.copy(_bS); first = false; } else bound.union(_bS);
+        for (const sm of meshes) {
+          const b = sm.boundingSphere;
+          let first = true;
+          for (const r of sm.userData.recs) {
+            if (r.off || !bShown(r.part, root)) continue;
+            _bS.copy(r.geo.boundingSphere).applyMatrix4(_bm.multiplyMatrices(_bInv, r.part.matrixWorld));
+            if (first) { b.copy(_bS); first = false; } else b.union(_bS);
+          }
+          sm.visible = !first;
+          if (first) continue;
+          b.radius += 0.12;                                      // (a frame of motion: eyes / dangles move after this)
+          sm.boundingBox.makeEmpty().expandByPoint(b.center).expandByScalar(b.radius);
         }
-        bound.radius += 0.12;                                    // (a frame of motion: eyes / dangles move after this)
-        for (const sm of meshes) sm.boundingBox.makeEmpty().expandByPoint(bound.center).expandByScalar(bound.radius);
       },
       dispose() {
-        for (const r of recs) if (!r.off) { r.part.layers.mask = root.layers.mask; delete r.part.userData.rigHidden; r.off = true; }
+        for (const r of recs) if (!r.off) { restore(r); r.off = true; }
         for (const sm of meshes) { sm.removeFromParent(); sm.geometry.dispose(); }
         skel.dispose();
         meshes.length = 0;
@@ -17108,7 +17152,7 @@ const Rig = (() => {
   const api = {
     human, create, PRESETS, update, definePreset, prop: standaloneProp,
     defineGesture: defGesture, defineAnim: defAnim,
-    batch, batching: true,                          // CONTRACT+ (see Rig.batch above)
+    batch, batching: true, HIDDEN_LAYER,            // CONTRACT+ (see Rig.batch above)
     get actors() { return LIVE; },
     get ANIMS() { return Object.keys(LOOPS); },
     get GESTURES() { return Object.keys(GEST); },
@@ -20060,6 +20104,8 @@ const World = (() => {
       checkExits(p, ctl);
       if (build && !transitioning) checkTriggers(p, ctl);
     }
+    // the room's skinned batches (Kit → Rig.batch): parts that changed drop out, bounds follow what moved
+    if (build && build.batch) { try { build.batch.check(); } catch (e) { console.error('[World] room batch', e); build.batch = null; } }
   }
 
   const api = {
@@ -27150,6 +27196,8 @@ const Enemies = (() => {
     });
   }
   // coiled security tether: a unit helix along +Y (0 → 1); a mesh scaled on Y stretches the coil like the real cord
+  // (a 3-sided tube — it is 1 cm thick, the coil's 9 samples a turn carry its look — so a Tethered's four tethers cost
+  // ~6.6k triangles instead of ~8.8k)
   function helixGeo(turns, rad, tube, key) {
     return shared('helix' + key, () => {
       const pts = [], n = Math.max(16, Math.round(turns * 9));
@@ -27157,7 +27205,7 @@ const Enemies = (() => {
         const t = i / n, a = t * turns * TAU, e = Math.min(1, t * 14, (1 - t) * 14);
         pts.push(V(Math.cos(a) * rad * e, t, Math.sin(a) * rad * e));
       }
-      const g = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), n, tube, 4, false);
+      const g = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), n, tube, 3, false);
       g.userData.shared = true;
       return g;
     });
@@ -30859,8 +30907,8 @@ const Debug = (() => {
 //   (META.endingsSeen / results / completed → EXTRA and New Game+ unlock); Aidan's body is put back as a new game
 //   expects it (posture, the phone in his hand, nothing in the other), then the title.
 // Fog culling: Rig actors beyond the fog's cutoff (≈ 2.45 / density m) are skipped by the renderer (render layer 1),
-//   with the groups listed in actor.cullWith (an enemy's fx group), and so are the room's merged static batches (kit:*)
-//   wholly beyond 3 / density; it runs on SH.advance's manual ticks too.
+//   with the groups listed in actor.cullWith (an enemy's fx group), and so is every piece of the room wholly beyond
+//   3 / density; it runs on SH.advance's manual ticks too.
 // Debug jumps (Game.debugRoom = SH.goto) in play cancel a transition in flight and abort running blocking scripts.
 // CONTRACT+: Game.fps, Game.culled, Game.manual(on) (SH.advance), Game.autosave(), Game.goTitle(), Game.results(name) (the §2A results
 //   record + stars without showing it), Game.rank(stats), Game.stickerCount(S), Game.debugStart(n, o),
@@ -31149,23 +31197,47 @@ const Game = (() => {
     a.root.traverse(set);
     if (Array.isArray(a.cullWith)) for (const g of a.cullWith) if (g && g.traverse) g.traverse(set);
   }
-  // Static geometry too: the room's merged batches (kit:* — most of a room's triangles, in ≤ 40 m cells) whose nearest
-  // point lies beyond 3 / density (FogExp2 lets e^-9 ≈ 0.01 % through: nothing shows, even a bright emissive) go to
-  // layer 1 as well — a long street no longer draws the blocks the fog has swallowed. Only fogged materials; only the
-  // room's static batches (they never move). Game.staticCulled → how many this frame.
+  // Static geometry too: every piece of the room (its merged kit:* batches — most of its triangles —, props, doors,
+  // loose meshes; not the people in it, not what the fog doesn't touch: halos, glows with fog:false) whose bounds lie
+  // wholly beyond 3 / density (FogExp2 lets e^-9 ≈ 0.01 % through: nothing shows, even a bright emissive) goes to layer
+  // 1 as well — a long street no longer draws the blocks the fog has swallowed. Bounds follow a piece that moves (a
+  // door leaf, a car): each top-level piece keeps its local sphere (+ 2 m for its moving parts). Game.staticCulled →
+  // how many pieces this frame.
   let sBuild = null, sList = [], sCulled = 0;
+  const _sm = new THREE.Matrix4(), _sb = new THREE.Box3(), _sb2 = new THREE.Box3(), _ss = new THREE.Sphere();
   function staticList(rb) {
     const out = [];
-    for (const m of rb.group.children) {
-      if (!m.isMesh || !/^kit:/.test(m.name) || !m.geometry) continue;
-      const mats = Array.isArray(m.material) ? m.material : [m.material];
-      if (mats.some((q) => !q || q.fog === false)) continue;
-      if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
-      m.updateMatrixWorld(true);
-      out.push({ m, s: m.geometry.boundingSphere.clone().applyMatrix4(m.matrixWorld), off: false });
+    rb.group.updateMatrixWorld(true);
+    for (const top of rb.group.children) {
+      // a skinned batch (Rig.batch) of the room's moving parts: its bounds follow them (kept by batch.check())
+      if (top.userData && top.userData.rigBatch) {
+        const mats = Array.isArray(top.material) ? top.material : [top.material];
+        if (!mats.some((q) => !q || q.fog === false)) out.push({ top, meshes: [top], dyn: true, c: top.boundingSphere.center, r: 0, pad: 0, off: false });
+        continue;
+      }
+      const meshes = [];
+      let skip = false;
+      top.traverse((o) => {
+        if (skip) return;
+        if (/^(actor|player):/.test(o.name) || (o.userData && o.userData.actor)) { skip = true; return; }
+        if (!(o.isMesh || o.isLine || o.isPoints) || !o.geometry) return;
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        if (mats.some((q) => !q || q.fog === false)) { skip = true; return; }
+        meshes.push(o);
+      });
+      if (skip || !meshes.length) continue;
+      _sb.makeEmpty();
+      for (const m of meshes) { if (!m.geometry.boundingBox) m.geometry.computeBoundingBox(); _sb2.copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld); _sb.union(_sb2); }
+      if (_sb.isEmpty()) continue;
+      _sb.getBoundingSphere(_ss);
+      const kit = top.isMesh && /^kit:/.test(top.name);
+      _sm.copy(top.matrixWorld).invert();
+      const sc = top.matrixWorld.getMaxScaleOnAxis() || 1;
+      out.push({ top, meshes, c: _ss.center.clone().applyMatrix4(_sm), r: _ss.radius / sc, pad: kit ? 0 : 2, off: false });
     }
     return out;
   }
+  const _sc = new THREE.Vector3();
   function staticCull(d) {
     const rb = typeof World !== 'undefined' ? World.build : null;
     if (rb !== sBuild) { sBuild = rb; sList = rb && rb.group ? staticList(rb) : []; sCulled = 0; }
@@ -31174,8 +31246,10 @@ const Game = (() => {
     Render.camera.getWorldPosition(_cp);
     let n = 0;
     for (const it of sList) {
-      const off = far < Infinity && _cp.distanceTo(it.s.center) - it.s.radius > far;
-      if (off !== it.off) { it.off = off; it.m.layers.set(off ? CULL_LAYER : 0); }
+      const r = it.dyn ? it.top.boundingSphere.radius : it.r;
+      _sc.copy(it.dyn ? it.top.boundingSphere.center : it.c).applyMatrix4(it.top.matrixWorld);
+      const off = far < Infinity && it.top.visible && _cp.distanceTo(_sc) - r * it.top.matrixWorld.getMaxScaleOnAxis() - it.pad > far;
+      if (off !== it.off) { it.off = off; for (const m of it.meshes) if (!m.userData.rigHidden) m.layers.set(off ? CULL_LAYER : 0); }
       if (off) n++;
     }
     sCulled = n;

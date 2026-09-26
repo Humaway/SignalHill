@@ -26,7 +26,7 @@
 // opts.saveLoad — save at the reception payphone (the chapter's first), do the waiting room and the tea room, reload that
 // slot (Game.continueFrom) and play on (the waiting room again: the Tethered are back as they were at the save).
 // → { chapter: 7, F, A, flags, calls, spawns, notes }
-import { ev, advance, advanceUntil, mustReach, choose, press, walkTo, errorCount, report } from './lib.mjs';
+import { ev, advance, advanceUntil, mustReach, choose, press, walkTo, errorCount, report, takeHealPickup } from './lib.mjs';
 
 const PATHS = {
   connected: { answer: true, cut: true, listen: true, stand: 'face', play: true, examine: true, walk: true, rest: true },
@@ -329,10 +329,8 @@ async function reception(h, P, notes, opts) {
     await useAt(h, P, notes, 1.2, 10.1, -90);                          // the "You said, we did" board
     await saw(h, 'Nobody said anything.', notes, 'the feedback board', m0);
   }
-  if (!(await ev(h, "return !!(SH.S.taken && SH.S.taken['c7_reception:firstaid'])"))) {
-    await useAt(h, P, notes, 6.0, 1.05, 180);                          // the first aid kit behind the desk
-    if (!(await ev(h, "return !!(SH.S.taken && SH.S.taken['c7_reception:firstaid'])"))) notes.push('BUG: the reception first aid kit was not picked up');
-  }
+  // the first aid kit behind the desk (one of the ~30 % Hard leaves out)
+  await takeHealPickup(h, notes, 'c7_reception:firstaid', () => useAt(h, P, notes, 6.0, 1.05, 180), 'the reception first aid kit');
 }
 async function waiting(h, P, notes, opts) {
   await goRoom(h, P, notes, 'c7_waiting');

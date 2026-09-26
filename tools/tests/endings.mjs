@@ -263,7 +263,7 @@ export async function playEnding(h, name, o = {}) {
   const tst = await titleSt(h);
   if (!tst || !tst.items.includes('EXTRA')) bad(`no EXTRA on the title after ${name} (${JSON.stringify(tst && tst.items)})`);
   notes.push(`${name}${o.skip ? ' (skipped)' : ''}: ${got.join(' → ')}; game ${last ? last.T.toFixed(0) : '?'} s, ${((Date.now() - t0) / 1000).toFixed(0)} s real`);
-  return { ending: name, ok: !notes.some((n) => n.startsWith('BUG')), notes, flow: got };
+  return { ending: name, ok: !notes.some((n) => n.startsWith('BUG')), notes, flow: got, events };
 }
 
 export default async function (page, h) {

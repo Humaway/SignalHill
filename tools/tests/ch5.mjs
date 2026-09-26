@@ -26,7 +26,7 @@
 // opts.saveLoad — save at the lobby payphone (the chapter's first), go on through the pass, the stairwell and 5-1 to
 // Level 4 (CALL 5), then reload that slot (Game.continueFrom) and play the chapter on from the lobby.
 // → { chapter: 5, F, A, flags, notes }
-import { ev, advance, advanceUntil, mustReach, choose, press, walkTo, errorCount, report } from './lib.mjs';
+import { ev, advance, advanceUntil, mustReach, choose, press, walkTo, errorCount, report, takeHealPickup } from './lib.mjs';
 
 const PATHS = {
   connected: { answer: true, cut: true, borrowed: 'examine', huddle: true, brk: true, hitTop: false, play: true, examine: true },
@@ -243,7 +243,7 @@ async function lobby(h, P, notes, opts, st) {
     await useAt(h, P, notes, 7.4, 13.3, -141, { play: true });         // the rankings screen
     await saw(h, "She's always at the top.", notes, 'the rankings screen');
     if (!(await has('map_office'))) { await useAt(h, P, notes, 0.95, 9.6, -90); if (!(await has('map_office'))) notes.push('BUG: no Regional Office Directory (map_office) from the lobby wall'); }
-    if (!(await ev(h, "return !!(SH.S.taken && SH.S.taken['c5_lobby:firstaid'])"))) { await useAt(h, P, notes, 22.25, 11.55, 180); if (!(await ev(h, "return !!(SH.S.taken && SH.S.taken['c5_lobby:firstaid'])"))) notes.push('BUG: the first aid kit on the security desk was not picked up'); }
+    await takeHealPickup(h, notes, 'c5_lobby:firstaid', () => useAt(h, P, notes, 22.25, 11.55, 180), 'the first aid kit on the security desk');
     if (opts.saveLoad && !st.saved) { await payphoneSave(h, P, notes, 0, [0.9, 13.4, -90]); st.saved = true; }
     await useAt(h, P, notes, 11.2, 8.0, 180);                          // the gates without a pass
     await saw(h, 'The gates need a pass.', notes, 'the speed gates');
@@ -365,6 +365,8 @@ async function level4(h, P, notes, opts) {
   await saw(h, "Somebody's kid drew a picture on this desk. Their mum's a sixty-three.", notes, 'the desk photo frames');
   await useAt(h, P, notes, 3.0, 5.8, 180, { play: true });              // the escalations office door
   await saw(h, 'Keycard only.', notes, 'the escalations door');
+  // (Easy only: a coffee on the meeting-room table, nearer to that spot than the projector — the first E takes it)
+  await takeHealPickup(h, notes, 'c5_level4:mr2coffee', () => useAt(h, P, notes, 31.8, 18.1, 55), 'the meeting-room coffee (Easy)');
   await useAt(h, P, notes, 31.6, 18.3, 140, { play: true });            // meeting room "Summit": the projector
   await saw(h, '"Q3: WHAT DOES WINNING LOOK LIKE?"', notes, 'the projector');
   await saw(h, "Winning looks like everyone's asleep.", notes, 'the projector');
@@ -384,8 +386,7 @@ async function level4(h, P, notes, opts) {
   }
   if (P.examine) {
     for (const [x, z, yaw, id] of [[32.6, 1.3, 180, 'c5_level4:coffee'], [22.3, 27.6, 0, 'c5_level4:energy']]) {
-      await useAt(h, P, notes, x, z, yaw);
-      if (!(await ev(h, `return !!(SH.S.taken && SH.S.taken[${JSON.stringify(id)}])`))) notes.push(`BUG: ${id} was not picked up`);
+      await takeHealPickup(h, notes, id, () => useAt(h, P, notes, x, z, yaw));
     }
   }
   // the print room: slow, careful breathing through the door

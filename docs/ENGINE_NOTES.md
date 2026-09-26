@@ -618,8 +618,19 @@ chapter-start autosave, and prints a per-chapter timeline):
 node tools/build.mjs --out .build/chain.html
 SH_PATH=connected SH_RIDDLE=normal node tools/run.mjs --file .build/chain.html --size 640x360 --script tools/tests/chain.mjs
 ```
-`SH_PATH` connected | coverage | tomorrow | deal; `SH_RESUME=1` continues every chapter from its autosave before playing
-it; `SH_FROM_AUTO=.build/chainlogs/<path>_<riddle>_chN.auto.json` replays from a chapter-start autosave a run wrote.
+`SH_PATH` connected | coverage | tomorrow | deal; `SH_RIDDLE` / `SH_ACTION` easy | normal | hard (picked on the NEW GAME
+setup screen); `SH_DEATH=1` kills Aidan once in every boss fight (Chapters 1 3 4 5 6 8) and checks that the death
+screen's CONTINUE restores the latest save exactly before the chapter's test plays on; `SH_RESUME=1` continues every
+chapter from its autosave before playing it; `SH_FROM_AUTO=.build/chainlogs/<path>_<riddle>_chN.auto.json` replays from
+a chapter-start autosave a run wrote. The release matrix: connected (normal, `SH_RIDDLE=hard`, `SH_RIDDLE=easy
+SH_ACTION=easy`, `SH_DEATH=1`), coverage, tomorrow (normal, `SH_ACTION=hard`), deal — each must end `PASS chain …` —
+plus `tools/tests/stickers.mjs` (each Ollie sticker placed once in `src/data` and taken in its room; the first
+playthrough is not Yes; after its ending, EXTRA → NEW GAME+ starts playthrough 2 with the stickers and the bar, and
+Chapter 8's hut door opens onto E-YES → credits over the hold music → results → title) and `tools/tests/endings.mjs`.
+The Action level changes what is in the rooms: Easy adds the `extraOnEasy` heal pickups (one can be the nearest thing
+to an E press meant for an examine next to it — the chapter test takes it first), Hard leaves out a fixed ~30 % of the
+heal pickups (`DIFF.pickup`, by id): a test checks a heal pickup through `takeHealPickup` / `pickupPlan` in
+`tools/tests/lib.mjs`, never by id alone.
 The chain turns `renderer.render` into a no-op (`SH_RENDER=1` keeps drawing): headless SwiftShader rendering between the
 test's steps is what made long runs crawl. Tests drive time with `SH.advance`; nothing in the game depends on frames
 being drawn. `tools/run.mjs` starts Chromium with `--disable-accelerated-2d-canvas` (`SH_GPU_CANVAS=1` turns it off):
@@ -631,7 +642,9 @@ Chromium hangs while it boots, with several browsers running). `run.mjs` exits 1
 * **Game randomness and the tests.** The game keeps `Math.random` (enemy barks, the Escalation's roars, the mast's
   flickering bars…) and the chapter tests play it as it comes, so a check on something random samples until it has seen
   enough (the mast's bars: until three different readings), and a walk has to survive a monster standing in the way
-  (`walkTo` leans the sideways key in when the held keys got him nowhere). To replay a flaky run, seed it: `let s = N;
+  (`walkTo` leans the sideways key in when the held keys got him nowhere — after 1 s any sideways part of the
+  direction, after 2 s a sidestep now and then: the camera-relative 8-way keys can drift him up to 22° into a cubicle
+  mouth, and a target a few degrees off the pressed axis then never frees him). To replay a flaky run, seed it: `let s = N;
   Math.random = () => …` (a small PRNG) in the test before the chapter starts.
 * **Canvas textures that are read back** (`Tex.util.age`, `pix`, any `getImageData`) must be created with
   `getContext('2d', { willReadFrequently: true })` (every chapter's `ctex` helper does now; Tex / Kit / props always did).

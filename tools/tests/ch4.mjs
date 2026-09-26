@@ -22,7 +22,7 @@
 // opts.saveLoad — save at the Wire Lane payphone (the chapter's first), go on through the park and into the lobby, reload
 // that slot (Game.continueFrom) and play on; later save at the break-room payphone and reload it after the dial.
 // → { chapter: 4, F, A, flags, notes }
-import { ev, advance, advanceUntil, mustReach, choose, press, walkTo, errorCount, report } from './lib.mjs';
+import { ev, advance, advanceUntil, mustReach, choose, press, walkTo, errorCount, report, takeHealPickup } from './lib.mjs';
 
 const PATHS = {
   connected: { answer: true, cut: true, acct5: true, readLogs: true, chaseNotes: true, hits: 'few', play: true, examine: true },
@@ -555,8 +555,7 @@ export async function play(h, opts = {}) {
       notes.push(`break table: health ${hp}`);
       if (hp < 100) notes.push('BUG: the fifteen-minute break did not heal fully');
       for (const [x, z, yaw, id] of [[8.95, 2.9, 90, 'c4_break:coffee1'], [8.95, 4.4, 90, 'c4_break:coffee2'], [8.55, 6.6, 0, 'c4_break:energy']]) {
-        await useAt(h, P, notes, x, z, yaw);
-        if (!(await ev(h, `return !!(SH.S.taken && SH.S.taken[${JSON.stringify(id)}])`))) notes.push(`BUG: ${id} was not picked up`);
+        await takeHealPickup(h, notes, id, () => useAt(h, P, notes, x, z, yaw));
       }
     }
     // ---- 4D the team-leader pods: Huddle Whiteboard 2, Account Note 5, the ringing phone with the clicks ---------------------

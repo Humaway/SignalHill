@@ -125,6 +125,27 @@ export function report(name, ok, detail = '') {
   return ok;
 }
 
+// Action level and the placed heal pickups (spec §2A: Hard has "30% fewer pickups" — DIFF.pickup leaves out a fixed ~30 %
+// of them by id; an extraOnEasy one exists only on Easy). → 'placed' (it should be in the room unless taken), 'left out'
+// (this Action level has none there, and the room has none), or 'left out but placed' (a bug)
+export async function pickupPlan(h, id, o = {}) {
+  return ev(h, `const id = ${JSON.stringify(id)}; if (SH.mod.DIFF.pickup(id, ${JSON.stringify(o)})) return 'placed';
+    return SH.mod.World.interactables.some((i) => i.id === id) ? 'left out but placed' : 'left out';`);
+}
+// the usual check of a heal pickup a chapter test takes: take it with `take()` unless this Action level left it out; a
+// note either way → false when it should have been taken and was not (a BUG note pushed)
+export async function takeHealPickup(h, notes, id, take, what = id) {
+  const plan = await pickupPlan(h, id);
+  if (plan !== 'placed') {
+    notes.push(plan === 'left out' ? `${what}: none on ${await ev(h, 'return SH.S.difficulty.action')} (30 % fewer pickups)` : `BUG: ${what} is in the room although DIFF.pickup leaves it out`);
+    return plan === 'left out';
+  }
+  if (!(await ev(h, `return !!(SH.S.taken && SH.S.taken[${JSON.stringify(id)}])`))) await take();
+  if (await ev(h, `return !!(SH.S.taken && SH.S.taken[${JSON.stringify(id)}])`)) return true;
+  notes.push(`BUG: ${what} was not picked up`);
+  return false;
+}
+
 // ---- walking, menus, saving (added for ch0; generic) -------------------------------------------------------------
 // walk Aidan with REAL keys (camera-relative W/A/S/D, diagonals, Shift with o.run) toward (x, z) until he is within
 // o.tol m (default 0.4) or, with o.until (a page predicate), until that holds — e.g. walking into an exit:
@@ -132,7 +153,9 @@ export function report(name, ok, detail = '') {
 // Keys are re-chosen every o.step game seconds from Cam.basis(); after a camera cut they are released for a tick so
 // the new camera's axes apply (direction hold would otherwise keep the old ones). While a blocking script owns Aidan
 // the keys are released and the walk waits. Stuck (the keys held moved him < 4 cm), the sideways key joins in at a
-// lower share of the direction. → true | false (o.maxSec of game time, default 25)
+// lower share of the direction, after 1 s at any share (he leans along whatever holds him toward the target's side),
+// and after 2 s he sidesteps now and then (the minor axis alone, alternating sides). → true | false (o.maxSec of game
+// time, default 25)
 export async function walkTo(h, x, z, o = {}) {
   const tol = o.tol ?? 0.4, maxSec = o.maxSec ?? 25, step = o.step ?? 0.25;
   const until = o.until || 'false';
@@ -157,12 +180,21 @@ export async function walkTo(h, x, z, o = {}) {
       // sideways part of the direction; once stuck, a player leans into it: the sideways key comes in at a lower share)
       stuck = last && held.size && Math.hypot(st.x - last.x, st.z - last.z) < 0.04 ? stuck + 1 : 0;
       last = { x: st.x, z: st.z };
-      const th = stuck >= 2 ? 0.12 : 0.38;
+      // (a direction a few degrees off one camera axis — pressed into the side of a cubicle he drifted into, the target
+      // down the aisle past its end — has a sideways part under any fixed share: after 1 s stuck any sideways part leans in)
+      const th = stuck >= 4 ? 0.01 : stuck >= 2 ? 0.12 : 0.38;
       const ux = dist > 1e-3 ? dx / dist : 0, uz = dist > 1e-3 ? dz / dist : 0;
       const fy = ux * st.b.fx + uz * st.b.fz, rx = ux * st.b.rx + uz * st.b.rz;
       const want = new Set();
-      if (fy > th) want.add('w'); else if (fy < -th) want.add('s');
-      if (rx > th) want.add('d'); else if (rx < -th) want.add('a');
+      if (stuck >= 8 && stuck % 4 === 0) {
+        // still stuck after 2 s of leaning: a sidestep, the minor axis alone (toward the target's side, then the other)
+        const flip = (stuck / 4) % 2 === 1;
+        if (Math.abs(fy) >= Math.abs(rx)) want.add((rx >= 0) !== flip ? 'd' : 'a');
+        else want.add((fy >= 0) !== flip ? 'w' : 's');
+      } else {
+        if (fy > th) want.add('w'); else if (fy < -th) want.add('s');
+        if (rx > th) want.add('d'); else if (rx < -th) want.add('a');
+      }
       if (o.run && want.size) want.add('Shift');
       await setKeys(want);
       await advance(h, o.until ? step : Math.min(step, dist / 1.6 + 0.05));

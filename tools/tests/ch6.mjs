@@ -27,7 +27,7 @@
 // opts.saveLoad — save at the Level 6 lobby payphone (the chapter's first), go into Luka's back office, reload that slot
 // (Game.continueFrom) and play on.
 // → { chapter: 6, F, A, flags, notes }
-import { ev, advance, advanceUntil, mustReach, choose, press, walkTo, errorCount, report } from './lib.mjs';
+import { ev, advance, advanceUntil, mustReach, choose, press, walkTo, errorCount, report, takeHealPickup } from './lib.mjs';
 
 const PATHS = {
   connected: { answer: true, cut: true, acct6: true, docs: true, openCase: true, reply: 2, play: true, examine: true, brace: 'clean', walk: true },
@@ -423,8 +423,7 @@ async function office(h, P, notes, opts) {
     await shot(h, opts, 'office_roster');
   }
   for (const [x, z, yaw, id] of [[4.55, 0.91, 118, 'c6_lukaoffice:firstaid'], [4.4, 4.55, 58, 'c6_lukaoffice:coffee']]) {
-    await useAt(h, P, notes, x, z, yaw);
-    if (!(await ev(h, `return !!(SH.S.taken && SH.S.taken[${JSON.stringify(id)}])`))) notes.push(`BUG: ${id} was not picked up`);
+    await takeHealPickup(h, notes, id, () => useAt(h, P, notes, x, z, yaw));
   }
 }
 

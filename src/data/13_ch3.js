@@ -164,6 +164,27 @@
     K.mesh(m, { static: true, world: o.world });
     return m;
   }
+  // a slab whose top follows yf(x) (linear in x) from x0 to x1, z0 to z1, with its sides and ends h deep: a footpath or a
+  // kerb beside a sloping road, drawn only (no floor)
+  function C3_slab(K, x0, z0, x1, z1, yf, h, mat) {
+    const pos = [], uv = [], idx = [];
+    const s = typeof mat === 'string' ? 1 / Tex.size(mat) : 0.3;
+    const face = (P, U) => { const b = pos.length / 3; for (let i = 0; i < 4; i++) { pos.push(...P[i]); uv.push(U[i][0] * s, U[i][1] * s); } idx.push(b, b + 1, b + 2, b, b + 2, b + 3); };
+    const t0 = yf(x0), t1 = yf(x1);
+    face([[x0, t0, z0], [x0, t0, z1], [x1, t1, z1], [x1, t1, z0]], [[x0, -z0], [x0, -z1], [x1, -z1], [x1, -z0]]);
+    face([[x0, t0, z1], [x0, t0 - h, z1], [x1, t1 - h, z1], [x1, t1, z1]], [[x0, t0], [x0, t0 - h], [x1, t1 - h], [x1, t1]]);
+    face([[x1, t1, z0], [x1, t1 - h, z0], [x0, t0 - h, z0], [x0, t0, z0]], [[x1, t1], [x1, t1 - h], [x0, t0 - h], [x0, t0]]);
+    face([[x1, t1, z1], [x1, t1 - h, z1], [x1, t1 - h, z0], [x1, t1, z0]], [[z1, t1], [z1, t1 - h], [z0, t1 - h], [z0, t1]]);
+    face([[x0, t0, z0], [x0, t0 - h, z0], [x0, t0 - h, z1], [x0, t0, z1]], [[z0, t0], [z0, t0 - h], [z1, t0 - h], [z1, t0]]);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, K.mat(mat)); m.receiveShadow = true; m.castShadow = false;
+    m.userData.ownedGeo = true;
+    K.mesh(m, { static: true });
+    return m;
+  }
   // a sagging wire / cable between points (tube)
   function C3_wire(K, a, b, sag = 0.4, r = 0.012, color = '#1b1c1c', o = {}) {
     const pts = []; for (let i = 0; i <= 10; i++) { const t = i / 10; pts.push(new THREE.Vector3(lerp(a[0], b[0], t), lerp(a[1], b[1], t) - Math.sin(t * Math.PI) * sag, lerp(a[2], b[2], t))); }
@@ -479,12 +500,21 @@
     ],
     build(K) {
       K.floor(0, 0, 37, 20, 'concrete');
-      // the ground round the forecourt (fog beyond), and Exchange Road dropping away east
-      C3_ground(K, -24, 20, 70, 44, () => -0.05, 'grass');
-      C3_ground(K, -24, -12, 0, 20, () => -0.05, 'grass');
-      C3_ground(K, 37, -12, 70, 6.2, (x) => -0.05 - (x - 37) * 0.06, 'grass');
-      C3_ground(K, 37, 15.8, 70, 20, (x) => -0.05 - (x - 37) * 0.06, 'grass');
-      C3_ground(K, 37, 6.2, 70, 15.8, (x) => -(x - 37) * 0.0714, 'bitumen');
+      // the ground round the forecourt (fog beyond), and Exchange Road dropping away east as the street it is: bitumen,
+      // footpaths, picket fences, a street light and the top cottage (its 0.5 m of verge either side of the mouth)
+      const yR = (x) => -Math.max(0, x - 37) * (ER.Y / ER.L);
+      C3_ground(K, -24, 20, 37, 46, () => -0.05, 'grass');
+      C3_ground(K, -24, -40, 0, 20, () => -0.05, 'grass');
+      C3_ground(K, 0, -40, 37, -12, () => -0.05, 'grass');
+      C3_ground(K, 37, -40, 90, 7.24, (x) => yR(x) - 0.05, 'grass');
+      C3_ground(K, 37, 14.76, 90, 46, (x) => yR(x) - 0.05, 'grass');
+      C3_ground(K, 37, 6.2, 90, 15.8, (x) => yR(x), 'bitumen');
+      for (const [z0, z1] of [[6.2, 8.8], [13.2, 15.8]]) C3_slab(K, 37, z0, 90, z1, (x) => yR(x) + 0.15, 0.3, 'footpath');
+      C3_fenceX(K, 37.4, 90, 6.3, 'n', { variant: 'picket', color: '#d9d4c4', yf: (x) => yR(x) + 0.12 });
+      C3_fenceX(K, 37.4, 90, 15.7, 's', { variant: 'picket', color: '#cfc8b4', yf: (x) => yR(x) + 0.12 });
+      K.prop('streetlight', 41.5, 15.5, 180, { y: yR(41.5) + 0.15, lit: true, light: false });
+      K.prop('cottage', 60, -2.2, 0, { y: yR(60) + 0.23, color: '#bfc6cc', number: 5, seed: 303 });
+      K.prop('gum_tree', 48, 22, 120, { y: yR(48) - 0.1, seed: 22 });
       // the car park: bitumen, faded bays, wheel stops, the supervisor's bay
       K.floor(3.5, 7.5, 24, 19.5, 'bitumen');
       for (let i = 0; i <= 7; i++) K.plane(4.2 + i * 2.6, 0.012, 11.2, 0.1, 4.6, { color: '#d8d4c4', roughness: 0.9 }, { rot: [-90, 0, 0] });
@@ -494,6 +524,20 @@
       K.wall(-2, -0.2, 36, -0.2, 9, { tex: 'brick', color: '#7a6250' }, { openings: [{ at: FC.doorX + 2, w: 1.9, h: 2.25 }], grime: true, thick: 0.4 });
       K.box(17, 9, -0.35, 38.6, 0.5, 0.7, { tex: 'concrete', color: '#76786f' });            // parapet
       K.box(36.1, 0, -9, 0.4, 9, 18, { tex: 'brick', color: '#735c4b' }, { collide: true });  // the east side wall running back
+      // the building behind the facade: one solid block back to the rear yard (the facade is never a card on its own), a
+      // parapet cap round its roof, windows and a downpipe down its west side, a lift-motor room on the roof
+      K.box(16.9, 0, -9.2, 38.2, 9, 17.6, { tex: 'brick', color: '#735c4b' }, { shadow: false });
+      K.box(-2.05, 9, -9.2, 0.5, 0.5, 18, { tex: 'concrete', color: '#76786f' }, { shadow: false });
+      K.box(17, 9, -17.95, 38.6, 0.5, 0.5, { tex: 'concrete', color: '#76786f' }, { shadow: false });
+      K.box(36.05, 9, -9.2, 0.5, 0.5, 18, { tex: 'concrete', color: '#76786f' }, { shadow: false });
+      K.box(8, 9, -11, 5, 2.6, 4, { tex: 'brick', color: '#6d5a4c' }, { shadow: false });
+      K.box(8, 11.6, -11, 5.3, 0.18, 4.3, { tex: 'concrete', color: '#6a6c66' }, { shadow: false });
+      for (let i = 0; i < 5; i++) {
+        const wz = -2.6 - i * 3.3;
+        K.plane(-2.12, 2.3, wz, 1.1, 2.1, winTex(i + 5), { rotY: -90 });
+        K.plane(-2.12, 6.3, wz, 1.1, 2.1, winTex(i + 7), { rotY: -90 });
+      }
+      K.cyl(-2.2, 0, -1.2, 0.06, 9, { tex: 'metal', color: '#4a4f4c' }, { seg: 6 });
       K.box(15, 0, -0.42, 40, 0.5, 0.1, { tex: 'concrete', color: '#6d6f68' });                // plinth course
       K.box(17, 4.55, 0.02, 38, 0.22, 0.16, { tex: 'concrete', color: '#7e8079' });            // string course between the storeys
       for (let i = 0; i <= 13; i++) { const px = -0.3 + i * 2.9; if (Math.abs(px - FC.doorX) < 3.0) continue; K.box(px, 0, 0.06, 0.42, 9, 0.16, { tex: 'brick', color: '#6a5444' }); }

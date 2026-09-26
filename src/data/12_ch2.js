@@ -2254,15 +2254,15 @@
       // ...and the rest of the row on past both ends of the lane, the back yards they stand in (grass, dividing fences),
       // the ground behind the bays and round both ends, the fences on along the lane: never the fog under a house
       { const YD = { tex: 'grass', color: '#6a755e' }, FC = '#5f6b64';
-        for (const [x, c] of [[-5.5, '#7a4a3a'], [34.5, '#7a4a3a'], [44.5, '#6f3b30']]) { const rb = MB(); hipRoof(rb, x, 2.9, 12.5, 9, 8, 1.6, 0); mesh(K, rb, { tex: 'metal', color: c, roughness: 0.7 }); K.box(x, 0, 12.5, 9, 2.9, 8, { tex: 'brick', color: '#bfa894' }, { shadow: false }); }
-        K.box(18, 0, 13.2, 60, 0.02, 13.8, YD, { shadow: false });                                  // the back yards (z 6.3 … 20.1)
-        K.box(18, 0, -10.15, 60, 0.02, 20, YD, { shadow: false });                                  // behind the bays (… z −0.15)
+        for (const [x, c] of [[-5.5, '#7a4a3a'], [34.5, '#7a4a3a'], [44.5, '#6f3b30'], [54.5, '#7a4a3a'], [64.5, '#6f3b30']]) { const rb = MB(); hipRoof(rb, x, 2.9, 12.5, 9, 8, 1.6, 0); mesh(K, rb, { tex: 'metal', color: c, roughness: 0.7 }); K.box(x, 0, 12.5, 9, 2.9, 8, { tex: 'brick', color: '#bfa894' }, { shadow: false }); }
+        K.box(29, 0, 13.2, 82, 0.02, 13.8, YD, { shadow: false });                                  // the back yards (z 6.3 … 20.1)
+        K.box(29, 0, -10.15, 82, 0.02, 20, YD, { shadow: false });                                  // behind the bays (… z −0.15)
         K.box(-6, 0, 3.07, 12, 0.02, 6.44, YD, { shadow: false });                                  // past the dead end
-        K.box(46, -0.05, 3, 8, 0.05, 6, { tex: 'concrete', color: '#8a867a' }, { shadow: false });   // the lane on east
-        for (const x of [-0.5, 9.5, 19.5, 29.5, 39.5]) K.prop('fence', x, 11.4, 90, { variant: 'colorbond', len: 10.2, color: FC, collide: false });
+        K.box(56, -0.05, 3, 28, 0.05, 6, { tex: 'concrete', color: '#8a867a' }, { shadow: false });  // the lane on east
+        for (const x of [-0.5, 9.5, 19.5, 29.5, 39.5, 49.5, 59.5]) K.prop('fence', x, 11.4, 90, { variant: 'colorbond', len: 10.2, color: FC, collide: false });
         K.prop('fence', 1.9, -0.1, 0, { variant: 'colorbond', len: 3.8, color: FC, collide: false });
-        K.prop('fence', 40.2, -0.1, 0, { variant: 'colorbond', len: 16.4, color: FC, collide: false });
-        K.prop('fence', 41.0, 6.15, 180, { variant: 'colorbond', len: 14, color: FC, collide: false });
+        K.prop('fence', 51.0, -0.1, 0, { variant: 'colorbond', len: 38, color: FC, collide: false });
+        K.prop('fence', 52.0, 6.15, 180, { variant: 'colorbond', len: 36, color: FC, collide: false });
         K.prop('gum_tree_small', 36.5, 17.5, 70, { collide: false }); K.prop('gum_tree', 12.0, -9.5, 150, { collide: false }); }
       K.cyl(6.0, 0, 18.2, 0.04, 2.2, { tex: 'metal', color: '#9aa39c' }); for (let i = 0; i < 4; i++) K.box(6.0, 2.1, 18.2, 2.6, 0.02, 0.02, '#b9bcb6', { rot: i * 45 });
       K.prop('couch', 18.2, 5.35, 180, { len: 1.8, color: '#5a5040', collide: true });

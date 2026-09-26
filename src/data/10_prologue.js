@@ -910,8 +910,8 @@
       K.plane(9.9, 0.006, 3.2, 3.6, 0.3, lineTex(), { rot: [-90, 0, 90], transparent: true });
       // Hill Road runs on west into the fog (visual), Relay Street north (visual beyond the exit)
       K.box(-9, -0.05, 6.7, 15, 0.05, 6.4, 'bitumen', { shadow: false });
-      K.box(10.2, -0.05, -14, 4.6, 0.05, 13, 'bitumen', { shadow: false });
-      K.box(7.2, 0, -14, 1.5, 0.14, 13, 'footpath', { shadow: false });
+      K.box(10.2, -0.05, -26.3, 4.6, 0.05, 37.6, 'bitumen', { shadow: false });
+      K.box(7.2, 0, -26.3, 1.5, 0.14, 37.6, 'footpath', { shadow: false });
       // the drop to the south: the road ends
       K.drop(-1.6, 9.9, 12.5, 12.2, { side: 'n', msg: 'The road ends here.' });
       K.examine(3.6, 1.2, 9.35, ['ROAD CLOSED — WORKS IN PROGRESS. [beat] There\'s nothing left to work on.', 'The road just stops. Like someone forgot the rest of it.'], { id: 'p4:drop', r: 1.6 });
@@ -934,11 +934,11 @@
       // north beside Relay Street into the fog — never the fog's floor
       { const SCRUB = { tex: 'grass', color: '#6c745f' }, DRY = { tex: 'grass', color: '#77765e' };
         K.box(-9.3, 0, -4.25, 15.4, 0.08, 15.5, SCRUB, { shadow: false });                         // x −17 … −1.6, z −12 … 3.5
-        K.box(2.35, 0, -11.85, 7.9, 0.08, 20.5, SCRUB, { shadow: false });                          // behind the paling fences (… z −1.6)
-        K.box(22.2, 0, -5.25, 15.6, 0.05, 29.5, DRY, { shadow: false });                            // past the wire fence (x 14.4 … 30)
-        K.box(13.45, 0.06, -14.05, 1.9, 0.01, 12.9, { tex: 'grass', color: '#77806a' }, { shadow: false });   // the verge on north
-        for (const z of [-9.1, -12.1, -15.1, -18.1]) K.prop('fence', 6.3, z, -90, { variant: 'paling', len: 3 });
-        for (const z of [-10, -14, -18]) K.prop('fence', 14.35, z, -90, { variant: 'wire', len: 4 });
+        K.box(2.35, 0, -23.3, 7.9, 0.08, 43.4, SCRUB, { shadow: false });                           // behind the paling fences (… z −1.6)
+        K.box(22.2, 0, -17.5, 15.6, 0.05, 54, DRY, { shadow: false });                              // past the wire fence (x 14.4 … 30)
+        K.box(13.45, 0.06, -26.3, 1.9, 0.01, 37.4, { tex: 'grass', color: '#77806a' }, { shadow: false });   // the verge on north
+        for (let z = -9.1; z > -44; z -= 3) K.prop('fence', 6.3, z, -90, { variant: 'paling', len: 3 });
+        for (let z = -10; z > -44; z -= 4) K.prop('fence', 14.35, z, -90, { variant: 'wire', len: 4 });
         for (const [x, z, w, h, d] of [[-4.2, -3.5, 1.8, 1.4, 0], [-7.5, 1.2, 1.5, 1.2, 1], [-3.0, -7.8, 1.6, 1.3, 0], [1.8, -4.4, 1.4, 1.1, 1], [4.6, -9.5, 1.5, 1.2, 0], [17.5, -2.5, 1.6, 1.0, 1], [19.8, 6.2, 1.3, 0.9, 0], [16.4, 9.2, 1.2, 1.0, 1]]) K.prop('shrub', x, z, 0, { y: 0.08, w, h, dead: !!d, collide: false });
         K.prop('gum_tree', -8.5, -6.5, 120, { y: 0.08, collide: false }); K.prop('gum_tree_small', 2.8, -8.2, 40, { y: 0.08, collide: false }); K.prop('gum_tree', 23.5, -8.5, 210, { y: 0.05, collide: false }); }
       bags.flush(K);

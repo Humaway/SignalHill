@@ -352,6 +352,10 @@ export async function escalation(h, P, notes) {
   await saw(h, 'Get Chase to the back office.', notes, 'the boss objective');
   const chase = () => ev(h, `let p = null; await SH.run(async (G) => { const C = G.actor('chase'); if (C && C.raw) p = [C.raw.root.position.x, C.raw.root.position.z]; }); return p;`);
   const hits = () => ev(h, 'return SH.S.chaseHits | 0');
+  // (for the notes: where Chase and the Escalation are, and Chase's fight state)
+  const fightSnap = () => ev(h, `const f = SH.c4 && SH.c4.fight, F = f ? { state: f.state, held: f.held, hurt: f.hurt, path: f.path ? f.path.length : 0 } : null; const b = SH.mod.World.build, c = b && b.npcs && b.npcs.chase, e = SH.mod.Enemies.get('c4_oldstore:esc');
+    const r = (v) => +v.toFixed(2);
+    return { chase: c ? [r(c.root.position.x), r(c.root.position.z)] : null, esc: e ? [r(e.pos.x), r(e.pos.z), e.data.state, e.data.level] : null, F: F || null };`);
   const level = () => ev(h, "const e = SH.mod.Enemies.get('c4_oldstore:esc'); return e ? e.data.level : -1");
   // 1. the duress button under the counter (the staff side)
   await heal(h);
@@ -413,9 +417,11 @@ export async function escalation(h, P, notes) {
     try {
       await advance(h, 0.5);
       const behind = await ev(h, 'return SH.mod.Player.pos.z < 3.9 && SH.mod.Player.pos.x < 16.9');
-      const legs = behind ? [[17.1, 2.3], [17.4, 6.0], [18.55, 8.5]] : [[18.55, 8.5]];
+      // (round the counter's east end wide, along the east wall: the Escalation follows Aidan behind the counter and
+      // stands at its east end, and a straight line past the end runs into the counter's corner or into it)
+      const legs = behind ? [[17.1, 2.3], [18.7, 3.1], [18.8, 6.0], [18.55, 8.5]] : [[18.55, 8.5]];
       for (const [x, z] of legs) {
-        if (!(await walkWithChase(h, x, z, { maxSec: 15, tol: 0.45 }))) { notes.push(`walk to ${x},${z} (holding Chase, try ${tries + 1}) did not arrive: ${JSON.stringify(await snap(h))}`); break; }
+        if (!(await walkWithChase(h, x, z, { maxSec: 15, tol: 0.45 }))) { notes.push(`walk to ${x},${z} (holding Chase, try ${tries + 1}) did not arrive: ${JSON.stringify(await snap(h))} · ${JSON.stringify(await fightSnap())}`); break; }
       }
       for (let k = 0; k < 12 && (await chaseDist()) > 2.2; k++) await advance(h, 0.25);
     } finally { await ev(h, 'SH.mod.Input.releaseAll(); return 1'); }
@@ -499,7 +505,13 @@ export async function play(h, opts = {}) {
         await useAt(h, P, notes, 24.2, 21.6, 180, { play: true }).catch(() => null);
       }
       await walkPath(h, [[18.6, 19.3]], 'across the centre to row 6', { heal: true });
-      if (!(await walkTo(h, 10.8, 19.3, { maxSec: 12, until: "SH.mod.Script.cutscene || !!SH.S.done['cs:4-1']" }))) throw new Error('4-1 did not start in Chase\'s aisle');
+      const in41 = "SH.mod.Script.cutscene || !!SH.S.done['cs:4-1']";
+      if (!(await walkTo(h, 10.8, 19.3, { maxSec: 12, until: in41 }))) {
+        // (once, a run stalled on this walk — the state says where; walk on down the aisle's middle from there)
+        notes.push('the walk down row 6\'s aisle stalled: ' + JSON.stringify(await snap(h)));
+        await advanceUntil(h, `(${in41}) || (SH.mode === 'play' && !SH.mod.Script.busy)`, 20);
+        if (!(await walkTo(h, 10.8, 19.2, { maxSec: 16, until: in41 }))) throw new Error('4-1 did not start in Chase\'s aisle: ' + JSON.stringify(await snap(h)));
+      }
       if (P.play) {
         await shot(h, opts, '41_start');
         await playUntil(h, '!SH.mod.Script.cutscene', 240, '4-1 playing through');

@@ -131,12 +131,13 @@ export function report(name, ok, detail = '') {
 //   await walkTo(h, 10.2, -7.5, { until: "SH.mod.World.room === 'c1_relay'" })
 // Keys are re-chosen every o.step game seconds from Cam.basis(); after a camera cut they are released for a tick so
 // the new camera's axes apply (direction hold would otherwise keep the old ones). While a blocking script owns Aidan
-// the keys are released and the walk waits. → true | false (o.maxSec of game time, default 25)
+// the keys are released and the walk waits. Stuck (the keys held moved him < 4 cm), the sideways key joins in at a
+// lower share of the direction. → true | false (o.maxSec of game time, default 25)
 export async function walkTo(h, x, z, o = {}) {
   const tol = o.tol ?? 0.4, maxSec = o.maxSec ?? 25, step = o.step ?? 0.25;
   const until = o.until || 'false';
   const kb = h.page.keyboard;
-  let held = new Set(), lastCam = null;
+  let held = new Set(), lastCam = null, last = null, stuck = 0;
   const setKeys = async (want) => {
     for (const k of held) if (!want.has(k)) await kb.up(k);
     for (const k of want) if (!held.has(k)) await kb.down(k);
@@ -149,14 +150,19 @@ export async function walkTo(h, x, z, o = {}) {
       if (st.u) return true;
       const dx = x - st.x, dz = z - st.z, dist = Math.hypot(dx, dz);
       if (!o.until && dist < tol) return true;
-      if (!st.free) { await setKeys(new Set()); await advance(h, step); continue; }
+      if (!st.free) { await setKeys(new Set()); await advance(h, step); last = null; continue; }
       if (lastCam !== null && st.cam !== lastCam && held.size) { await setKeys(new Set()); await advance(h, 0.05); }
       lastCam = st.cam;
+      // (held keys that got him nowhere: pressed straight into a wall end or a corner — the 8-way keys drop a small
+      // sideways part of the direction; once stuck, a player leans into it: the sideways key comes in at a lower share)
+      stuck = last && held.size && Math.hypot(st.x - last.x, st.z - last.z) < 0.04 ? stuck + 1 : 0;
+      last = { x: st.x, z: st.z };
+      const th = stuck >= 2 ? 0.12 : 0.38;
       const ux = dist > 1e-3 ? dx / dist : 0, uz = dist > 1e-3 ? dz / dist : 0;
       const fy = ux * st.b.fx + uz * st.b.fz, rx = ux * st.b.rx + uz * st.b.rz;
       const want = new Set();
-      if (fy > 0.38) want.add('w'); else if (fy < -0.38) want.add('s');
-      if (rx > 0.38) want.add('d'); else if (rx < -0.38) want.add('a');
+      if (fy > th) want.add('w'); else if (fy < -th) want.add('s');
+      if (rx > th) want.add('d'); else if (rx < -th) want.add('a');
       if (o.run && want.size) want.add('Shift');
       await setKeys(want);
       await advance(h, o.until ? step : Math.min(step, dist / 1.6 + 0.05));

@@ -754,7 +754,7 @@ node tools/run.mjs --file .build/x.html --size 1280x720 --quiet --script tools/t
 node tools/run.mjs --file .build/x.html --size 1280x720 --quiet --script tools/tests/title.mjs     # ~4 min
 node tools/run.mjs --file .build/x.html --size 1280x720 --quiet --script tools/tests/ui.mjs        # ~16 min
 node tools/run.mjs --file .build/x.html --size 960x540  --quiet --script tools/tests/options.mjs   # ~2 min
-node tools/run.mjs --file .build/x.html --size 960x540  --quiet --script tools/tests/signal.mjs    # ~7 min
+node tools/run.mjs --file .build/x.html --size 960x540  --quiet --script tools/tests/signal.mjs    # ~2 min
 node tools/run.mjs --file .build/x.html --size 960x540  --quiet --script tools/tests/gamepad.mjs   # ~1 min
 SH_CHROME_ARGS="--autoplay-policy=document-user-activation-required" \
   node tools/run.mjs --file .build/x.html --size 960x540 --ready 3 --quiet --script tools/tests/audiogate.mjs

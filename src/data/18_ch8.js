@@ -1529,7 +1529,7 @@
       K.examine(-3.05, 1.1, 3.35, ['A harness on a hook. Somebody hung it up and went home.', 'I don\'t know how to put it on. [beat] I\'m going up anyway.'], { id: 'c8m:harness', r: 1.2 });
       K.sphere(3.05, 0.42, 3.05, 0.14, { color: '#e8e4d8', roughness: 0.4 }, { scale: [1, 0.75, 1.1] });
       K.sign('CLIMBING — AUTHORISED\nPERSONS ONLY\nHARNESS REQUIRED', 1.0, 2.25, 2.45, 0.8, 0.46, { style: 'warning' });
-      K.examine(1.0, 1.6, 2.9, ['Twenty metres to the first platform. [beat] Then another twenty. Then more.', 'The rungs are wet. Cold enough to hurt.'], { id: 'c8m:ladder', r: 1.2 });
+      K.examine(1.7, 1.6, 2.9, ['Twenty metres to the first platform. [beat] Then another twenty. Then more.', 'The rungs are wet. Cold enough to hurt.'], { id: 'c8m:ladder', r: 1.2 });
       K.examine(3.6, 1.2, 1.9, ['Equipment cabinets under the platform. Everything humming, nothing connecting.', 'A label: "FEEDER — DO NOT ISOLATE". Somebody\'s isolated it.'], { id: 'c8m:cab', r: 1.3 });
       K.examine(-5, 1.0, 9.6, 'The compound\'s back through the gate. [beat] There\'s nowhere else to go but up.', { id: 'c8m:back', r: 1.4 });
       // ---- the platforms: things to see, sticker12, the view ------------------------------------------------------------
@@ -2040,7 +2040,7 @@
       for (const [x0, z0, x1, z1] of [[0.05, 0.05, W - 0.05, 0.05], [0.05, D - 0.05, W - 0.05, D - 0.05]]) K.box((x0 + x1) / 2, 0, (z0 + z1) / 2, Math.abs(x1 - x0) || 0.04, 0.12, Math.abs(z1 - z0) || 0.04, trimM, { shadow: false });
       // ---- the door: the hut's plain steel door, set in all this white (it won't open from this side) ------------------
       K.door({ id: 'c8_transmitter:door', x: 15, z: D, rot: 0, w: 0.95, style: 'metal', locked: true, lockMsg: 'It won\'t open from this side.', mapMark: false });
-      K.examine(15, 1.3, D - 0.5, ['The hut\'s door. Grey steel, a dent by the handle. [beat] The only thing in here that\'s real.', 'It won\'t open from this side.'], { id: 'c8t:door', r: 1.2, when: () => !C8.fight });
+      K.examine(15.7, 1.3, D - 0.5, ['The hut\'s door. Grey steel, a dent by the handle. [beat] The only thing in here that\'s real.', 'It won\'t open from this side.'], { id: 'c8t:door', r: 1.2, when: () => !C8.fight });
       // ---- the counter under the light box ----------------------------------------------------------------------------
       const [cx0, cz0, cx1, cz1] = TR.counter;
       K.box((cx0 + cx1) / 2, 0, (cz0 + cz1) / 2, cx1 - cx0, 1.0, cz1 - cz0, GLOSS('#0f9f9a', 0.22), { collide: true });

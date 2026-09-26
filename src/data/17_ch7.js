@@ -1206,7 +1206,7 @@
       K.prop('plant_pot', 15.4, 0.6, 0, { variant: 'fiddle' });
       K.prop('wet_floor_sign', 12.2, 6.9, 30, {});
       K.prop('poster', 0.08, 2.4, 90, { style: 'alarm', text: 'PERSONAL ALARMS\nSAVE LIVES', sub: 'Test yours every month.', mount: 1.55 });
-      K.prop('poster', RC.W - 0.08, 10.9, -90, { style: 'notice', text: 'FALLS PREVENTION\nAre you at risk? Loose rugs, poor lighting, living alone. Ask us about a personal alarm.', mount: 1.55 });
+      K.prop('poster', RC.W - 0.08, 11.3, -90, { style: 'notice', text: 'FALLS PREVENTION\nAre you at risk? Loose rugs, poor lighting, living alone. Ask us about a personal alarm.', mount: 1.55 });
       K.prop('poster', RC.W - 0.08, 1.4, -90, { style: 'notice', text: 'HAND HYGIENE\nClean your hands on the way in and on the way out.', mount: 1.55 });
       K.prop('extinguisher', RC.W - 0.08, 3.4, -90, { variant: 'wall' });
       K.prop('exit_sign', 8, RC.D - 0.08, 180, { mount: 2.6 });
@@ -1227,7 +1227,7 @@
       K.examine(1.8, 1.2, RC.desk[2] + 0.4, ['"Hospital Auxiliary. Every gold coin helps." It\'s full.', 'Nobody\'s emptied it. Nobody\'s taken any either.'], { id: 'c7rc:aux', r: 1.0 });
       K.examine(7.6, 1.3, RC.desk[2] - 0.05, ['The screen\'s on the login page.', 'A sticky note on the edge: "Ward 3 rang — Rm 12 visitor after hours OK".'], { id: 'c7rc:screen', r: 1.3 });
       K.examine(0.4, 1.5, 2.4, ['"Personal alarms save lives. Test yours every month."', 'Press and hold for help. [beat] If there\'s a line on the other end.'], { id: 'c7rc:alarm', r: 1.3 });
-      K.examine(RC.W - 0.4, 1.5, 10.9, ['"Falls prevention. Are you at risk?"', '"Living alone." [beat] She was.'], { id: 'c7rc:falls', r: 1.3 });
+      K.examine(RC.W - 0.4, 1.5, 11.3, ['"Falls prevention. Are you at risk?"', '"Living alone." [beat] She was.'], { id: 'c7rc:falls', r: 1.3 });
       K.examine(10.4, 0.8, 10.9, ['"Courtesy wheelchairs. Please return."', 'There\'s one missing. [beat] I saw it. In the car park.'], { id: 'c7rc:wheelchair', r: 1.4 });
       K.examine(0.5, 1.1, 5.2, 'The cooler gurgles as I walk past. Like it\'s clearing its throat.', { id: 'c7rc:cooler', r: 1.1 });
       K.examine(5.5, 2.3, 0.3, ['Ten to four. [beat] In the morning, I think.', 'It hasn\'t moved since I came in.'], { id: 'c7rc:clock', r: 2.2 });
@@ -1609,7 +1609,7 @@
     K.examine(22.9, 0.7, -16.0, 'A mop in a bucket. The water\'s grey and still warm.', { id: 'c7co:mop', r: 1.3 });
     K.examine(25.3, 1.2, -1.6, 'A linen trolley. Clean sheets, folded into squares. Nobody to put them on.', { id: 'c7co:linen', r: 1.3 });
     K.examine(8.5, 1.1, -21.5, 'A drinking fountain. It gurgles when I lean over it, then nothing comes.', { id: 'c7co:fountain', r: 1.2 });
-    K.examine(10, 1.5, 3.7, 'Outpatients 2, through the glass. Chairs in a row, facing a wall.', { id: 'c7co:b1', r: 1.8 });
+    K.examine(8.2, 1.5, 3.7, 'Outpatients 2, through the glass. Chairs in a row, facing a wall.', { id: 'c7co:b1', r: 1.8 });
     K.examine(19, 1.5, 0.3, 'Radiology. A bed in there, made up, under a dead light.', { id: 'c7co:b2', r: 1.8 });
     K.examine(25.7, 1.5, -11, 'Pathology. Shelves of boxes behind the glass.', { id: 'c7co:b3', r: 1.8 });
     // CUTSCENE 7-1 — a few steps in, the corridor changes
@@ -1901,8 +1901,8 @@
       // ---- examine --------------------------------------------------------------------------------------------------
       K.examine(W3.W - 0.3, 1.7, -8.0, ['"Call, don\'t fall. Press the button. We\'ll come."', 'She pressed it. [beat] Nobody came.'], { id: 'c7w3:sign', r: 1.4 });
       K.examine(0.6, 1.2, -12.45, 'A patient hoist, folded up against the wall. For lifting people who can\'t get up on their own.', { id: 'c7w3:hoist', r: 1.3 });
-      K.examine(0.3, 1.5, -3.5, 'Room 1, through the little window. A bed, made. Nobody in it.', { id: 'c7w3:r1', r: 1.2 });
-      K.examine(W3.W - 0.3, 1.5, -10.5, 'Room 4. The curtain\'s drawn round the bed. I don\'t look.', { id: 'c7w3:r4', r: 1.2 });
+      K.examine(0.3, 1.5, -4.2, 'Room 1, through the little window. A bed, made. Nobody in it.', { id: 'c7w3:r1', r: 1.2 });
+      K.examine(W3.W - 0.3, 1.5, -9.8, 'Room 4. The curtain\'s drawn round the bed. I don\'t look.', { id: 'c7w3:r4', r: 1.2 });
       K.examine(2.55, 0.9, -2.6, 'A linen skip. Somebody\'s sheets, balled up. Somebody went home. [beat] Or didn\'t.', { id: 'c7w3:linen', r: 1.2 });
       K.examine(W3.chair[0] - 0.3, 0.8, W3.chair[1], flag('c7_luke') ? ['His chair. It\'s still warm.', 'He sat here for days. [beat] Waiting for her. Waiting for me, maybe.'] : 'A plastic chair outside Room 12.', { id: 'c7w3:chair', r: 1.1, when: () => flag('c7_luke') });
       K.examine(1.5, 2.2, -W3.L + 0.3, 'The call light over Room 12. Blinking. [beat] Somebody\'s pressing it.', { id: 'c7w3:calllight', r: 1.8, when: () => flag('c7_standoff') && !flag('c7_room12') });

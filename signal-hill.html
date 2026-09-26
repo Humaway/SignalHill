@@ -39813,7 +39813,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.prop('notice_board', 12.5, 11.93, 180, { title: 'HALL NOTICES', w: 1.0, h: 0.7 });
       K.examine(12.5, 1.5, 11.5, ['Scone roster. Hall hire. "Chair yoga — cancelled until further notice."'], { id: 'c2ha:notices', r: 1.1 });
       K.prop('exit_sign', 9, 11.93, 180, { mount: 2.65 });
-      K.examine(9, 2.2, 11.4, 'The only light in here is the exit sign.', { id: 'c2ha:exit', r: 1.2, world: 'fog' });
+      K.examine(9.7, 2.2, 11.5, 'The only light in here is the exit sign.', { id: 'c2ha:exit', r: 1.2, world: 'fog' }); // (off the door's line: E head-on is the door)
       for (const [x, z] of [[5, 6], [13, 6]]) { K.cyl(x, H - 0.3, z, 0.02, 0.3, '#1b1c1c'); K.cyl(x, H - 0.4, z, 0.12, 0.1, '#6a6a60'); for (let b = 0; b < 3; b++) K.box(x, H - 0.36, z, 1.3, 0.02, 0.16, { tex: 'wood', color: '#5a4a38' }, { rot: b * 60 }); }
       K.fogOnly(() => {
         for (const [x, z] of [[4, 4], [14, 4], [4, 9], [14, 9]]) K.prop('fluoro_tube', x, z, 90, { h: H - 0.02, lit: false, light: false });
@@ -49263,7 +49263,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.examine(0.9, 2.3, 0.6, ['A plastic chair and a tin of cigarette butts.', 'Somebody used to come out here to breathe.'], { id: 'c6fs:chair', r: 1.2 });
       K.examine(3.75, 4.9, FS.D - 0.3, 'Fire hose. Inspected in March. [beat] Everything in this building gets inspected.', { id: 'c6fs:hose', r: 1.1 });
       K.examine(1.7, 2.6, 2.9, 'The handrail\'s warm. [beat] Like somebody just let go of it.', { id: 'c6fs:rail', r: 1.1 });
-      K.examine(2.85, 3.6 + 1.7, FS.D - 0.3, 'The emergency light\'s on its battery. It\'ll go eventually.', { id: 'c6fs:bulk', r: 1.3 });   // (the light is high over the Level 5 door: looked at from the landing)
+      K.examine(2.15, 3.6 + 1.7, FS.D - 0.3, 'The emergency light\'s on its battery. It\'ll go eventually.', { id: 'c6fs:bulk', r: 1.3 });   // (the light is high over the Level 5 door: looked at from the landing)
       K.examine(3.8, 7.0, 0.35, ['"DID YOU CHECK." [beat] In marker, on the concrete.', 'It\'s old. It\'s been painted over and it came back through.'], { id: 'c6fs:writing', r: 1.4 });
       // the taped note (only while the power's off — it isn't there once the maglock is green); read before the door is
       // tried: with the kinds' default priorities the door always won the E press and the note could not be read
@@ -51701,7 +51701,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.prop('plant_pot', 15.4, 0.6, 0, { variant: 'fiddle' });
       K.prop('wet_floor_sign', 12.2, 6.9, 30, {});
       K.prop('poster', 0.08, 2.4, 90, { style: 'alarm', text: 'PERSONAL ALARMS\nSAVE LIVES', sub: 'Test yours every month.', mount: 1.55 });
-      K.prop('poster', RC.W - 0.08, 10.9, -90, { style: 'notice', text: 'FALLS PREVENTION\nAre you at risk? Loose rugs, poor lighting, living alone. Ask us about a personal alarm.', mount: 1.55 });
+      K.prop('poster', RC.W - 0.08, 11.3, -90, { style: 'notice', text: 'FALLS PREVENTION\nAre you at risk? Loose rugs, poor lighting, living alone. Ask us about a personal alarm.', mount: 1.55 });
       K.prop('poster', RC.W - 0.08, 1.4, -90, { style: 'notice', text: 'HAND HYGIENE\nClean your hands on the way in and on the way out.', mount: 1.55 });
       K.prop('extinguisher', RC.W - 0.08, 3.4, -90, { variant: 'wall' });
       K.prop('exit_sign', 8, RC.D - 0.08, 180, { mount: 2.6 });
@@ -51722,7 +51722,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.examine(1.8, 1.2, RC.desk[2] + 0.4, ['"Hospital Auxiliary. Every gold coin helps." It\'s full.', 'Nobody\'s emptied it. Nobody\'s taken any either.'], { id: 'c7rc:aux', r: 1.0 });
       K.examine(7.6, 1.3, RC.desk[2] - 0.05, ['The screen\'s on the login page.', 'A sticky note on the edge: "Ward 3 rang — Rm 12 visitor after hours OK".'], { id: 'c7rc:screen', r: 1.3 });
       K.examine(0.4, 1.5, 2.4, ['"Personal alarms save lives. Test yours every month."', 'Press and hold for help. [beat] If there\'s a line on the other end.'], { id: 'c7rc:alarm', r: 1.3 });
-      K.examine(RC.W - 0.4, 1.5, 10.9, ['"Falls prevention. Are you at risk?"', '"Living alone." [beat] She was.'], { id: 'c7rc:falls', r: 1.3 });
+      K.examine(RC.W - 0.4, 1.5, 11.3, ['"Falls prevention. Are you at risk?"', '"Living alone." [beat] She was.'], { id: 'c7rc:falls', r: 1.3 });
       K.examine(10.4, 0.8, 10.9, ['"Courtesy wheelchairs. Please return."', 'There\'s one missing. [beat] I saw it. In the car park.'], { id: 'c7rc:wheelchair', r: 1.4 });
       K.examine(0.5, 1.1, 5.2, 'The cooler gurgles as I walk past. Like it\'s clearing its throat.', { id: 'c7rc:cooler', r: 1.1 });
       K.examine(5.5, 2.3, 0.3, ['Ten to four. [beat] In the morning, I think.', 'It hasn\'t moved since I came in.'], { id: 'c7rc:clock', r: 2.2 });
@@ -52104,7 +52104,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
     K.examine(22.9, 0.7, -16.0, 'A mop in a bucket. The water\'s grey and still warm.', { id: 'c7co:mop', r: 1.3 });
     K.examine(25.3, 1.2, -1.6, 'A linen trolley. Clean sheets, folded into squares. Nobody to put them on.', { id: 'c7co:linen', r: 1.3 });
     K.examine(8.5, 1.1, -21.5, 'A drinking fountain. It gurgles when I lean over it, then nothing comes.', { id: 'c7co:fountain', r: 1.2 });
-    K.examine(10, 1.5, 3.7, 'Outpatients 2, through the glass. Chairs in a row, facing a wall.', { id: 'c7co:b1', r: 1.8 });
+    K.examine(8.2, 1.5, 3.7, 'Outpatients 2, through the glass. Chairs in a row, facing a wall.', { id: 'c7co:b1', r: 1.8 });
     K.examine(19, 1.5, 0.3, 'Radiology. A bed in there, made up, under a dead light.', { id: 'c7co:b2', r: 1.8 });
     K.examine(25.7, 1.5, -11, 'Pathology. Shelves of boxes behind the glass.', { id: 'c7co:b3', r: 1.8 });
     // CUTSCENE 7-1 — a few steps in, the corridor changes
@@ -52396,8 +52396,8 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       // ---- examine --------------------------------------------------------------------------------------------------
       K.examine(W3.W - 0.3, 1.7, -8.0, ['"Call, don\'t fall. Press the button. We\'ll come."', 'She pressed it. [beat] Nobody came.'], { id: 'c7w3:sign', r: 1.4 });
       K.examine(0.6, 1.2, -12.45, 'A patient hoist, folded up against the wall. For lifting people who can\'t get up on their own.', { id: 'c7w3:hoist', r: 1.3 });
-      K.examine(0.3, 1.5, -3.5, 'Room 1, through the little window. A bed, made. Nobody in it.', { id: 'c7w3:r1', r: 1.2 });
-      K.examine(W3.W - 0.3, 1.5, -10.5, 'Room 4. The curtain\'s drawn round the bed. I don\'t look.', { id: 'c7w3:r4', r: 1.2 });
+      K.examine(0.3, 1.5, -4.2, 'Room 1, through the little window. A bed, made. Nobody in it.', { id: 'c7w3:r1', r: 1.2 });
+      K.examine(W3.W - 0.3, 1.5, -9.8, 'Room 4. The curtain\'s drawn round the bed. I don\'t look.', { id: 'c7w3:r4', r: 1.2 });
       K.examine(2.55, 0.9, -2.6, 'A linen skip. Somebody\'s sheets, balled up. Somebody went home. [beat] Or didn\'t.', { id: 'c7w3:linen', r: 1.2 });
       K.examine(W3.chair[0] - 0.3, 0.8, W3.chair[1], flag('c7_luke') ? ['His chair. It\'s still warm.', 'He sat here for days. [beat] Waiting for her. Waiting for me, maybe.'] : 'A plastic chair outside Room 12.', { id: 'c7w3:chair', r: 1.1, when: () => flag('c7_luke') });
       K.examine(1.5, 2.2, -W3.L + 0.3, 'The call light over Room 12. Blinking. [beat] Somebody\'s pressing it.', { id: 'c7w3:calllight', r: 1.8, when: () => flag('c7_standoff') && !flag('c7_room12') });
@@ -54829,7 +54829,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.examine(-3.05, 1.1, 3.35, ['A harness on a hook. Somebody hung it up and went home.', 'I don\'t know how to put it on. [beat] I\'m going up anyway.'], { id: 'c8m:harness', r: 1.2 });
       K.sphere(3.05, 0.42, 3.05, 0.14, { color: '#e8e4d8', roughness: 0.4 }, { scale: [1, 0.75, 1.1] });
       K.sign('CLIMBING — AUTHORISED\nPERSONS ONLY\nHARNESS REQUIRED', 1.0, 2.25, 2.45, 0.8, 0.46, { style: 'warning' });
-      K.examine(1.0, 1.6, 2.9, ['Twenty metres to the first platform. [beat] Then another twenty. Then more.', 'The rungs are wet. Cold enough to hurt.'], { id: 'c8m:ladder', r: 1.2 });
+      K.examine(1.7, 1.6, 2.9, ['Twenty metres to the first platform. [beat] Then another twenty. Then more.', 'The rungs are wet. Cold enough to hurt.'], { id: 'c8m:ladder', r: 1.2 });
       K.examine(3.6, 1.2, 1.9, ['Equipment cabinets under the platform. Everything humming, nothing connecting.', 'A label: "FEEDER — DO NOT ISOLATE". Somebody\'s isolated it.'], { id: 'c8m:cab', r: 1.3 });
       K.examine(-5, 1.0, 9.6, 'The compound\'s back through the gate. [beat] There\'s nowhere else to go but up.', { id: 'c8m:back', r: 1.4 });
       // ---- the platforms: things to see, sticker12, the view ------------------------------------------------------------
@@ -55340,7 +55340,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       for (const [x0, z0, x1, z1] of [[0.05, 0.05, W - 0.05, 0.05], [0.05, D - 0.05, W - 0.05, D - 0.05]]) K.box((x0 + x1) / 2, 0, (z0 + z1) / 2, Math.abs(x1 - x0) || 0.04, 0.12, Math.abs(z1 - z0) || 0.04, trimM, { shadow: false });
       // ---- the door: the hut's plain steel door, set in all this white (it won't open from this side) ------------------
       K.door({ id: 'c8_transmitter:door', x: 15, z: D, rot: 0, w: 0.95, style: 'metal', locked: true, lockMsg: 'It won\'t open from this side.', mapMark: false });
-      K.examine(15, 1.3, D - 0.5, ['The hut\'s door. Grey steel, a dent by the handle. [beat] The only thing in here that\'s real.', 'It won\'t open from this side.'], { id: 'c8t:door', r: 1.2, when: () => !C8.fight });
+      K.examine(15.7, 1.3, D - 0.5, ['The hut\'s door. Grey steel, a dent by the handle. [beat] The only thing in here that\'s real.', 'It won\'t open from this side.'], { id: 'c8t:door', r: 1.2, when: () => !C8.fight });
       // ---- the counter under the light box ----------------------------------------------------------------------------
       const [cx0, cz0, cx1, cz1] = TR.counter;
       K.box((cx0 + cx1) / 2, 0, (cz0 + cz1) / 2, cx1 - cx0, 1.0, cz1 - cz0, GLOSS('#0f9f9a', 0.22), { collide: true });

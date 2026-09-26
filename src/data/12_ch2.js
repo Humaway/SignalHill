@@ -2037,7 +2037,7 @@
       K.prop('notice_board', 12.5, 11.93, 180, { title: 'HALL NOTICES', w: 1.0, h: 0.7 });
       K.examine(12.5, 1.5, 11.5, ['Scone roster. Hall hire. "Chair yoga — cancelled until further notice."'], { id: 'c2ha:notices', r: 1.1 });
       K.prop('exit_sign', 9, 11.93, 180, { mount: 2.65 });
-      K.examine(9, 2.2, 11.4, 'The only light in here is the exit sign.', { id: 'c2ha:exit', r: 1.2, world: 'fog' });
+      K.examine(9.7, 2.2, 11.5, 'The only light in here is the exit sign.', { id: 'c2ha:exit', r: 1.2, world: 'fog' }); // (off the door's line: E head-on is the door)
       for (const [x, z] of [[5, 6], [13, 6]]) { K.cyl(x, H - 0.3, z, 0.02, 0.3, '#1b1c1c'); K.cyl(x, H - 0.4, z, 0.12, 0.1, '#6a6a60'); for (let b = 0; b < 3; b++) K.box(x, H - 0.36, z, 1.3, 0.02, 0.16, { tex: 'wood', color: '#5a4a38' }, { rot: b * 60 }); }
       K.fogOnly(() => {
         for (const [x, z] of [[4, 4], [14, 4], [4, 9], [14, 9]]) K.prop('fluoro_tube', x, z, 90, { h: H - 0.02, lit: false, light: false });

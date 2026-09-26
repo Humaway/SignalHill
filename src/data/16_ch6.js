@@ -889,7 +889,7 @@
       K.examine(0.9, 2.3, 0.6, ['A plastic chair and a tin of cigarette butts.', 'Somebody used to come out here to breathe.'], { id: 'c6fs:chair', r: 1.2 });
       K.examine(3.75, 4.9, FS.D - 0.3, 'Fire hose. Inspected in March. [beat] Everything in this building gets inspected.', { id: 'c6fs:hose', r: 1.1 });
       K.examine(1.7, 2.6, 2.9, 'The handrail\'s warm. [beat] Like somebody just let go of it.', { id: 'c6fs:rail', r: 1.1 });
-      K.examine(2.85, 3.6 + 1.7, FS.D - 0.3, 'The emergency light\'s on its battery. It\'ll go eventually.', { id: 'c6fs:bulk', r: 1.3 });   // (the light is high over the Level 5 door: looked at from the landing)
+      K.examine(2.15, 3.6 + 1.7, FS.D - 0.3, 'The emergency light\'s on its battery. It\'ll go eventually.', { id: 'c6fs:bulk', r: 1.3 });   // (the light is high over the Level 5 door: looked at from the landing)
       K.examine(3.8, 7.0, 0.35, ['"DID YOU CHECK." [beat] In marker, on the concrete.', 'It\'s old. It\'s been painted over and it came back through.'], { id: 'c6fs:writing', r: 1.4 });
       // the taped note (only while the power's off — it isn't there once the maglock is green); read before the door is
       // tried: with the kinds' default priorities the door always won the E press and the note could not be read

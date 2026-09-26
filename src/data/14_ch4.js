@@ -1364,6 +1364,11 @@
       K.wall(10.1, 8, -0.1, 8, H, 'plaster', { skirting: true });
       K.wall(0, 8.1, 0, -0.1, H, 'plaster', { both: false, openings: [{ at: 4.1, w: 1.0, h: 2.15 }] });
       K.door({ id: 'c4_break:door', x: 0, z: 4.0, rot: 90, w: 0.95, style: 'wood', to: 'c4_floor', entry: 'break', sign: 'FLOOR 1' });
+      // outside the cutaway west wall, round the door camera: the ceiling, the floor and the side walls run on (it looked
+      // up past the end of the ceiling into nothing)
+      K.box(-1.4, H, 4, 2.8, 0.15, 8.4, 'ceiling_tile', { shadow: false });
+      K.box(-1.4, -0.15, 4, 2.8, 0.15, 8.4, { tex: 'lino', color: '#8a8472' }, { shadow: false });
+      for (const z of [-0.2, 8.2]) K.box(-1.4, 0, z, 2.8, H, 0.2, 'plaster', { shadow: false });
       // north: the payphone, the noticeboard, the vending machine
       K.payphone(1.9, 0.08, 0, { wall: true, id: 'c4_break:payphone' });
       K.prop('notice_board', 4.6, 0.08, 0, { mount: 1.55 });
@@ -1442,6 +1447,13 @@
       K.wall(10, -0.1, 10, 8.1, H, 'plaster', { skirting: true });
       K.wall(0, 8.1, 0, -0.1, H, 'plaster', { skirting: true });
       K.door({ id: 'c4_records:door', x: RC.door[0], z: RC.door[1], rot: 180, w: 0.95, style: 'metal', to: 'c4_floor', entry: 'records', sign: 'FLOOR 1' });
+      // outside both cutaway walls, round the two high cameras: the ceiling, the floor and the side walls run on (they
+      // looked up past the ends of the ceiling into nothing)
+      for (const zc of [-1.4, 9.4]) {
+        K.box(5, H, zc, 10.4, 0.15, 2.8, 'ceiling_tile', { shadow: false });
+        K.box(5, -0.15, zc, 10.4, 0.15, 2.8, { tex: 'lino', color: '#7a7a70' }, { shadow: false });
+        for (const x of [-0.15, 10.15]) K.box(x, 0, zc, 0.3, H, 2.8, 'plaster', { shadow: false });
+      }
       // floor-to-ceiling shelves of dot-matrix printouts
       K.fogOnly(() => {
         for (const z of [1.3, 3.5, 5.7]) { K.prop('binders_shelf', 0.2, z, 90, { len: 2.1, h: 2.9 }); K.prop('binders_shelf', 9.8, z, -90, { len: 2.1, h: 2.9 }); }
@@ -1579,6 +1591,9 @@
       K.blocker(6.9, 12.0, 13.3, 12.7, 'The shutter\'s stuck halfway. Outside there\'s nothing. Just dark.');
       K.box(10, -0.02, 15, 12, 0.02, 6, { tex: 'tile', color: '#3a3c3a' }, { shadow: false });
       K.box(10, 0, 18, 12, 4, 0.1, { color: '#0a0c0c', roughness: 1 });
+      // (the dark mall closed in: its sides and ceiling — from the high camera, through the shutter, past its end was nothing)
+      for (const x of [4, 16]) K.box(x, 0, 15, 0.1, 4, 6.1, { color: '#0a0c0c', roughness: 1 }, { shadow: false });
+      K.box(10, 4, 15, 12.2, 0.1, 6.2, { color: '#0a0c0c', roughness: 1 }, { shadow: false });
       K.light('point', 10, 2.8, 14.5, { color: '#5a7a78', intensity: 1.2, distance: 5, real: false });
       // the doors: the side door he came in by; the back office (maglock, released by the duress button)
       K.door({ id: 'c4_oldstore:side', x: OS.side[0], z: OS.side[1], rot: 90, w: 0.95, style: 'glass', to: 'c4_floor', entry: 'westwall', locked: (s) => !!(s.done && s.done['cs:4-2']) && !(s.flags && s.flags.c4_bossDone), lockMsg: 'It won\'t open from this side.' });

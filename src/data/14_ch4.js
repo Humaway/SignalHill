@@ -552,6 +552,19 @@
       K.box(30.3, 0, 1.6, 61, 5.6, 0.1, { color: '#070909', roughness: 1 });
       for (let x = 1; x < 60; x += 8.4) K.box(x, 0, 3.72, 0.35, 5.6, 0.12, { tex: 'concrete', color: '#aaa699' });
       K.box(30.3, 5.6, 3.5, 61, 0.35, 0.55, { tex: 'concrete', color: '#85827a' });
+      // the Care Centre itself behind its facade and the dark behind the glass: the ground floor's block back 27 m, its
+      // roof, and Floor 1 set back above it with a ribbon of dark windows (the facade is never a card with the fog behind)
+      {
+        const MASS = { tex: 'concrete', color: '#8f8c82' }, CAP = { tex: 'concrete', color: '#85827a' }, NS = { shadow: false };
+        K.box(30.3, 0, -11.75, 61, 5.6, 26.5, MASS, NS);
+        K.box(30.3, 5.5, 2.45, 61, 0.1, 1.9, CAP, NS);
+        K.box(30.3, 5.6, -24.9, 61.2, 0.35, 0.5, CAP, NS);
+        for (const x of [-0.1, 60.7]) K.box(x, 5.6, -10.7, 0.5, 0.35, 28.6, CAP, NS);
+        K.box(30.3, 5.6, -12.5, 56, 3.9, 20, { tex: 'concrete', color: '#96938a' }, NS);
+        K.box(30.3, 9.5, -12.5, 56.3, 0.3, 20.3, CAP, NS);
+        for (let x = 4; x < 57; x += 6.4) K.box(x + 2.7, 6.5, -2.48, 5.2, 1.9, 0.06, { color: '#101415', roughness: 0.25, metalness: 0.3 }, NS);
+        K.box(44, 9.8, -16, 6, 1.8, 5, { tex: 'metal', color: '#6f7370' }, NS);       // the roof plant
+      }
       K.plane(30.2, 4.75, 3.7, 2.2, 0.8, Tex.wordmark({ w: 2.2, h: 0.8, bg: BR.teal, age: 0.6 }), { rotY: 0, emissive: true, emissiveIntensity: 0.55 });
       K.light('point', 30.2, 4.6, 4.6, { color: '#6fd8d0', intensity: 3, distance: 6, bank: 1, name: 'c4park:sign', flicker: true });
       K.sign('CUSTOMER CARE CENTRE', 30, 3.95, 3.69, 5.2, 0.5, { style: 'shop', bg: '#0b4f52', fg: '#f4f3ee' });
@@ -632,6 +645,19 @@
       K.exit({ id: 'c4_park:lane', box: [35.3, 39.7, 42.7, 40.7], to: 'c4_wirelane', entry: 'park' });
       K.box(39, -0.3, 52, 7.6, 0.3, 22.8, { tex: 'bitumen', color: '#3a3c3b' }, { shadow: false });
       for (const xx of [35.8, 42.2]) K.box(xx, -0.2, 52, 1.3, 0.35, 22.8, { tex: 'footpath', color: '#8a8880' }, { shadow: false });
+      // ---- the land round the park (east of the west drop): grass under everything, the vacant lot behind the bus stop, the
+      // stem's fences running on down the hill, the road running on east through the gate toward the ring road --------------
+      C4_ground(K, 2.9, -30, 110, 80, () => -0.04, { tex: 'grass', color: '#5f6656' });
+      C4_ground(K, 21.1, 27.75, 35.0, 40.6, () => -0.02, { tex: 'gravel', color: '#77766c' });
+      K.prop('pallet', 24.2, 31.5, 20, { n: 3, collide: false });
+      K.prop('dumpster', 31.8, 37.6, 90, { collide: false });
+      for (const [px, pz] of [[22.6, 36.2], [28.4, 39.4], [33.6, 30.2]]) K.prop('shrub', px, pz, px * 9, { w: 1.2, h: 0.7, dead: true, collide: false });
+      for (let z = 42; z < 62; z += 3.4) for (const xx of [35.1, 42.9]) K.prop('chainlink', xx, z + 1.7, 90, { len: 3.4, h: 2.0, collide: false });
+      K.box(85.3, -0.3, 19.5, 49.4, 0.3, 7, { tex: 'bitumen', color: '#3a3c3b' }, { shadow: false });
+      for (const zz of [15.25, 23.75]) K.box(85.3, -0.2, zz, 49.4, 0.35, 1.5, { tex: 'footpath', color: '#8a8880' }, { shadow: false });
+      K.prop('streetlight', 72, 14.9, 0, { real: false, bank: 3 });
+      K.prop('gum_tree', 70, 30, 60, { seed: 46 });
+      K.prop('gum_tree', 64, 6, 200, { seed: 47 });
       // CALL 4 rings on entering the business park
       K.trigger([35.3, 27.5, 42.7, 36.5], (G) => G.call('luka4'), { id: 'c4_park:call4', when: (s) => s.chapter === 4 && !(s.calls && s.calls.luka4) });
 

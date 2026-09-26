@@ -580,6 +580,7 @@
       K.plane(FC.doorX, 4.3, 0.05, 8.2, 1.02, nameTex(), { transparent: true });
       K.door({ id: 'c3_forecourt:doors', x: FC.doorX, z: -0.2, rot: 0, w: 1.8, style: 'glass_double', to: 'c3_foyer', entry: 'doors' });
       K.plane(FC.doorX, 1.2, -0.28, 1.7, 2.2, { color: '#050706', roughness: 1 }, { rotY: 0 });   // the dark foyer behind the glass
+      K.box(FC.doorX, -0.3, -0.5, 2.4, 0.3, 1.0, { tex: 'tile', color: '#4a4740' }, { shadow: false });   // (the floor under the leaves)
       // the brass plaque, right of the doors (DOC Exchange Plaque)
       K.box(FC.doorX + 2.45, 1.25, 0.0, 0.66, 0.48, 0.03, { tex: 'metal', color: '#5a4a30' });
       K.plane(FC.doorX + 2.45, 1.49, 0.036, 0.62, 0.44, plaqueTex(), { roughness: 0.35 });

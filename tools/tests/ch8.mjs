@@ -470,7 +470,9 @@ async function mast(h, P, notes, opts) {
   await awaitLine(h, 'Sixty metres. [beat] Come up where it\'s clearer.', notes, 'the mast', m0);
   // nothing here is sure: the bars flicker between 0 and 5 at random
   const seenBars = new Set();
-  for (let k = 0; k < 12; k++) { await advance(h, 0.25); seenBars.add(await ev(h, 'return SH.mod.Phone.reading.bars')); }
+  // (sampled every 0.25 s until three different readings: a fixed 3 s window missed a third one ~3 % of the time — the
+  // flicker holds a reading 0.05–0.6 s and picks 0 more often — and failed a correct mast)
+  for (let k = 0; k < 40 && (k < 12 || seenBars.size < 3); k++) { await advance(h, 0.25); seenBars.add(await ev(h, 'return SH.mod.Phone.reading.bars')); }
   notes.push(`mast: phone bars seen ${JSON.stringify([...seenBars].sort())}`);
   if (seenBars.size < 3) notes.push('BUG: the phone bars do not flicker on the mast');
   if (P.examine) await examine(h, P, notes, -1.95, 4.4, 180, 'The last line\'s filled in already. [beat] AIDAN. The reason\'s left blank.');

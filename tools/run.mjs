@@ -37,44 +37,63 @@ const log = (...a) => { if (!quiet) console.log(...a); };
 const threeDir = path.join(root, 'node_modules/three');
 const html = fs.readFileSync(file, 'utf8');
 const exe = fs.existsSync('/opt/pw-browsers/chromium-1194/chrome-linux/chrome') ? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' : undefined;
-const browser = await chromium.launch({
+const launchArgs = {
   executablePath: exe,
   // 2D canvases raster on the CPU (SH_GPU_CANVAS=1 keeps them on the "GPU"): here the GPU is SwiftShader, and every
   // accelerated-canvas draw and readback queued behind it — a room with an animated screen could stall a run for many
   // minutes. SH_CHROME_ARGS adds switches (space-separated).
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required',
     ...(process.env.SH_GPU_CANVAS === '1' ? [] : ['--disable-accelerated-2d-canvas']), ...String(process.env.SH_CHROME_ARGS || '').split(/\s+/).filter(Boolean)],
-});
-const page = await browser.newPage({ viewport: { width: vw, height: vh } });
-const problems = [];
-page.on('console', (m) => {
-  const t = m.type();
-  if (t === 'error') { problems.push(m.text()); console.log('[console.error]', m.text()); }
-  else if (t === 'warning') { if (!quiet) console.log('[console.warn]', m.text()); }
-  else if (!quiet) console.log('[console]', m.text());
-});
-page.on('pageerror', (e) => { problems.push(String(e.stack || e)); console.log('[pageerror]', e.stack || String(e)); });
-await page.route('**/*', async (route) => {
-  const url = route.request().url();
-  if (url.startsWith('http://signalhill.local/')) return route.fulfill({ status: 200, contentType: 'text/html', body: html });
-  const m = url.match(/^https:\/\/cdn\.jsdelivr\.net\/npm\/three@[^/]+\/(.*)$/);
-  if (m) {
-    const p = path.join(threeDir, m[1]);
-    if (fs.existsSync(p)) return route.fulfill({ status: 200, contentType: 'application/javascript', headers: { 'access-control-allow-origin': '*' }, body: fs.readFileSync(p) });
-  }
-  problems.push('blocked network request: ' + url);
-  console.log('[network] BLOCKED', url);
-  return route.abort();
-});
+};
+let problems = [];
+const within = (p, ms) => Promise.race([p, new Promise((res) => setTimeout(() => res('__timeout__'), ms))]);
+async function openPage() {
+  const browser = await chromium.launch(launchArgs);
+  const page = await browser.newPage({ viewport: { width: vw, height: vh } });
+  page.on('console', (m) => {
+    const t = m.type();
+    if (t === 'error') { problems.push(m.text()); console.log('[console.error]', m.text()); }
+    else if (t === 'warning') { if (!quiet) console.log('[console.warn]', m.text()); }
+    else if (!quiet) console.log('[console]', m.text());
+  });
+  page.on('pageerror', (e) => { problems.push(String(e.stack || e)); console.log('[pageerror]', e.stack || String(e)); });
+  await page.route('**/*', async (route) => {
+    const url = route.request().url();
+    if (url.startsWith('http://signalhill.local/')) return route.fulfill({ status: 200, contentType: 'text/html', body: html });
+    const m = url.match(/^https:\/\/cdn\.jsdelivr\.net\/npm\/three@[^/]+\/(.*)$/);
+    if (m) {
+      const p = path.join(threeDir, m[1]);
+      if (fs.existsSync(p)) return route.fulfill({ status: 200, contentType: 'application/javascript', headers: { 'access-control-allow-origin': '*' }, body: fs.readFileSync(p) });
+    }
+    problems.push('blocked network request: ' + url);
+    console.log('[network] BLOCKED', url);
+    return route.abort();
+  });
+  return { browser, page };
+}
 
 const t0 = Date.now();
-await page.goto('http://signalhill.local/index.html');
 const readyTimeout = Number(opt('ready', 40)) * 1000;
-try {
-  await page.waitForFunction(() => window.SH && window.SH.ready === true, null, { timeout: readyTimeout });
-  log(`ready in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-} catch {
-  console.log('NOT READY after', readyTimeout / 1000, 's; SH.errors =', await page.evaluate(() => (window.SH && window.SH.errors) || []));
+let browser, page;
+// (a headless Chromium on SwiftShader can hang while it boots — no SH.ready, and even page.evaluate never returns —
+// about once in twenty runs with several browsers at work: a page that is not ready in time gets a fresh browser, twice
+// at most)
+for (let attempt = 1; ; attempt++) {
+  ({ browser, page } = await openPage());
+  await page.goto('http://signalhill.local/index.html');
+  let ready = false;
+  try {
+    await page.waitForFunction(() => window.SH && window.SH.ready === true, null, { timeout: readyTimeout });
+    ready = true;
+    log(`ready in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  } catch {
+    const errs = await within(page.evaluate(() => (window.SH && window.SH.errors) || []).catch((e) => ['(page gone: ' + e.message + ')']), 5000);
+    console.log('NOT READY after', readyTimeout / 1000, 's; SH.errors =', errs === '__timeout__' ? '(the page does not answer)' : errs);
+  }
+  if (ready || attempt >= 3) break;
+  console.log(`(relaunching the browser: attempt ${attempt + 1} of 3)`);
+  await within(browser.close().catch(() => {}), 10000);
+  problems = [];
 }
 
 const h = {
@@ -118,4 +137,5 @@ for (const e of shErrors) if (!problems.includes(e)) { problems.push(e); console
 const fps = await page.evaluate(() => window.SH && window.SH.fps).catch(() => null);
 log(`done in ${((Date.now() - t0) / 1000).toFixed(1)}s; fps(swiftshader)=${fps}; problems=${problems.length}`);
 await browser.close();
-process.exit(problems.length && !opt('allow-errors', false) ? 1 : 0);
+// (a --script that reported a FAIL — tools/tests/lib.mjs report() sets process.exitCode — exits 1 too)
+process.exit((problems.length && !opt('allow-errors', false)) || process.exitCode ? 1 : 0);

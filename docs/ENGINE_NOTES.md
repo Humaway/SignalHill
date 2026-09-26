@@ -624,6 +624,14 @@ test's steps is what made long runs crawl. Tests drive time with `SH.advance`; n
 being drawn. `tools/run.mjs` starts Chromium with `--disable-accelerated-2d-canvas` (`SH_GPU_CANVAS=1` turns it off):
 with SwiftShader as the "GPU", accelerated-canvas draws (the Level 4 rankings screen's blurred list at 10 Hz) and
 readbacks queued behind each other and could stall a run for many minutes (Chapter 5 went from 700–2700 s to ~40 s).
+A page that is not `SH.ready` within `--ready` seconds gets a fresh browser (twice at most: now and then a SwiftShader
+Chromium hangs while it boots, with several browsers running). `run.mjs` exits 1 when a `--script` reported a FAIL
+(`report()` in `tools/tests/lib.mjs`), as well as on console errors.
+* **Game randomness and the tests.** The game keeps `Math.random` (enemy barks, the Escalation's roars, the mast's
+  flickering bars…) and the chapter tests play it as it comes, so a check on something random samples until it has seen
+  enough (the mast's bars: until three different readings), and a walk has to survive a monster standing in the way
+  (`walkTo` leans the sideways key in when the held keys got him nowhere). To replay a flaky run, seed it: `let s = N;
+  Math.random = () => …` (a small PRNG) in the test before the chapter starts.
 * **Canvas textures that are read back** (`Tex.util.age`, `pix`, any `getImageData`) must be created with
   `getContext('2d', { willReadFrequently: true })` (every chapter's `ctex` helper does now; Tex / Kit / props always did).
   A GPU-backed canvas makes each readback wait for the GPU process: entering Stairwell A stalled for 10 s to minutes in

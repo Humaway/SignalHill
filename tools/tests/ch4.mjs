@@ -326,19 +326,27 @@ function walkFight(h, x, z, o = {}) {
 }
 // Chase's distance from Aidan (page expression) and position
 const CHASE_D = "(() => { const b = SH.mod.World.build, c = b && b.npcs && b.npcs.chase; return c ? Math.hypot(c.root.position.x - SH.mod.Player.pos.x, c.root.position.z - SH.mod.Player.pos.z) : 99; })()";
+// the fight is over: both of them went through the back-office door (C4_officeDoor → c4_bossDone → 4-3 moves them into
+// the security office, where the old store's Chase NPC no longer exists)
+const BOSS_DONE = '!!(SH.S.flags && SH.S.flags.c4_bossDone)';
 // walk to (x, z) with E held and Chase in tow, as a player keeps him: whenever he drops behind (the Escalation knocks him
-// back, or he snags on the counter) turn back for him first — E still held takes hold of him again within 2 m
+// back, or he snags on the counter) turn back for him first — E still held takes hold of him again within 2 m.
+// → true on arrival, false when he never got there, 'through' when an E press on the way (the one that takes hold of him
+// again) was also on the back-office door with him beside Aidan: the door's interact spot (r 1.4) is 0.9 m past the last
+// leg's end, and a player's press there takes them both through, as the spec's "both through the back-office door" wants
 async function walkWithChase(h, x, z, o = {}) {
   const tol = o.tol ?? 0.45;
   for (let k = 0; k < 14; k++) {
+    if (await ev(h, `return ${BOSS_DONE}`)) return 'through';
     const d = await ev(h, `return ${CHASE_D}`);
     if (d > 1.8) {
-      const c = await ev(h, 'const c = SH.mod.World.build.npcs.chase; return [c.root.position.x, c.root.position.z]');
-      await walkFight(h, c[0], c[1], { maxSec: 6, tol: 1.1 });
+      const c = await ev(h, 'const b = SH.mod.World.build, c = b && b.npcs && b.npcs.chase; return c ? [c.root.position.x, c.root.position.z] : null');
+      if (!c) { if (await advanceUntil(h, BOSS_DONE, 1)) return 'through'; throw new Error('Chase is gone from the old store mid-fight: ' + JSON.stringify(await snap(h))); }
+      await walkFight(h, c[0], c[1], { maxSec: 6, tol: 1.1, stop: BOSS_DONE });
       await advance(h, 0.4);
       continue;
     }
-    await walkFight(h, x, z, { maxSec: o.maxSec ?? 15, tol, stop: `${CHASE_D} > 2.1` });
+    await walkFight(h, x, z, { maxSec: o.maxSec ?? 15, tol, stop: `${CHASE_D} > 2.1 || ${BOSS_DONE}` });
     if ((await ev(h, `return Math.hypot(SH.mod.Player.pos.x - ${x}, SH.mod.Player.pos.z - ${z})`)) < tol + 0.05) return true;
   }
   return false;
@@ -420,9 +428,13 @@ export async function escalation(h, P, notes) {
       // (round the counter's east end wide, along the east wall: the Escalation follows Aidan behind the counter and
       // stands at its east end, and a straight line past the end runs into the counter's corner or into it)
       const legs = behind ? [[17.1, 2.3], [18.7, 3.1], [18.8, 6.0], [18.55, 8.5]] : [[18.55, 8.5]];
+      let through = false;
       for (const [x, z] of legs) {
-        if (!(await walkWithChase(h, x, z, { maxSec: 15, tol: 0.45 }))) { notes.push(`walk to ${x},${z} (holding Chase, try ${tries + 1}) did not arrive: ${JSON.stringify(await snap(h))} · ${JSON.stringify(await fightSnap())}`); break; }
+        const r = await walkWithChase(h, x, z, { maxSec: 15, tol: 0.45 });
+        if (r === 'through') { through = true; notes.push(`through the back-office door with Chase on an E press on the way to it (try ${tries + 1})`); break; }
+        if (!r) { notes.push(`walk to ${x},${z} (holding Chase, try ${tries + 1}) did not arrive: ${JSON.stringify(await snap(h))} · ${JSON.stringify(await fightSnap())}`); break; }
       }
+      if (through) break;
       for (let k = 0; k < 12 && (await chaseDist()) > 2.2; k++) await advance(h, 0.25);
     } finally { await ev(h, 'SH.mod.Input.releaseAll(); return 1'); }
     await advance(h, 0.1);

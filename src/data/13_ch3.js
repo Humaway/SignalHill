@@ -268,9 +268,15 @@
       K.road(ER.br[0], 7.76, ER.br[1], ER.brEnd, { axis: 'z', markings: 'none', kerb: false, footpath: 0, slope: { y0: erF(77), y1: erF(77) - 1.45 } });
       K.drop(ER.br[0] - 0.4, ER.brEnd, ER.br[1] + 0.4, 24.5, { side: 'n', msg: "I can't go that way." });
       // ---- the ground either side: yards on terraces north, the hillside falling away south --------------------------
-      C3_ground(K, -2, -22, 114, 0.24, (x) => erF(x) - 0.006, 'grass');
-      C3_ground(K, -2, 7.76, ER.br[0] - 0.05, 30, (x, z) => erF(x) - 0.006 - Math.max(0, z - 12) * 0.5, 'grass');
-      C3_ground(K, ER.br[1] + 0.05, 7.76, 114, 30, (x, z) => erF(x) - 0.006 - Math.max(0, z - 12) * 0.5, 'grass');
+      // Planar strips (one quad over the knee at z 12 sagged more than a metre under the south cottages' stumps), running
+      // on past both ends of the street — west into the exchange's grounds, east down the lane to the village — and far
+      // enough north and south that their edges are lost in the fog.
+      const gY = (x) => (x <= 112 ? erY(x) : -Math.min(x - 112, 22) * 0.11);     // the street, then the lane down to the village
+      const GX = [-40, 0, 112, 134, 150];
+      const strips = (x0, x1, z0, z1, yf, mat) => { for (let i = 0; i < GX.length - 1; i++) { const a = Math.max(x0, GX[i]), b = Math.min(x1, GX[i + 1]); if (b - a > 0.01) C3_ground(K, a, z0, b, z1, yf, mat); } };
+      const fall = (z) => Math.max(0, z - 12) * 0.5;
+      strips(-40, 150, -46, 0.24, (x) => gY(x) + 0.144, 'grass');
+      for (const [x0, x1] of [[-40, ER.br[0] - 0.05], [ER.br[1] + 0.05, 150]]) for (const [z0, z1] of [[7.76, 12], [12, 30], [30, 64]]) strips(x0, x1, z0, z1, (x, z) => gY(x) + 0.144 - fall(z), 'grass');
       // ---- fences (the street's edges): north picket (gates at each cottage), south picket with the branch gap -------
       const gateGaps = (xs) => xs.map((x) => [x - 0.55, x + 0.55]);
       const run = (x0, x1, z, side, gaps, o) => {
@@ -383,11 +389,11 @@
       K.prop('streetlight', 44, 7.62, 180, { y: erF(44), bank: 3, flicker: true });
       K.prop('streetlight', 24.5, 0.42, 0, { y: erF(24.5), bank: 4 });
       K.prop('streetlight', 5.5, 7.62, 180, { y: erF(5.5), bank: 5 });
-      const poles = [110, 82, 54.5, 27, 1.5];
-      poles.forEach((x) => K.prop('power_pole', x, -0.55, 0, { y: erF(x), h: 9, span: 0, seed: Math.round(x) }));
+      const poles = [128, 110, 82, 54.5, 27, 1.5], pY = (x) => (x > 112 ? gY(x) + 0.15 : erF(x));
+      poles.forEach((x) => K.prop('power_pole', x, -0.55, 0, { y: pY(x), h: 9, span: 0, seed: Math.round(x) }));
       for (let i = 0; i < poles.length - 1; i++) {
         const a = poles[i], b = poles[i + 1];
-        for (const [dz, dy] of [[-1.05, 8.76], [-0.4, 8.76], [0.4, 8.76], [1.05, 8.76], [-0.62, 7.75], [0.62, 7.75]]) C3_wire(K, [a, erF(a) + dy, -0.55 + dz], [b, erF(b) + dy, -0.55 + dz], 0.55, 0.008);
+        for (const [dz, dy] of [[-1.05, 8.76], [-0.4, 8.76], [0.4, 8.76], [1.05, 8.76], [-0.62, 7.75], [0.62, 7.75]]) C3_wire(K, [a, pY(a) + dy, -0.55 + dz], [b, pY(b) + dy, -0.55 + dz], 0.55, 0.008);
       }
       // ---- the payphone at the top of the road (a save point) --------------------------------------------------------
       K.payphone(7.2, 0.62, 0, { id: 'c3_exchangerd:payphone', y: erF(7.2) });
@@ -396,6 +402,31 @@
       K.box(-14, erF(0) + 9.3, -8, 22.4, 0.5, 14.4, { tex: 'concrete', color: '#6a6c66' });
       for (let i = 0; i < 6; i++) K.plane(-23 + i * 3.4, erF(0) + 5.2, -0.98, 1.1, 2.3, winTex(i), { rotY: 0 });
       K.box(-3.2, erF(0) + 9.8, -10, 1.6, 4.2, 1.6, 'brick');                 // a stair tower / flue
+      // the road runs on past the top into the forecourt: bitumen and footpaths, a brick boundary wall along the staff car
+      // park (never the street stopping at an edge over the white)
+      K.box(-20, ER.Y - 0.3, 4, 40, 0.3, 4.4, 'bitumen', { shadow: false });
+      for (const z of [1.02, 6.98]) K.box(-20, ER.Y - 0.25, z, 40, 0.4, 1.56, 'footpath', { shadow: false });
+      K.box(-17.2, erF(0) - 0.1, 7.98, 34.6, 1.0, 0.24, { tex: 'brick', color: '#7a6254' }, { shadow: false });
+      K.box(-17.2, erF(0) + 0.9, 7.98, 34.8, 0.08, 0.32, { tex: 'concrete', color: '#6a6c66' }, { shadow: false });
+      K.box(0.2, erF(0) - 0.1, 7.98, 0.4, 1.25, 0.4, 'brick', { shadow: false });
+
+      // ---- past the village back gate: the lane dropping to Hilltop Village between old paling fences (c2_crescent's
+      // back gate at the bottom), the backs of the units beyond it --------------------------------------------------------
+      C3_ground(K, 112, 0.1, 134, 7.9, (x) => gY(x) + 0.012, 'gravel');
+      C3_ground(K, 134, 0.1, 150, 7.9, () => gY(134) + 0.012, 'bitumen');
+      { const tilt = Math.atan(0.11);
+        for (let x = 112; x < 133.9; x += 3.66) {
+          const cx = Math.min(x + 1.83, 134 - 1.83);
+          for (const [z, rot, t] of [[0.05, 0, -tilt], [7.95, 180, tilt]]) {
+            const f = K.prop('fence', cx, z, rot, { variant: 'paling', len: 3.7, y: gY(cx) - 0.02, collide: false, seed: 70 + Math.round(x) });
+            if (f) { f.rotation.order = 'YXZ'; f.rotation.set(0, rot * D2R, t); }
+          }
+        } }
+      for (const z of [0.75, 7.25]) K.cyl(134, gY(134), z, 0.08, 1.6, { tex: 'metal', color: '#7d837d' });
+      K.prop('house', 142.5, -3.2, -90, { y: gY(134) + 0.05, variant: 'brick', seed: 341 });
+      K.prop('house', 142.5, 11.4, -90, { y: gY(134) + 0.05, variant: 'brick', seed: 342 });
+      for (const z of [-8.5, 16.5]) K.prop('fence', 137.2, z, 90, { variant: 'colorbond', len: 5.2, y: gY(134), collide: false });
+      K.prop('gum_tree', 137, 22, 40, { y: gY(134) - 4.5, seed: 17 });
       // ---- writing on a paling fence, fog-faded ----------------------------------------------------------------------------
       K.writing('DID YOU CHECK', 76.9, erF(77) - 0.7, 14.6, 1.6, { rotY: 90 });
       // ---- dressing -------------------------------------------------------------------------------------------------

@@ -451,6 +451,15 @@ name); `switchboard/lamp_panel.setLamp`;
   toward the lens, 1.3 m up — 0.8 in the Fog world, 2.3 in the Outage, scaled down where room lights already reach
   him — so a fixed camera 6–15 m away keeps him readable in a dark interior. (Ch 1's own `C1_bounce` is gone.)
   `Player.poseSnapshot()` / `poseRestore(snap)` (Script uses them per letterboxed scene).
+* **The glance (hold the phone key).** C / D-pad up / LB is a tap or a hold (`Player.GLANCE.tap`, 0.25 s): a **tap**
+  opens the phone menu as it is *released* (Game's shortcuts — a hold never flashes the menu); **holding** it raises
+  the phone without pausing (`Player.glancing`, `Player.glance` = the pose blend 0..1): the right arm blends from the
+  'phone' carry to 'phone_look' (≈ 0.3 s) and his head turns to the screen, he walks at `GLANCE.speed` (50 %) and
+  can't run, the torch pitches down to a pool `GLANCE.pool` (1.5 m) ahead of him with its cone narrowed to
+  `GLANCE.cone` (18°), and the Phone shows the bars HUD (§6). Release lowers it. Never while readied, swinging, holding
+  E, climbing, crawling, grabbed, down, dead or without control — readying / a swing / a scene ends one at once. A
+  script that takes the body mid-glance keeps any pose it sets; the glance's pose is recorded as the plain 'phone'
+  carry by `poseSnapshot`, so it never comes back after a scene. The Unread's torch-spill check sees the lowered beam.
 * Weapons: `ITEMS[id].weapon = {dmg, speed:'fast'|'slow', range, arc, knock, spray}`; defaults exist for
   box_cutter / steel_bar / extinguisher. Extinguisher: ready + attack sprays (`S.ammo.extinguisher`), attack alone bashes.
   Every extinguisher picked up adds its `ITEMS.extinguisher.ammo` (6) sprays (the first one sets the count); the
@@ -559,10 +568,19 @@ other dead enemies aren't spawned again.
   `'signal:phantom'({peak, tell})`). Never while an override, a call, a `Phone.display` insert, a cutscene or blocking
   script, a menu, a keypad, an Outage transition or death owns things (one under way ends at once). Game time and a
   seeded RNG (reseeded from S after `Phone.reset()`: a load replays the same schedule); every number is in `Phone.TUNE`.
+  **No always-on meter (UNRELIABLE):** the bars HUD is hidden by default and shows only while Aidan **glances** at the
+  phone (hold C, §4 — shown whatever the reading, empty bars too), while an override supplies the bars, a call rings
+  or is live, or a `Phone.display` insert is up (those by the old rule: with bars, fading 2.5 s after them — so every
+  scripted beat looks as authored). Otherwise the cues are the static, the tells, rumble, the torch flicker and the
+  phone's own screens: the phone menu's status row and the screen in his hand (`Phone.drawScreen`) always show the
+  lagged / phantom reading. CLASSIC keeps the old always-on HUD. (`UI.bars(n, {show: true|false|null})`,
+  `UI.barsShown`.) **Teaching:** the first real reading (`signal:real`) or the first phantom in UNRELIABLE shows
+  `UI.prompt('Hold {phone}: check your phone.', {id:'signal_glance'})` once per save (`Phone.TUNE.teach`).
   **Scripted bars are untouched:** `G.bars` / `Phone.override` (numbers, `'noservice'`, `'flicker'`, climbs, fns) show
   exactly as authored in both modes; an fn override's `auto` argument is the mode's own reading. `Phone.reading` adds
   `signal, source (enemy id), aware, target (true bars), lag, jitter, phantom, phantomPeak, phantomTell, phantoms,
-  quiet` (the unreliable fields are null in CLASSIC). `tools/tests/signal.mjs` checks all of it.
+  quiet` (the unreliable fields are null in CLASSIC). `tools/tests/signal.mjs` checks all of it (the HUD rules, the
+  glance and the prompt too).
 * Save: slots 0–2 + `'auto'`. `Game.startChapter(n)` takes `Save.autosave({room, entry, chapterStart:n})` with the
   chapter's start — always, even when Aidan already stands in that room — and continuing from it resumes at that entry
   and **re-runs the chapter's `begin(G, {resumed:true})`** (the envelope's `chapterStart` flag decides). A plain
@@ -736,7 +754,7 @@ node tools/run.mjs --file .build/x.html --size 1280x720 --quiet --script tools/t
 node tools/run.mjs --file .build/x.html --size 1280x720 --quiet --script tools/tests/title.mjs     # ~4 min
 node tools/run.mjs --file .build/x.html --size 1280x720 --quiet --script tools/tests/ui.mjs        # ~16 min
 node tools/run.mjs --file .build/x.html --size 960x540  --quiet --script tools/tests/options.mjs   # ~2 min
-node tools/run.mjs --file .build/x.html --size 960x540  --quiet --script tools/tests/signal.mjs    # ~6 min
+node tools/run.mjs --file .build/x.html --size 960x540  --quiet --script tools/tests/signal.mjs    # ~7 min
 node tools/run.mjs --file .build/x.html --size 960x540  --quiet --script tools/tests/gamepad.mjs   # ~1 min
 SH_CHROME_ARGS="--autoplay-policy=document-user-activation-required" \
   node tools/run.mjs --file .build/x.html --size 960x540 --ready 3 --quiet --script tools/tests/audiogate.mjs
@@ -783,7 +801,15 @@ SH_CHROME_ARGS="--autoplay-policy=document-user-activation-required" \
   reading), never under an override (shown as authored), a letterboxed scene, a `Phone.display` insert, a menu (one
   under way ends as it opens) or an aware threat in 20 m, ended by a real threat; the same S + seed → the same
   phantoms; the real intervals (50–140 s Fog, 35–90 s Outage); CLASSIC against the old radar tick by tick along a
-  moving threat's path; a mode switch carrying the bars; the Options row with real keys.
+  moving threat's path; a mode switch carrying the bars; the Options row with real keys. C: no HUD for a reading by
+  itself in UNRELIABLE, the HUD under overrides (as authored, G.bars(0) fading 2.5 s after the last bar) and calls,
+  the phone menu's status row and the in-hand screen showing the reading and a phantom's bars, CLASSIC's HUD as
+  before. D (real keys): a tap of C opens the menu on release; a hold raises the phone (pose, head, no pause), fades
+  the HUD in (empty bars too), halves his speed with no running, pitches the torch to a pool ~1.5 m ahead (18° cone)
+  and puts it all back on release; no glance while readied / swinging / crawling / climbing / grabbed / without
+  control; a scene mid-glance leaves the plain carry; D-pad up tap / hold on a synthesised pad. F: the one-time "Hold
+  C: check your phone." on the first real reading or the first phantom, not in CLASSIC, the pad's button on a pad.
+  `SIG_ONLY=C,D,F` runs only some sections (A B C D F E).
 * `gamepad.mjs` — a synthesised standard-mapping pad (`navigator.getGamepads` overridden) plays the title (A, the
   D-pad and the stick, OPTIONS, B), NEW GAME → setup → calibration → the Prologue skipped by holding Start, then walks,
   runs (RT), examines (A), torch (Y), quick turn (B), ready / attack (LT / X), pause (Start, D-pad, A, B, Start), map

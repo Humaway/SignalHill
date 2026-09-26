@@ -41,7 +41,8 @@ change direction. Options → Control Type switches to classic tank controls.
 | Quick 180° turn | Q | B / Circle |
 | Inventory (items, weapons, key items) | Tab | RB, R3 or D-pad down |
 | Map | M | Select / Back / View |
-| Phone (calls, voicemail, notes, map) | C | D-pad up or LB |
+| Phone menu (calls, voicemail, notes, map) | Tap C | Tap D-pad up or LB |
+| Check your phone: raise it and read the signal bars (you walk slowly, the torch points at your feet) | Hold C | Hold D-pad up or LB |
 | Answer / decline an incoming call | E / Q | A / B |
 | Pause | Esc | Start |
 | Back / cancel in menus | Esc, Backspace or right mouse | B / Circle |
@@ -85,7 +86,8 @@ Choices are saved and applied the next time the game starts.
 
 **Signal** decides how far you can trust Aidan's phone. **Unreliable** (the default): the phone only picks up what has
 already found him, the bars are slow to catch up and never sit still, and now and then they show something that isn't
-there. **Classic**: the phone reacts to every monster within 20 m, at once, like a radar.
+there. The bars stay off the screen: listen for the static, or hold C to check the phone. **Classic**: the phone
+reacts to every monster within 20 m, at once, like a radar, and the bars appear on screen by themselves.
 
 ### The debug overlay
 

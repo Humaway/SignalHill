@@ -24,6 +24,8 @@
 // at their definitions (say, sting, mash, grainOverlay, capturing, dismissMessage, skippable, skip, clear, crmHtml …).
 // CONTRACT+ (maintenance): keypads keep digits typed while locked (replayed on unlock), ignore the press that opened
 //   them, and show [beat]-split check messages; UI.bars(n, {letterbox:true}) shows the indicator under a letterbox.
+// CONTRACT+ UI.bars(n, {show: true|false|null}) — the unreliable signal's meter rules (Phone decides: shown while Aidan
+//   glances at his phone, hidden otherwise, the old rule under an override or a call); UI.barsShown (its opacity).
 const UI = (() => {
   const TAU = Math.PI * 2;
   const SERIF = "Georgia, 'Times New Roman', Times, serif";
@@ -897,13 +899,20 @@ const UI = (() => {
   // =================================================================================================================
   // Phone signal bars (§4): 0–5, the only image besides item models; modes normal | pulse | none | noservice
   // =================================================================================================================
-  const barsSt = { f: null, n: 0, mode: 'normal', batt: 1, segs: 4, blinkSeg: -1, blinkT: 0, active: -99, battAt: -99, key: '', forceShow: 0, lbUntil: -99 };
+  const barsSt = { f: null, n: 0, mode: 'normal', batt: 1, segs: 4, blinkSeg: -1, blinkT: 0, active: -99, battAt: -99, key: '', forceShow: 0, lbUntil: -99, show: 0 };
   // UI.bars(n, {mode:'normal'|'pulse'|'none'|'noservice', battery 0..1}). Cheap to call every frame. The indicator fades in
   // while bars > 0 (or pulse / NO SERVICE) and out ~2.5 s after it goes idle; losing a battery notch blinks it and
   // shows the indicator for 4 s (the Standard's tell). Hidden while the letterbox is down or the HUD is off —
   // CONTRACT+ o.letterbox:true shows it for 4 s even under the letterbox (5-1: "the battery drops a notch").
+  // CONTRACT+ o.show (the unreliable signal: Phone passes it every frame): true — shown whatever the reading (Aidan
+  // glancing at his phone: empty bars too; still hidden for mode 'none', under the letterbox and with the HUD off);
+  // false — hidden (no always-on meter); omitted / null — the rule above (CLASSIC, and every scripted override or call).
+  // Coming out of `false`, the idle / battery timers start afresh: a reading the player never saw doesn't linger.
   function bars(n, o = {}) {
     ensure();
+    const show = o.show === true ? 1 : o.show === false ? -1 : 0;
+    if (barsSt.show < 0 && show >= 0) { barsSt.active = -99; barsSt.battAt = -99; }
+    barsSt.show = show;
     if (o.letterbox) barsSt.lbUntil = clock + (+o.letterbox > 1 ? +o.letterbox : 4);
     barsSt.n = clamp(Math.round(+n || 0), 0, 5);
     barsSt.mode = ['normal', 'pulse', 'none', 'noservice'].includes(o.mode) ? o.mode : 'normal';
@@ -917,8 +926,8 @@ const UI = (() => {
   function tickBars(dt, menu) {
     const b = barsSt;
     if (!menu) b.blinkT = Math.max(0, b.blinkT - dt);
-    const want = hudF.target > 0 && (lbF.v < 0.5 || clock < b.lbUntil) && b.mode !== 'none' &&
-      (b.n > 0 || b.mode === 'pulse' || b.mode === 'noservice' || clock - b.active < 2.5 || clock - b.battAt < 4);
+    const want = hudF.target > 0 && (lbF.v < 0.5 || clock < b.lbUntil) && b.mode !== 'none' && (b.show > 0 || (b.show === 0 &&
+      (b.n > 0 || b.mode === 'pulse' || b.mode === 'noservice' || clock - b.active < 2.5 || clock - b.battAt < 4)));
     if (b.f.target !== (want ? 1 : 0)) b.f.to(want ? 1 : 0, want ? 0.35 : 0.8);
     if (b.f.v <= 0 && !want) return;
     const s = lcdS, lit = b.mode === 'pulse' ? Math.round(heartPulse(clock) * 5) : b.n;
@@ -2154,6 +2163,7 @@ const UI = (() => {
       return top;
     },
     get hud() { return hudOn; },                                     // CONTRACT+
+    get barsShown() { return barsSt.f ? barsSt.f.v : 0; },           // CONTRACT+: the bars indicator's opacity 0..1
   };
   return api;
 })();

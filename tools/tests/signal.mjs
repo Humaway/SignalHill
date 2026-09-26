@@ -20,10 +20,25 @@
 //      way ends as the menu opens), or an aware threat is within 20 m (a dormant one doesn't stop them); the same S and
 //      seed give the same phantoms; with the real tuning the first comes 50–140 s into a quiet Fog world (35–90 s in the
 //      Outage).
+//   C  no always-on meter: in UNRELIABLE an aware threat's reading (bars, static) never shows the bars HUD by itself; the
+//      HUD shows while a scripted override supplies the bars (a number, 'noservice', a climb, 'flicker' — the old rule,
+//      so G.bars(0) still fades 2.5 s after the last bar) and while a call rings / is live (the old rule: with bars), and
+//      goes when they end; the phone menu's own status row and the phone's screen in Aidan's hand show the lagged
+//      reading and a phantom's bars while the HUD stays hidden; CLASSIC shows the HUD as before (with the bars, fading
+//      2.5 s after they go).
+//   D  the glance, with real keys: a TAP of C opens the phone menu on release (not on the press); HOLDING C never opens
+//      it — Aidan raises the phone (the 'phone' → 'phone_look' carry, his head on it) without pausing, the bars HUD
+//      fades in (empty bars too), release lowers it and the HUD goes; he walks at half speed and cannot run; the torch
+//      pitches down to a small pool ~1.5 m ahead with a narrower cone, and comes back after; no glance while readied
+//      (and readying ends one), swinging, crawling, climbing, grabbed or without control; a scene that takes control
+//      mid-glance gets the plain carry back; the same on a synthesised pad: D-pad up tap = the menu, hold = the glance.
+//   F  the first real aware reading in UNRELIABLE shows "Hold C: check your phone." once (S.done['prompt:signal_glance']);
+//      never again; the first phantom teaches it too; not in CLASSIC; the pad's label on a pad (D-PAD UP).
 //   E  CLASSIC restores the old reading exactly: tick by tick along a moving threat's path the bars equal the old radar's
 //      (nearest threat of any kind, 0 beyond 20 m, 5 within 3 m, 1–4 between, 0.06 hysteresis) and no phantom comes;
 //      a switch mid-reading carries the bars across; the SIGNAL row in Options (real keys) switches it live and saves
 //      it; a META without the key reads UNRELIABLE.
+// SIG_ONLY=C,D,F (any of A B C D F E) runs only those sections.
 // Prints its evidence and `PASS signal`.
 import { ev, report } from './lib.mjs';
 
@@ -55,6 +70,45 @@ function install() {
   Z.t = 0;
   Z.run = async (sec, fn) => { const n = Math.round(sec * 30); for (let i = 1; i <= n; i++) { await SH.advance(1 / 30); Z.t += 1 / 30; if (fn && fn(i / 30) === true) break; } };
   Z.rd = () => M.Phone.reading;
+  // the bars HUD (its opacity, as UI fades it) and the bars lit on the phone's own screens
+  Z.hud = () => +M.UI.barsShown.toFixed(3);
+  Z.hudDom = () => { const el = document.querySelector('#ui .ui-bars'); return el ? el.style.visibility !== 'hidden' && +(el.style.opacity || 0) > 0.02 : false; };
+  const lit = (x, px, py) => { const d = x.getImageData(px, py, 1, 1).data; return d[1] > 120; };
+  Z.screenBars = () => {                                // the in-hand phone (Phone.drawScreen, 128 × 256 design space)
+    const c = document.createElement('canvas'); c.width = 128; c.height = 256; const x = c.getContext('2d', { willReadFrequently: true });
+    M.Phone.drawScreen(x, 128, 256); let n = 0; for (let i = 0; i < 5; i++) if (lit(x, 7 + i * 5, 20)) n++; return n;
+  };
+  Z.menuBars = () => {                                  // the phone menu's LCD status row
+    const t = M.Menus._top; if (!t || !t.st || !t.st.lctx) return null;
+    let n = 0; for (let i = 0; i < 5; i++) if (lit(t.st.lctx, 4 + i * 3, 10)) n++; return n;
+  };
+  Z.prompts = () => [...document.querySelectorAll('#ui .ui-prompt')].map((e) => e.textContent);
+  // a synthesised standard pad (as gamepad.mjs): Z.pad.btn(i, on); Z.pad.off() puts navigator.getGamepads back
+  Z.padOn = () => {
+    if (Z.pad) return Z.pad;
+    const orig = navigator.getGamepads ? navigator.getGamepads.bind(navigator) : null;
+    const pad = { id: 'Synthetic standard gamepad', index: 0, connected: true, mapping: 'standard', timestamp: 0,
+      buttons: Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 })), axes: [0, 0, 0, 0] };
+    navigator.getGamepads = () => [pad, null, null, null];
+    Z.pad = { pad, btn(i, v) { const b = pad.buttons[i]; b.pressed = b.touched = !!v; b.value = v ? 1 : 0; pad.timestamp = performance.now(); },
+      off() { if (orig) navigator.getGamepads = orig; else delete navigator.getGamepads; Z.pad = null; } };
+    return Z.pad;
+  };
+  // Aidan's body: the right arm's carry (a name, or 'blend' for the glance's own pose), the phone's height above his
+  // feet, whether his head has a look target
+  Z.body = () => {
+    const P = M.Player, a = P.actor, c = a.state.carry.R, ph = a.held && a.held.R;
+    let y = null; if (ph) { ph.updateWorldMatrix(true, false); y = +(ph.matrixWorld.elements[13] - P.pos.y).toFixed(3); }
+    return { carry: typeof c === 'string' ? c : c ? 'blend' : null, phoneY: y, look: !!a.state.look.target, glancing: P.glancing, k: +P.glance.toFixed(2) };
+  };
+  // the torch: pitch (°), cone (°), where the beam's axis meets the floor (m ahead of Aidan)
+  Z.torch = () => {
+    const L = M.Render.torch.light, p = L.position, t = L.target.position, P = M.Player.pos;
+    const dx = t.x - p.x, dy = t.y - p.y, dz = t.z - p.z, l = Math.hypot(dx, dy, dz) || 1;
+    const pitch = Math.asin(dy / l) * 180 / Math.PI, s = dy < -1e-3 ? (p.y - P.y) / (-dy / l) : Infinity;
+    const hx = p.x + (dx / l) * s - P.x, hz = p.z + (dz / l) * s - P.z;
+    return { pitch: +pitch.toFixed(1), cone: +(L.angle * 180 / Math.PI).toFixed(1), pool: isFinite(s) ? +Math.hypot(hx, hz).toFixed(2) : null, on: M.Player.torchOn };
+  };
   // sample the reading for `sec`: max / min bars, max static, min battery, phantoms seen, sources seen
   Z.sample = async (sec, o = {}) => {
     const r = { maxBars: 0, minBars: 9, maxStatic: 0, minBatt: 1, phantomTicks: 0, sources: {}, bars: {}, maxPeak: 0, override: 0, modes: {} };
@@ -80,6 +134,9 @@ export default async function (page, h) {
   const bad = (m) => notes.push('BUG: ' + m);
   const say = (m) => notes.push(m);
   const J = (o) => JSON.stringify(o);
+  // SIG_ONLY=C,D,F runs only those sections (A B C D F E; the setup always runs)
+  const only = String(process.env.SIG_ONLY || '').toUpperCase().split(/[\s,]+/).filter(Boolean);
+  const on = (k) => !only.length || only.includes(k);
 
   try {
     // ---- setup: a new game, TEST STREET, Aidan in control, Chapter 1 -------------------------------------------------
@@ -103,7 +160,7 @@ export default async function (page, h) {
       ['standard, patrol facing away, 10 m', "{ id: 'sig:std', type: 'standard', pos: [5, 9.5], rot: 180, persist: false }", "!e.data.seenT"],
       ['borrowed, disguised, 7 m', "{ id: 'sig:borrowed', type: 'borrowed', disguise: 'wai', pos: [2.4, 12.8], rot: 180, persist: false }", 'e.disguised'],
     ];
-    for (const [what, def, still] of DORMANT) {
+    for (const [what, def, still] of on('A') ? DORMANT : []) {
       const r = await ev(h, `await __sig.fresh(); delete SH.S.done['signal:real']; __sig.mode('unreliable');
         const e = SH.mod.Enemies.spawn(${def}); if (!e) return { err: 'no spawn' };
         const u = await __sig.sample(3); const uAware = SH.mod.Enemies.aware(e), uStill = !!(${still});
@@ -124,7 +181,7 @@ export default async function (page, h) {
       } else if (r.c.maxBars !== 0) bad(`${what}: a disguised Borrowed reads in CLASSIC`);
     }
     // all of them at once
-    {
+    if (on('A')) {
       const r = await ev(h, `await __sig.fresh();
         const es = [${DORMANT.map((d) => d[1]).join(', ')}].map((d) => SH.mod.Enemies.spawn(d));
         const u = await __sig.sample(4); const aware = es.filter((e) => SH.mod.Enemies.aware(e)).map((e) => e.id);
@@ -134,7 +191,7 @@ export default async function (page, h) {
     }
 
     // each type AWARE: it is the source, and the reading comes
-    {
+    if (on('A')) {
       const r = await ev(h, `const out = {};
         const E = SH.mod.Enemies;
         // Tethered: alerted (the turn, then the offer)
@@ -171,7 +228,7 @@ export default async function (page, h) {
 
     // =========================================================================================================== B ====
     // lag: a plain probe appears 8 m off (true 3.82 → 3 bars): the bars climb over seconds; it goes: they fall over seconds
-    {
+    if (on('B')) {
       const r = await ev(h, `await __sig.fresh(); delete SH.S.done['signal:real'];
         const T = SH.mod.Phone.TUNE; T.jitter = 0;                      // (the wobble off: the lag alone)
         const e = __sig.probe('sig:lag', 8);
@@ -194,7 +251,7 @@ export default async function (page, h) {
       if (!r.real) bad("S.done['signal:real'] was not set by an aware reading in play");
     }
     // a skipped scene resolves the lag at once: it leaves the reading (and the static) the played scene leaves
-    {
+    if (on('B')) {
       const r = await ev(h, `const once = async (skip) => { await __sig.fresh(); SH.mod.Phone.TUNE.jitter = 0; let e = null;
           SH.mod.Script.run(async (G) => { e = __sig.probe('sig:skip', 8); await G.wait(8); }, { control: false, letterbox: true, skippable: true, name: 'signal:skip' });
           await __sig.run(0.2); if (skip) SH.skip(); await __sig.run(20, () => !SH.mod.Script.busy); const q = __sig.rd(); const at = { lag: +q.lag.toFixed(2), target: +q.target.toFixed(2) };
@@ -204,7 +261,7 @@ export default async function (page, h) {
       if (!(Math.abs(r.skipped.lag - r.skipped.target) < 0.02 && Math.abs(r.played.lag - r.skipped.lag) < 0.05 && Math.abs(r.played.static - r.skipped.static) < 0.02)) bad('a skipped scene leaves a different reading from the played one');
     }
     // the EFTPOS tell follows the lagged reading: one beep per bar as it climbs (CLASSIC: one beep, at once)
-    {
+    if (on('B')) {
       const r = await ev(h, `await __sig.fresh(); SH.mod.Phone.TUNE.jitter = 0;
         let e = __sig.probe('sig:beep', 6, { type: 'sig_probe_beep' }); __sig.sounds.length = 0; const t0 = __sig.t;
         await __sig.run(5); const u = __sig.sounds.filter((s) => s.name === 'eftpos').map((s) => +(s.t - t0).toFixed(2)); const ub = __sig.rd().bars; e.remove();
@@ -216,7 +273,7 @@ export default async function (page, h) {
       if (!(r.c.length === 1 && r.c[0] < 0.1)) bad('CLASSIC does not beep once, at once');
     }
     // 5 bars only within ~3 m; the wobble moves the bars at a fixed distance
-    {
+    if (on('B')) {
       const r = await ev(h, `await __sig.fresh();
         let e = __sig.probe('sig:near', 3.5); let s = await __sig.sample(12); const at35 = s.maxBars; e.remove(); await __sig.run(6);
         e = __sig.probe('sig:close', 2.5); s = await __sig.sample(12); const at25 = s.maxBars; e.remove(); await __sig.run(6);
@@ -229,7 +286,7 @@ export default async function (page, h) {
 
     // phantoms (sped up) ------------------------------------------------------------------------------------------------
     const FAST = "{ quiet: { fog: [3, 5], outage: [2, 3] }, phantomRise: [0.5, 0.8], phantomHold: [1, 1.5], phantomFall: [0.5, 0.8] }";
-    {
+    if (on('B')) {
       const r = await ev(h, `await __sig.fresh(); __sig.tune(${FAST});
         SH.S.chapter = 0; SH.S.done['signal:real'] = true; const ch0 = await __sig.sample(30);
         SH.S.chapter = 1; delete SH.S.done['signal:real']; const noReal = await __sig.sample(30);
@@ -249,7 +306,7 @@ export default async function (page, h) {
       if (!(r.quietTells.phantoms >= 2 && r.fake0 === 0)) bad('with phantomTell 0 a phantom still plays a tell');
     }
     // never during an override (shown exactly), a cutscene, a display insert, a menu; not with an aware threat in range
-    {
+    if (on('B')) {
       const r = await ev(h, `await __sig.fresh(); __sig.tune(${FAST}); SH.S.chapter = 1; SH.S.done['signal:real'] = true;
         const P = SH.mod.Phone, out = {};
         P.bars(2); out.ov2 = await __sig.sample(30); P.bars('noservice'); out.ovNs = await __sig.sample(12); P.bars({ climb: 3, from: 0, dur: 1.2 }); out.ovClimb = await __sig.sample(12); P.bars('flicker'); out.ovFl = await __sig.sample(12); P.bars(null);
@@ -287,7 +344,7 @@ export default async function (page, h) {
       if (!(r.ovPh && !r.ovAfter.phantom && r.ovAfter.bars === 1)) bad('an override mid-phantom is not shown at once as authored');
     }
     // the same S + seed → the same phantoms (game clock, seeded RNG)
-    {
+    if (on('B')) {
       const r = await ev(h, `const runOnce = async (seed) => { await __sig.fresh(); __sig.tune(Object.assign(${FAST}, seed ? { seed } : {})); SH.S.chapter = 1; SH.S.done['signal:real'] = true; SH.S.stats.time = 1234.5; SH.mod.Phone.reset();
           const log = []; let was = false, t = 0; await __sig.run(40, () => { t += 1 / 30; const q = SH.mod.Phone.reading; if (q.phantom && !was) log.push([+t.toFixed(2), q.phantomPeak, q.phantomTell]); was = q.phantom; }); return log; };
         const a = await runOnce(), b = await runOnce(), c = await runOnce(99); __sig.tune(); return { a, b, c }`);
@@ -296,7 +353,7 @@ export default async function (page, h) {
       if (J(r.a) === J(r.c)) bad('the seed does not change the phantoms');
     }
     // the real tuning: the first phantom 50–140 s into a quiet Fog world, 35–90 s into the Outage
-    {
+    if (on('B')) {
       const r = await ev(h, `const first = async (outage) => { await __sig.fresh(); __sig.tune(); SH.S.chapter = 1; SH.S.done['signal:real'] = true;
           if (!!SH.S.outage !== outage) { const p = SH.run(async (G) => G.setOutage(outage)); await SH.advance(0.5); await p; SH.mod.Phone.reset(); }
           let t = 0, at = null, peak = null; await __sig.run(outage ? 100 : 150, () => { t += 1 / 30; const q = SH.mod.Phone.reading; if (q.phantom) { at = +t.toFixed(1); return true; } });
@@ -311,9 +368,180 @@ export default async function (page, h) {
       if (!r.outage.every((x) => x.at !== null && x.at >= 34.9 && x.at <= 91)) bad('the Outage quiet interval is not 35–90 s');
     }
 
+    // =========================================================================================================== C ====
+    // no always-on meter: an aware reading alone never shows the HUD in UNRELIABLE; overrides and calls show it as before
+    if (on('C')) {
+      const r = await ev(h, `await __sig.fresh(); __sig.mode('unreliable'); SH.S.chapter = 1;
+        const P = SH.mod.Phone, out = {};
+        // an aware probe 8 m off: bars and static, the phone's own screen shows them — no HUD
+        let e = __sig.probe('sig:hud', 8); let maxHud = 0, maxBars = 0, dom = false;
+        await __sig.run(5, () => { maxHud = Math.max(maxHud, __sig.hud()); maxBars = Math.max(maxBars, P.reading.bars); dom = dom || __sig.hudDom(); });
+        out.aware = { maxBars, maxHud, dom, static: +P.reading.static.toFixed(2), bars: P.reading.bars, screen: __sig.screenBars() };
+        // the phone menu: its status row shows the reading
+        SH.menu('phone'); for (let i = 0; i < 40 && !(SH.mod.Menus.current === 'phone' && SH.mod.Menus._top.ready); i++) await SH.advance(0.1);
+        await SH.advance(0.4); out.menu = { menu: SH.mod.Menus.current, lcd: __sig.menuBars(), bars: P.reading.bars };
+        { const c = SH.mod.Menus.close(null); await SH.advance(0.8); await c; }
+        await __sig.run(1); out.menuClosed = __sig.hud();
+        // a call rings with the reading up: the HUD shows (the old rule); answered it stays; ended it goes
+        let res = null; P.ring('sig:call', { def: { caller: 'TEST', track: false, answer: async (G) => { await G.wait(2); } } }).then((v) => { res = v; });
+        await __sig.run(0.8); out.ring = { ringing: P.ringing, hud: __sig.hud(), bars: P.reading.bars };
+        P.answer(); await __sig.run(1); out.inCall = { inCall: P.inCall, hud: __sig.hud(), bars: P.reading.bars };
+        await __sig.run(5, () => res !== null); await __sig.run(1.2); out.callEnd = { res, hud: __sig.hud(), bars: P.reading.bars };
+        e.remove(); await __sig.run(8);
+        // overrides with nothing near, each as authored (the old rule)
+        out.ov = {};
+        const ov = async (name, spec, sec) => { P.bars(spec); let mx = 0; await __sig.run(sec, () => { mx = Math.max(mx, __sig.hud()); }); out.ov[name] = { max: +mx.toFixed(2), bars: P.reading.bars, mode: P.reading.mode }; };
+        await ov('three', 3, 1.5); await ov('noservice', 'noservice', 1.5); await ov('climb', { climb: 4, from: 0, dur: 1 }, 1.5); await ov('flicker', 'flicker', 3);
+        P.bars(0); await __sig.run(1); out.ov.zero1 = __sig.hud(); await __sig.run(3); out.ov.zero4 = __sig.hud();
+        P.bars(2); await __sig.run(1); out.ov.two = __sig.hud(); P.bars(null); await __sig.run(1.2); out.ov.cleared = __sig.hud();
+        // a phantom: the phone in his hand shows its bars, the HUD does not
+        __sig.tune(${FAST}); SH.S.done['signal:real'] = true; SH.S.done['prompt:signal_glance'] = true;
+        await __sig.run(25, () => P.reading.phantom && P.reading.bars >= 1);
+        out.phantom = { phantom: P.reading.phantom, bars: P.reading.bars, screen: __sig.screenBars(), hud: __sig.hud() };
+        let phHud = 0; await __sig.run(4, () => { phHud = Math.max(phHud, __sig.hud()); }); out.phantom.maxHud = phHud; __sig.tune();
+        // CLASSIC: the HUD comes with the bars at once and goes 2.5 s after them, as before
+        __sig.mode('classic'); await __sig.fresh();
+        e = __sig.probe('sig:hudc', 8); await __sig.run(0.6); out.classic = { bars: P.reading.bars, hud: __sig.hud(), dom: __sig.hudDom() };
+        e.remove(); await __sig.run(1.2); out.classic.gone1 = __sig.hud(); await __sig.run(3); out.classic.gone4 = __sig.hud();
+        __sig.mode('unreliable'); await __sig.fresh();
+        return out;`);
+      say(`C hidden meter: an aware probe 8 m off → ${J(r.aware)}; the phone menu → ${J(r.menu)} (closed: HUD ${r.menuClosed}); a call rings → ${J(r.ring)}, answered → ${J(r.inCall)}, over → ${J(r.callEnd)}`);
+      say(`C overrides (nothing near): ${J(r.ov)}; a phantom → ${J(r.phantom)}; CLASSIC → ${J(r.classic)}`);
+      if (!(r.aware.maxBars >= 2 && r.aware.static > 0.05 && r.aware.maxHud === 0 && !r.aware.dom)) bad('UNRELIABLE shows the bars HUD for a reading by itself (or no reading came)');
+      if (r.aware.screen !== r.aware.bars) bad("the phone's screen in Aidan's hand does not show the reading");
+      if (!(r.menu.menu === 'phone' && r.menu.lcd === r.menu.bars && r.menu.bars >= 2)) bad("the phone menu's status row does not show the reading");
+      if (r.menuClosed !== 0) bad('the HUD shows after the phone menu closes');
+      if (!(r.ring.ringing === 'sig:call' && r.ring.hud > 0.9 && r.inCall.inCall === 'sig:call' && r.inCall.hud > 0.9)) bad('the HUD does not show while a call rings / is live');
+      if (!(r.callEnd.res === 'answered' && r.callEnd.hud === 0 && r.callEnd.bars >= 1)) bad('the HUD stays after the call ends');
+      for (const k of ['three', 'noservice', 'climb', 'flicker']) if (!(r.ov[k].max > 0.9)) bad(`the override ${k} does not show the HUD`);
+      if (!(r.ov.three.bars === 3 && r.ov.noservice.mode === 'noservice' && r.ov.climb.bars === 4)) bad('an override is not shown exactly as authored');
+      if (!(r.ov.zero1 > 0.9 && r.ov.zero4 === 0)) bad('G.bars(0) does not fade 2.5 s after the last bar (the old rule)');
+      if (!(r.ov.two > 0.9 && r.ov.cleared === 0)) bad('the HUD stays after the override is cleared');
+      if (!(r.phantom.phantom && r.phantom.bars >= 1 && r.phantom.screen === r.phantom.bars && r.phantom.hud === 0 && r.phantom.maxHud === 0)) bad("a phantom shows on the HUD, or not on the phone's own screen");
+      if (!(r.classic.bars === 3 && r.classic.hud > 0.9 && r.classic.dom && r.classic.gone1 > 0.9 && r.classic.gone4 === 0)) bad('CLASSIC does not show the HUD as before');
+    }
+
+    // =========================================================================================================== D ====
+    // the glance, with real keys
+    if (on('D')) {
+      const K = { d: (k) => page.keyboard.down(k), u: (k) => page.keyboard.up(k) };
+      const st = (pre) => ev(h, `${pre}; return { menu: SH.mod.Menus.current || null, ...__sig.body(), hud: __sig.hud(), bars: SH.mod.Phone.reading.bars, t: +SH.S.stats.time.toFixed(2) }`);
+      const closeMenu = () => ev(h, 'if (SH.mod.Menus.isOpen()) { const c = SH.mod.Menus.close(null); await SH.advance(0.8); await c; } await __sig.run(0.3); return 1');
+      await ev(h, "await __sig.fresh(); __sig.mode('unreliable'); SH.mod.Input.lastDevice = 'keyboard'; return 1");
+      // a tap: nothing on the press, the phone menu on the release
+      await K.d('c'); const tapDown = await st('await __sig.run(0.1)'); await K.u('c'); const tapUp = await st('await __sig.run(0.1)');
+      await closeMenu();
+      // a hold: no menu, the phone comes up, the HUD fades in (an empty meter), release lowers it and the HUD goes
+      const b0 = await st('await __sig.run(0.1)');
+      await K.d('c'); const h015 = await st('await __sig.run(0.15)'); const h07 = await st('await __sig.run(0.55)');
+      await K.u('c'); const rel = await st('await __sig.run(0.1)'); const rel15 = await st('await __sig.run(1.4)');
+      await closeMenu();
+      say(`D tap: pressed → ${J({ menu: tapDown.menu, glancing: tapDown.glancing })}, released → ${J({ menu: tapUp.menu })}; hold: 0.15 s → ${J(h015)}, 0.7 s → ${J(h07)} (before ${J(b0)}), released → ${J(rel)}, 1.5 s later → ${J(rel15)}`);
+      if (!(tapDown.menu === null && !tapDown.glancing && tapUp.menu === 'phone')) bad('a tap of C does not open the phone menu on release');
+      if (!(h015.menu === null && !h015.glancing && h07.menu === null && h07.glancing && rel.menu === null && rel15.menu === null)) bad('holding C opens the menu, or does not glance');
+      if (!(h07.carry === 'blend' && h07.k > 0.9 && h07.look && h07.phoneY > b0.phoneY + 0.05 && h07.t > h015.t)) bad('the glance does not raise the phone (pose, head) without pausing');
+      if (!(h07.hud > 0.9 && h07.bars === 0 && h015.hud === 0)) bad('the HUD does not fade in while glancing');
+      if (!(!rel.glancing && rel15.carry === 'phone' && Math.abs(rel15.phoneY - b0.phoneY) < 0.02 && rel15.hud === 0)) bad('releasing C does not lower the phone and hide the HUD');
+      // … with an aware threat: the HUD shows its bars while held
+      await ev(h, "await __sig.fresh(); window.__gle = __sig.probe('sig:gl', 8); await __sig.run(4); return 1");
+      const gp0 = await st('0'); await K.d('c'); const gp1 = await st('await __sig.run(0.8)'); await K.u('c'); const gp2 = await st('await __sig.run(1.2); __gle.remove()');
+      say(`D glance at an aware probe 8 m off: before ${J({ bars: gp0.bars, hud: gp0.hud })}, held ${J({ bars: gp1.bars, hud: gp1.hud })}, released ${J({ bars: gp2.bars, hud: gp2.hud })}`);
+      if (!(gp0.hud === 0 && gp0.bars >= 2 && gp1.hud > 0.9 && gp1.bars >= 2 && gp2.hud === 0)) bad('glancing does not show the reading on the HUD (or it stays after)');
+      // half speed, no running
+      const walk = async (glance, run) => {
+        await ev(h, 'await __sig.fresh(); SH.teleport(5, 12, 180); await __sig.run(0.3); return 1');
+        if (glance) { await K.d('c'); await ev(h, 'await __sig.run(0.4); return 1'); }
+        if (run) await K.d('Shift');
+        await K.d('w');
+        const r = await ev(h, `const p0 = { x: SH.mod.Player.pos.x, z: SH.mod.Player.pos.z }; let mx = 0, runs = 0, gl = true;
+          await __sig.run(1.5, () => { mx = Math.max(mx, SH.mod.Player.speed); if (SH.mod.Player.running) runs++; gl = gl && SH.mod.Player.glancing; });
+          const p = SH.mod.Player.pos; return { d: +Math.hypot(p.x - p0.x, p.z - p0.z).toFixed(2), max: +mx.toFixed(2), runs, glancing: gl, stamina: +SH.mod.Player.stamina.toFixed(2) }`);
+        await K.u('w'); if (run) await K.u('Shift'); if (glance) await K.u('c');
+        await ev(h, 'await __sig.run(0.6); return 1');
+        return r;
+      };
+      const w0 = await walk(false, false), w1 = await walk(true, false), r0 = await walk(false, true), r1 = await walk(true, true);
+      say(`D speed (1.5 s of W): walking ${J(w0)}; glancing ${J(w1)}; running ${J(r0)}; Shift while glancing ${J(r1)}`);
+      if (!(w0.d > 1.5 && w1.glancing && w1.d / w0.d > 0.4 && w1.d / w0.d < 0.62 && w1.max <= 1.6 * 0.5 + 0.05)) bad('glancing does not halve his walking speed');
+      if (!(r0.runs > 0 && r0.max > 2.5 && r1.glancing && r1.runs === 0 && r1.max <= 1.6 * 0.5 + 0.05 && r1.stamina === 1)) bad('he can run while glancing');
+      // the torch: down to a small pool ~1.5 m ahead, a narrower cone; back after
+      const t0 = await ev(h, 'await __sig.fresh(); SH.mod.Player.setTorch(true); await __sig.run(0.4); return __sig.torch()');
+      await K.d('c'); const t1 = await ev(h, 'await __sig.run(0.8); return __sig.torch()');
+      await K.u('c'); const t2 = await ev(h, 'await __sig.run(1.2); const t = __sig.torch(); SH.mod.Player.setTorch(false); return t');
+      say(`D torch: before ${J(t0)}; glancing ${J(t1)}; after ${J(t2)}`);
+      if (!(t0.pitch > -12 && t0.pitch < 0 && Math.abs(t0.cone - 28) < 0.5)) bad(`the torch's rest aim is not the old one (${J(t0)})`);
+      if (!(t1.pitch < -25 && t1.pool > 1.2 && t1.pool < 1.8 && Math.abs(t1.cone - 18) < 0.5)) bad('glancing does not pitch the torch down to a small pool ~1.5 m ahead');
+      if (!(Math.abs(t2.pitch - t0.pitch) < 2 && t2.cone === t0.cone)) bad('the torch does not come back after the glance');
+      // never while readied, swinging, crawling, climbing, grabbed, without control; readying ends one
+      const G = {};
+      const holdC = async (name, pre, post) => {
+        await ev(h, `await __sig.fresh(); ${pre || ''}; await __sig.run(0.3); return 1`);
+        await K.d('c');
+        G[name] = await ev(h, `await __sig.run(0.6); const r = { glancing: SH.mod.Player.glancing, hud: __sig.hud(), mode: SH.mod.Player.mode, ready: SH.mod.Player.ready, menu: SH.mod.Menus.current || null }; ${post || ''}; return r`);
+        await K.u('c'); await ev(h, 'await __sig.run(0.4); return 1');
+      };
+      await K.d('Space'); await holdC('readied'); await K.u('Space');
+      await holdC('crawling', 'SH.mod.Player.crawl(true)', 'SH.mod.Player.crawl(false)');
+      await holdC('climbing', "SH.teleport(5, 12, 180); SH.mod.Player.climb({ x: 5, z: 11, rot: 0, y0: 0, y1: 3, top: [5, 10], bottom: [5, 12] }, 'bottom')", 'SH.teleport(5, 19.5, 180)');
+      await holdC('grabbed', 'window.__grab = SH.mod.Player.grab({ mash: 99, window: 5, damage: 0 })', 'SH.mod.Player.release()');
+      await holdC('noControl', 'SH.mod.Player.setControl(false)', 'SH.mod.Player.setControl(true)');
+      // glancing, then ready / a swing: it ends (and comes back while C is still held)
+      await ev(h, 'await __sig.fresh(); return 1');
+      await K.d('c'); const g1 = await ev(h, 'await __sig.run(0.5); return SH.mod.Player.glancing');
+      await K.d('Space'); const g2 = await ev(h, 'await __sig.run(0.15); return { glancing: SH.mod.Player.glancing, ready: SH.mod.Player.ready }');
+      await K.u('Space'); const g3 = await ev(h, 'await __sig.run(0.4); return SH.mod.Player.glancing');
+      const g4 = await ev(h, "SH.press('attack'); await __sig.run(0.12); return { glancing: SH.mod.Player.glancing, attack: SH.mod.Player.attackState ? SH.mod.Player.attackState.kind : null }");
+      await K.u('c'); await ev(h, 'await __sig.run(1.2); return 1');
+      // a scene takes control mid-glance: the glance ends, the arm comes back to the plain carry
+      await K.d('c'); const s0 = await ev(h, "await __sig.run(0.6); window.__sc = SH.mod.Script.run(async (G) => { await G.wait(1.5); }, { control: false, letterbox: true, skippable: false, name: 'signal:glance-scene' }); await __sig.run(1.2); return __sig.body()");
+      await K.u('c'); const s1 = await ev(h, 'await __sig.run(1.5); await __sc; await __sig.run(0.8); return __sig.body()');
+      say(`D never: ${J(G)}; glancing ${g1} → ready ${J(g2)} → released ${g3} → a swing ${J(g4)}; a scene mid-glance → ${J(s0)}, after → ${J(s1)}`);
+      for (const k of Object.keys(G)) if (G[k].glancing || G[k].menu) bad(`a glance (or the menu) came while ${k} (${J(G[k])})`);
+      if (!(G.readied.ready && G.crawling.mode === 'crawl' && G.climbing.mode === 'ladder' && G.grabbed.mode === 'grabbed')) bad(`the no-glance states were not set up (${J(G)})`);
+      if (!(g1 && !g2.glancing && g2.ready && g3 && !g4.glancing && g4.attack)) bad('readying or a swing does not end the glance');
+      if (!(!s0.glancing && s0.carry === 'phone' && !s1.glancing && s1.carry === 'phone')) bad("a scene mid-glance does not get Aidan's plain carry back");
+      // on a pad: D-pad up tap = the menu, hold = the glance
+      await ev(h, 'await __sig.fresh(); __sig.padOn(); await __sig.run(0.2); return 1');
+      const ptap = await ev(h, 'const P = __sig.pad; P.btn(12, true); await __sig.run(0.1); const m0 = SH.mod.Menus.current || null; P.btn(12, false); await __sig.run(0.15); return { onPress: m0, onRelease: SH.mod.Menus.current || null, device: SH.mod.Input.lastDevice }');
+      await closeMenu();
+      const phold = await ev(h, 'const P = __sig.pad; P.btn(12, true); await __sig.run(0.7); const r = { menu: SH.mod.Menus.current || null, glancing: SH.mod.Player.glancing, hud: __sig.hud() }; P.btn(12, false); await __sig.run(0.4); r.after = { menu: SH.mod.Menus.current || null, glancing: SH.mod.Player.glancing }; return r');
+      await closeMenu(); await ev(h, "__sig.pad.off(); SH.mod.Input.lastDevice = 'keyboard'; await __sig.run(0.2); return 1");
+      say(`D pad: D-pad up tapped → ${J(ptap)}; held → ${J(phold)}`);
+      if (!(ptap.onPress === null && ptap.onRelease === 'phone' && ptap.device === 'gamepad')) bad('a D-pad up tap does not open the phone menu on release');
+      if (!(phold.menu === null && phold.glancing && phold.hud > 0.9 && phold.after.menu === null && !phold.after.glancing)) bad('holding D-pad up does not glance (or opens the menu)');
+    }
+
+    // =========================================================================================================== F ====
+    // the teaching prompt: once, on the first real reading or the first phantom, UNRELIABLE only
+    if (on('F')) {
+      const r = await ev(h, `const P = SH.mod.Phone, out = {}; SH.mod.Input.lastDevice = 'keyboard';
+        const has = () => __sig.prompts().filter((x) => /check your phone/.test(x));
+        const reset = async () => { await __sig.fresh(); SH.S.chapter = 1; delete SH.S.done['signal:real']; delete SH.S.done['prompt:signal_glance']; SH.mod.UI.prompt(null, { id: 'signal_glance' }); await __sig.run(1); };
+        await reset(); let e = __sig.probe('sig:teach', 8); let when = null;
+        await __sig.run(4, (t) => { if (when === null && has().length) when = +t.toFixed(2); });
+        out.real = { when, text: has(), done: !!SH.S.done['prompt:signal_glance'], real: !!SH.S.done['signal:real'] };
+        e.remove(); await __sig.run(10);
+        delete SH.S.done['signal:real']; e = __sig.probe('sig:teach2', 8); let again = 0; await __sig.run(4, () => { if (has().length) again++; }); e.remove();
+        out.once = { again, real: !!SH.S.done['signal:real'] }; await __sig.run(6);
+        await reset(); SH.S.done['signal:real'] = true; __sig.tune(${FAST}); let phAt = null, prAt = null;
+        await __sig.run(25, (t) => { if (phAt === null && P.reading.phantom) phAt = +t.toFixed(2); if (prAt === null && has().length) prAt = +t.toFixed(2); return phAt !== null && prAt !== null; });
+        out.phantom = { phAt, prAt, text: has() }; __sig.tune(); await __sig.run(10);
+        await reset(); __sig.mode('classic'); e = __sig.probe('sig:teachc', 8); let cl = 0; await __sig.run(4, () => { if (has().length) cl++; }); e.remove();
+        out.classic = { shown: cl, real: !!SH.S.done['signal:real'], done: !!SH.S.done['prompt:signal_glance'] }; __sig.mode('unreliable');
+        await reset(); __sig.padOn(); __sig.pad.btn(14, true); await __sig.run(0.1); __sig.pad.btn(14, false); await __sig.run(0.2);
+        e = __sig.probe('sig:teachp', 8); await __sig.run(4); out.pad = { device: SH.mod.Input.lastDevice, text: has() }; e.remove(); __sig.pad.off(); SH.mod.Input.lastDevice = 'keyboard';
+        await __sig.run(10); await __sig.fresh(); return out`);
+      say(`F teaching: the first real reading → ${J(r.real)}; a second first reading → ${J(r.once)}; the first phantom → ${J(r.phantom)}; CLASSIC → ${J(r.classic)}; on a pad → ${J(r.pad)}`);
+      if (!(r.real.when !== null && r.real.when >= 0.9 && r.real.when < 3 && r.real.text[0] === 'Hold C: check your phone.' && r.real.done && r.real.real)) bad('the first real reading does not teach the glance');
+      if (!(r.once.again === 0 && r.once.real)) bad('the glance prompt shows more than once');
+      if (!(r.phantom.phAt !== null && r.phantom.prAt !== null && Math.abs(r.phantom.prAt - r.phantom.phAt) < 0.1)) bad('the first phantom does not teach the glance');
+      if (!(r.classic.shown === 0 && r.classic.real && !r.classic.done)) bad('CLASSIC shows the glance prompt');
+      if (r.pad.text[0] !== 'Hold D-PAD UP: check your phone.') bad("the glance prompt does not name the pad's button");
+    }
+
     // =========================================================================================================== E ====
     // CLASSIC, tick by tick, against the old radar (nearest threat of any kind; 0.06 hysteresis)
-    {
+    if (on('E')) {
       const r = await ev(h, `await __sig.fresh(); __sig.tune(${FAST}); SH.S.chapter = 1; SH.S.done['signal:real'] = true; __sig.mode('classic');
         const E = SH.mod.Enemies, P = SH.mod.Phone;
         const dorm = E.spawn({ id: 'sig:cteth', type: 'tethered', pos: [2.2, 3.5], rot: 180, anchor: [2.2, 3.5], persist: false });   // dormant, 16.2 m
@@ -340,7 +568,7 @@ export default async function (page, h) {
       if (r.phantomTicks || r.ph) bad('a phantom came in CLASSIC');
     }
     // switching mid-reading carries the bars across
-    {
+    if (on('E')) {
       const r = await ev(h, `await __sig.fresh(); __sig.mode('classic'); const e = __sig.probe('sig:sw', 8); await __sig.run(1); const c = __sig.rd().bars;
         __sig.mode('unreliable'); await __sig.run(1 / 30); const u1 = __sig.rd().bars; await __sig.run(3); const u3 = __sig.rd().bars;
         __sig.mode('classic'); await __sig.run(1 / 30); const c2 = __sig.rd().bars; e.remove(); __sig.mode('unreliable'); return { c, u1, u3, c2 }`);
@@ -348,7 +576,7 @@ export default async function (page, h) {
       if (!(r.c === 3 && r.u1 >= 2 && r.u3 >= 2 && r.c2 === 3)) bad('a switch mid-reading drops or jumps the bars');
     }
     // the Options row (real keys), live, saved; a META without the key reads UNRELIABLE
-    {
+    if (on('E')) {
       const key = async (k, n = 1) => { for (let i = 0; i < n; i++) { await page.keyboard.press(k); await ev(h, 'await SH.advance(0.12); return 1'); } };
       const waitMenu = (name) => ev(h, `for (let i = 0; i < 100; i++) { const t = SH.mod.Menus._top; if (SH.mod.Menus.current === ${J(name)} && t && t.ready) return true; await SH.advance(0.1); } return false`);
       await ev(h, "await __sig.fresh(); SH.menu('options'); return 1");
@@ -373,5 +601,5 @@ export default async function (page, h) {
   for (const n of notes) console.log('  ' + n);
   const errs = await ev(h, 'return SH.errors').catch(() => []);
   if (errs.length) { console.log('  SH.errors:', errs.slice(0, 6).join(' | ')); notes.push('BUG: page errors'); }
-  report('signal (unreliable signal: awareness, lag, wobble, phantoms; CLASSIC exact; the SIGNAL option)', !notes.some((n) => n.startsWith('BUG')), `${((Date.now() - t0) / 1000).toFixed(0)} s real`);
+  report('signal (unreliable signal: awareness, lag, wobble, phantoms; the hidden meter, the glance, the prompt; CLASSIC exact; the SIGNAL option)', !notes.some((n) => n.startsWith('BUG')), `${((Date.now() - t0) / 1000).toFixed(0)} s real`);
 }

@@ -48,6 +48,15 @@
 //   letterboxed scene owns Aidan, poseSnapshot() / poseRestore(snap) (Script restores his arm poses after each
 //   letterboxed scene), the torch bounce (a fill light that keeps Aidan readable in the dark), crawl-mode interactables
 //   ({crawl:true}), E with a message up goes to the faced target unless it is the thing just used.
+// CONTRACT+ THE GLANCE (the unreliable signal's only on-screen meter): HOLDING the phone key (C / D-pad up / LB) for
+//   Player.GLANCE.tap (0.25 s) or longer raises the phone without pausing — his right arm blends from the 'phone' carry
+//   to 'phone_look' (≈ 0.3 s), his head turns down to the screen, he walks at GLANCE.speed (50 %) and cannot run, and
+//   the torch pitches down to a small pool GLANCE.pool (1.5 m) ahead with its cone narrowed to GLANCE.cone (18°); the
+//   Phone shows the bars HUD while Player.glancing. Release lowers it. A TAP (< 0.25 s) opens the phone menu on release
+//   (Game's shortcuts), so a hold never flashes the menu. No glance while readied, attacking, holding E, climbing,
+//   crawling, grabbed, down, dead or without control (it ends at once when any of them starts). Player.glancing (bool),
+//   Player.glance (the pose blend 0..1). A script that takes the body mid-glance keeps whatever pose it sets; the
+//   glance's own pose never outlives it (poseSnapshot records it as the plain 'phone' carry).
 const Player = (() => {
   const TAU = Math.PI * 2, D2R = Math.PI / 180;
   const WALK = 1.6, RUN = 3.5, BACK = 0.9, CRAWL = 0.8, READY_STEP = 0.75, CLIMB_UP = 0.8, CLIMB_DOWN = 1.0;
@@ -92,6 +101,15 @@ const Player = (() => {
   let fx = null; // spray particles
   let footSurfaceOverride = null;
   let phoneGlow = -1;
+  // the glance (hold the phone key): see the header
+  const GLANCE = { tap: 0.25, speed: 0.5, pool: 1.5, cone: 18, rate: 7 };
+  let glanceOn = false, glanceK = 0, torchAngle0 = null;
+  // the right arm's carry while glancing: one object, re-blended in place each frame from Rig's 'phone' to 'phone_look'
+  // (the same numbers as Rig.ARM_POSES; chest space, left side, mirrored for the right hand)
+  const gPose = { w: [0, 0, 0], pole: [0, 0, 0], fing: [0, 0, 0], palm: [0, 0, 0], curl: 0.4, thumb: 0.45 };
+  const G_FROM = { w: [0.07, -0.19, 0.1], pole: [1, -0.7, -0.5], fing: [-0.35, 0.3, 1], palm: [-0.15, 1, -0.45], curl: 0.4, thumb: 0.45 };
+  const G_TO = { w: [0.04, -0.07, 0.16], pole: [1, -1, -0.2], fing: [-0.35, 0.6, 0.75], palm: [-0.15, 0.5, -0.9], curl: 0.12, thumb: 0.3 };
+  const _gl = V();
 
   // ---------------------------------------------------------------------------------------------------------------
   // Actor
@@ -265,6 +283,16 @@ const Player = (() => {
       pitch = Math.atan2(readyTarget.pos.y + 1.0 - ty, Math.hypot(dx, dz) || 1);
     }
     if (gaze > 0.01) { ay += swayYaw() * 1.3; pitch += Math.sin(clock * 2.3 + 1) * gaze * 5 * D2R; }
+    // the glance: the phone is raised to read, so its back light points at the ground a step ahead (a small pool)
+    const L = Render.torch.light;
+    if (L) {
+      if (torchAngle0 === null) torchAngle0 = L.angle;
+      if (glanceK > 0.001 && mode === 'normal') {
+        const fwd = (tx - p.x) * Math.sin(ay) + (tz - p.z) * Math.cos(ay);          // the raised phone is ahead of him
+        pitch = U.lerp(pitch, -Math.atan2(Math.max(0.3, ty - p.y), Math.max(0.4, GLANCE.pool - fwd)), glanceK);
+        L.angle = U.lerp(torchAngle0, GLANCE.cone * D2R, glanceK);
+      } else if (L.angle !== torchAngle0) L.angle = torchAngle0;
+    }
     Render.torch.setTransform([tx, ty, tz], [Math.sin(ay) * Math.cos(pitch), Math.sin(pitch), Math.cos(ay) * Math.cos(pitch)]);
     // flicker from the nearest threat
     let lv = 0;
@@ -304,6 +332,33 @@ const Player = (() => {
       bounceLv = 0;
       if (bounce) bounce.set({ intensity: 0 });
     }
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // The glance (hold the phone key): raise the phone and read it (see the header)
+  // ---------------------------------------------------------------------------------------------------------------
+  function glanceWanted(ctl) {
+    if (!ctl || deadSt || mode !== 'normal' || readyOn || attack || holdAct || grabSt || ladderSt || typeof Input === 'undefined') return false;
+    return Input.down('phone') && Input.heldTime('phone') >= GLANCE.tap;
+  }
+  // the right arm: 'phone' → 'phone_look' and back, blended; only while the arm carries the phone as the player left it
+  // (a script that sets its own pose mid-glance keeps it)
+  function updateGlance(dt) {
+    const a = actor;
+    if (!a || !a.state || !a.state.carry) { glanceK = 0; return; }
+    const carry = a.state.carry.R, ours = carry === gPose;
+    const phone = !!(a.held && a.held.R && a.held.R.userData.kind === 'phone');
+    const want = glanceOn && phone && (ours || carry === 'phone');
+    glanceK = dt > 0 ? U.damp(glanceK, want ? 1 : 0, GLANCE.rate, dt) : want ? 1 : 0;
+    if (!want) {
+      if (!ours) { glanceK = 0; return; }
+      if (glanceK < 0.01) { glanceK = 0; a.armPose('R', 'phone'); return; }
+    }
+    const k = U.smooth(glanceK), chestD = (a.D && a.D.T && a.D.T.chestD) || 0.1;
+    for (const f of ['w', 'pole', 'fing', 'palm']) for (let i = 0; i < 3; i++) gPose[f][i] = U.lerp(G_FROM[f][i], G_TO[f][i], k);
+    gPose.w[2] += chestD;
+    gPose.curl = U.lerp(G_FROM.curl, G_TO.curl, k); gPose.thumb = U.lerp(G_FROM.thumb, G_TO.thumb, k);
+    if (!ours) a.armPose('R', gPose);
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -806,6 +861,7 @@ const Player = (() => {
     let target = null;
     if (readyOn && readyTarget && readyTarget.pos) { enemyLook.copy(readyTarget.pos); enemyLook.y += readyTarget.height ? readyTarget.height * 0.85 : 1.4; target = enemyLook; }
     else if (holdAct && holdAct.e && holdAct.e.pos) { enemyLook.copy(holdAct.e.pos); enemyLook.y += 0.9; target = enemyLook; }
+    else if (glanceK > 0.3 && actor.held && actor.held.R) { actor.held.R.getWorldPosition(_gl); target = _gl; }   // reading the phone
     else if (lookIt && lookIt.look !== false) { lookVec.copy(lookIt.pos); target = lookVec; }
     actor.lookAt(target);
   }
@@ -881,6 +937,7 @@ const Player = (() => {
     let moved = 0;
 
     if (typeof Input !== 'undefined' && ctl && Input.pressed('torch') && mode !== 'dead') toggleTorch();
+    glanceOn = glanceWanted(ctl);                            // (re-checked after the actions below: ready / attack end it)
 
     switch (mode) {
       case 'dead': speed = 0; break;
@@ -905,6 +962,8 @@ const Player = (() => {
     }
     if (mode !== 'ladder' && mode !== 'dead' && (ctl || mode !== 'normal' || impulseSt)) settleY(dt);
     if (!basisRead) trackInput();
+    if (glanceOn && !glanceWanted(ctl)) glanceOn = false;     // readied, swung, grabbed … this frame
+    updateGlance(dt);
     // the phone's screen lights his face and chest from below (a weak pool light the Rig keeps at the screen)
     const glow = deadSt || !actor.root.visible || !actor.root.parent || !actor.held || !actor.held.R || !actor.held.R.userData.screen ? 0 : PHONE_GLOW;
     if (glow !== phoneGlow || (glow > 0 && (!actor._plight || !actor._plight.isOn))) { phoneGlow = glow; try { actor.setPhoneLight(glow); } catch (e) { /* no rig light */ } }
@@ -981,7 +1040,8 @@ const Player = (() => {
     const tank = typeof META !== 'undefined' && META.options && META.options.control === 'tank';
     const danger = S.health < 35;
     let target = 0, dirYaw = yaw, strafe = null;
-    const runKey = canRun && ctl && Input.down('run') && !readyOn && !exhausted && stamina > 0;
+    if (glanceOn) walkSpeed *= GLANCE.speed;                  // reading the phone: half speed, no running
+    const runKey = canRun && ctl && Input.down('run') && !readyOn && !glanceOn && !exhausted && stamina > 0;
     if (readyOn) {
       // ready: facing belongs to the lock (or A/D rotate without one); slow steps
       if (readyTarget && readyTarget.pos) {
@@ -1063,7 +1123,8 @@ const Player = (() => {
     deadSt = false; mode = 'normal'; modeOpts = {}; stamina = 1; exhausted = false; gaze = 0; gazeTarget = 0; tremorOn = false;
     speed = 0; control = true; locks.clear(); turnSt = null; attack = null; holdAct = null; ladderSt = null; downSt = null;
     staggerT = 0; impulseSt = null; hold = null; cutFlag = false; entryHold = null; lastLiveBasis = null; prevInput = { x: 0, y: 0 };
-    readyOn = false; readyTarget = null; stillTime = 0; phoneGlow = -1;
+    readyOn = false; readyTarget = null; stillTime = 0; phoneGlow = -1; glanceOn = false; glanceK = 0;
+    try { if (torchAngle0 !== null && Render.torch.light) Render.torch.light.angle = torchAngle0; } catch (e) { /* render */ }
     if (grabSt) grabEnd(null);
     heldFor = undefined; heldKind = null;
     setTorch(false);
@@ -1080,6 +1141,8 @@ const Player = (() => {
     try { a.finishGestures(); a.lookAt(null); a.expr('neutral'); a.eyes('ahead'); a.talk(false); } catch (e) { /* rig */ }
     try { a.hold('L', null); } catch (e) { /* rig */ }
     if (!a.held || !a.held.R || a.held.R.userData.kind !== 'phone') { try { a.hold('R', 'phone'); } catch (e) { /* rig */ } }
+    if (a.state && a.state.carry && a.state.carry.R === gPose) a.armPose('R', 'phone');   // (a glance in progress)
+    glanceOn = false; glanceK = 0;
     if (a.held && a.held.R) a.held.R.visible = true;
     try { a.bones.head.scale.set(1, 1, 1); } catch (e) { /* rig */ }
     try { a.setOpacity(1); if (a.tint && a.tint.amount) a.setTint(null, 0); a.visible(true); } catch (e) { /* rig */ }
@@ -1093,7 +1156,8 @@ const Player = (() => {
   function poseSnapshot() {
     const a = actor;
     if (!a || !a.state || !a.state.carry) return null;
-    return { L: a.state.carry.L, R: a.state.carry.R, hL: a.held ? a.held.L : null, hR: a.held ? a.held.R : null };
+    // (a glance under way is recorded as the plain carry: its pose never comes back after the scene)
+    return { L: a.state.carry.L, R: a.state.carry.R === gPose ? 'phone' : a.state.carry.R, hL: a.held ? a.held.L : null, hR: a.held ? a.held.R : null };
   }
   function poseRestore(snap) {
     const a = actor;
@@ -1153,7 +1217,9 @@ const Player = (() => {
     get surface() { return surface(); },
     set surfaceOverride(v) { footSurfaceOverride = v || null; },
     get directionHeld() { return !!hold; },
-    WEAPONS, WALK, RUN, CRAWL,
+    get glancing() { return glanceOn; },                          // CONTRACT+ the glance (hold the phone key)
+    get glance() { return glanceK; },
+    WEAPONS, WALK, RUN, CRAWL, GLANCE,
   };
   return api;
 })();

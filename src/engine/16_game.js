@@ -399,13 +399,22 @@ const Game = (() => {
 
   // Esc → pause; Tab / M / C → items / map / phone (spec §3). Nothing opens over a capture (choice, keypad, in-world
   // screen), a room transition or death; Tab / M / C also wait while a blocking script owns the input.
+  // CONTRACT+ the phone key is a TAP or a HOLD: a tap (released within Player.GLANCE.tap, 0.25 s) opens the phone menu
+  // as it is RELEASED; holding it is Player's glance (the phone raised in the world, no menu), so a hold never flashes
+  // the menu. A press that came while nothing could open never opens it later.
+  let phoneTap = false;
   function shortcuts() {
-    if (Menus.isOpen() || UI.capturing() || World.transitioning || Player.dead || flow) return;
-    if (Input.pressed('pause')) { Input.consume('pause'); openMenu('pause'); return; }
-    if (Script.busy) return;
-    if (Input.pressed('inventory')) { Input.consume('inventory'); openMenu('items'); }
-    else if (Input.pressed('map')) { Input.consume('map'); openMenu('map'); }
-    else if (Input.pressed('phone')) { Input.consume('phone'); openMenu('phone'); }
+    if (Menus.isOpen() || UI.capturing() || World.transitioning || Player.dead || flow) { phoneTap = false; return; }
+    if (Input.pressed('pause')) { Input.consume('pause'); phoneTap = false; openMenu('pause'); return; }
+    if (Script.busy) { phoneTap = false; return; }
+    if (Input.pressed('inventory')) { Input.consume('inventory'); phoneTap = false; openMenu('items'); return; }
+    if (Input.pressed('map')) { Input.consume('map'); phoneTap = false; openMenu('map'); return; }
+    const tap = (Player.GLANCE && Player.GLANCE.tap) || 0.25;
+    if (Input.pressed('phone')) phoneTap = true;
+    else if (phoneTap && Input.released('phone')) {
+      phoneTap = false;
+      if (Input.releasedAfter('phone') < tap) { Input.consume('phone'); openMenu('phone'); }
+    } else if (phoneTap && (!Input.down('phone') || Input.heldTime('phone') >= tap)) phoneTap = false;   // a hold: the glance
   }
   function openMenu(name, o = {}) {
     return quiet(Promise.resolve(Menus.open(name, o)).then((r) => { if (r === 'title') goTitle(); return r; }));

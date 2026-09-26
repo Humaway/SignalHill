@@ -8,12 +8,13 @@
 // Keyboard (physical key positions, e.code):
 //   WASD / arrows move (and navigate menus: up/down/left/right), Shift run, F torch, E interact+confirm,
 //   Enter confirm, Space or right mouse ready, left click attack, Q quick-turn+decline, Tab inventory, M map,
-//   C phone, Esc pause+cancel (Backspace also cancels), hold Esc 1 s = skip, ` debug.
+//   C phone (a tap opens the phone menu on release, a hold is Player's glance), Esc pause+cancel (Backspace also
+//   cancels), hold Esc 1 s = skip, ` debug.
 //   In menu context the right mouse button means cancel instead of ready.
 // Gamepad (standard mapping):
 //   left stick move (and menu nav), A interact+confirm, B quick-turn+cancel+decline, X attack, Y torch,
 //   LT ready, RT (or L3) run, Start pause (hold 1 s = skip), Select/Back/View map, D-pad navigates menus;
-//   in play the D-pad also gives phone (up) and inventory (down), LB is a second phone button and
+//   in play the D-pad also gives phone (up: tap / hold as C) and inventory (down), LB is a second phone button and
 //   RB / R3 open the inventory. (On most pads "View" *is* Select/Back, so the spec's "Select map / View
 //   inventory" cannot both be honoured on button 8 — map keeps Select, inventory moves to RB, R3 and D-pad down.)
 //   Right stick feeds drag() for examine rotation.

@@ -54,6 +54,13 @@
 //   number is in Phone.TUNE (PHONE_TUNE — tests may change it). Overrides (G.bars …) still show exactly as authored and
 //   fn overrides get this reading as `auto`. reading adds {signal, source, aware, target, lag, jitter, phantom,
 //   phantoms}. Phone.signalMode → 'unreliable' | 'classic'.
+//   * no always-on meter: the bars HUD (UI.bars {show}) is hidden unless Aidan GLANCES at the phone (Player.glancing:
+//     the phone key held ≥ 0.25 s — shown whatever the reading, empty bars too), an override supplies the bars, a call
+//     rings / is live, or a Phone.display insert is up (those three by the old rule: authored beats look as authored);
+//     the phone menu's status row and the screen in his hand (drawScreen) always show the lagged / phantom reading.
+//     CLASSIC keeps the old always-on rule (the glance shows it too).
+//   * the first real reading (S.done['signal:real']) or the first phantom in UNRELIABLE shows UI.prompt(TUNE.teach =
+//     'Hold {phone}: check your phone.', {id:'signal_glance'}) — once per save (S.done['prompt:signal_glance']).
 const Phone = (() => {
   const LCD_ON = '#38d2c6', LCD_MID = '#1f9d94', LCD_DIM = '#0f5a55', LCD_OFF = '#07201e', LCD_BG = '#010504';
   const clamp = U.clamp;
@@ -87,6 +94,7 @@ const Phone = (() => {
     phantomStatic: [0.12, 0.4],                // the static through the hold: from → to (× peak / 3, at least half)
     phantomTell: 0.4,                          // the chance of one fake tell: an EFTPOS beep, a buzz or distant keys
     seed: 0x51c4a1,
+    teach: 'Hold {phone}: check your phone.',  // the one-time prompt (first real reading / first phantom, UNRELIABLE)
   };
   const un = { mode: null, L: 0, J: 0, n: 0, kind: null, src: null, target: 0, dist: Infinity, quietT: 0, quietU: null, ph: null, realT: 0, rng: null, jrng: null, phantoms: 0, fromPh: false };
 
@@ -192,6 +200,9 @@ const Phone = (() => {
     return false;
   }
   const phantomGate = () => !!S && (S.chapter || 0) >= PHONE_TUNE.minChapter && !!(S.done && S.done['signal:real']);
+  const glancing = () => { try { return hasPlayer() && !!Player.glancing; } catch (e) { return false; } };
+  // the first real reading (or the first phantom) in UNRELIABLE teaches the glance, once per save (UI.prompt's id)
+  function teachGlance() { if (signalMode() === 'unreliable') ui('prompt', PHONE_TUNE.teach, { id: 'signal_glance' }); }
   function seedSignal() {
     const base = ((PHONE_TUNE.seed >>> 0) ^ U.hash(`${(S && S.chapter) || 0}|${Math.floor((S && S.stats && S.stats.time) || 0)}|${(S && S.playthrough) || 1}`)) >>> 0;
     un.rng = U.rng(base);
@@ -207,6 +218,7 @@ const Phone = (() => {
     S.done = S.done || {};
     S.done['signal:real'] = true;
     try { Bus.emit('signal:real'); } catch (e) { console.error('[Phone] signal:real', e); }
+    teachGlance();
   }
   function startPhantom() {
     const T = PHONE_TUNE, r = un.rng;
@@ -217,6 +229,7 @@ const Phone = (() => {
     un.ph = { t: 0, peak, rise, hold, fall, tell, tellAt: rise + r() * Math.min(1.5, hold * 0.5), told: false, top: 0 };
     un.phantoms++;
     try { Bus.emit('signal:phantom', { peak, tell }); } catch (e) { console.error('[Phone] signal:phantom', e); }
+    teachGlance();
   }
   function endPhantom() { un.ph = null; un.quietT = 0; un.quietU = null; }
   // the phantom's own envelope → {v (bars, continuous), stat}
@@ -424,7 +437,14 @@ const Phone = (() => {
     st.staticV = dt > 0 ? U.damp(st.staticV, clamp(stat), 5, dt) : clamp(stat);
     st.n = n; st.mode = mode; st.battery = battery;
     try { if (typeof Snd !== 'undefined' && Snd.staticLevel) Snd.staticLevel(st.staticV < 0.01 ? 0 : st.staticV); } catch (e) { /* audio */ }
-    ui('bars', n, { mode, battery, letterbox: !!(fromOv && r.letterbox) });   // {letterbox:true}: shown under the letterbox too
+    // the meter on screen: shown while Aidan glances at the phone (hold C) in either mode. Otherwise CLASSIC keeps the
+    // old rule (it comes with bars); UNRELIABLE has no always-on meter: the old rule while a scripted override supplies
+    // the bars, a call rings or is live, or an insert is up (authored beats show as authored), else hidden — the static,
+    // the tells and the phone's own screen in his hand carry it
+    let show = null;
+    if (glancing()) show = true;
+    else if (sm !== 'classic') show = fromOv || (st.ring && st.ring.live) || st.inCall || st.display ? null : false;
+    ui('bars', n, { mode, battery, letterbox: !!(fromOv && r.letterbox), show });   // {letterbox:true}: shown under the letterbox too
     refreshScreen(dt);
   }
 

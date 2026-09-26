@@ -751,6 +751,37 @@
       K.box(122, 0, -22, 44, 14, 26, { tex: 'render_cracked', color: '#5f625c' }, { shadow: false });
       for (let i = 0; i < 9; i++) K.box(102 + i * 4.6, 3.2, -8.9, 2.2, 1.3, 0.1, { color: '#1a2222', roughness: 0.2, metalness: 0.4 }, { shadow: false });
       for (let i = 0; i < 9; i++) K.box(102 + i * 4.6, 7.2, -8.9, 2.2, 1.3, 0.1, { color: i === 5 ? '#3a4442' : '#1a2222', roughness: 0.2, metalness: 0.4 }, { shadow: false });
+      // (gap sweep) past the entrance the road used to stop at an edge over the white, the hospital a box in the air:
+      // now the car park's bitumen runs on behind its low wall and hedge, the multi-storey stands on the south side
+      // (decks, parapets, columns, dark inside), the retaining wall turns the corner, the hospital stands on the lot
+      {
+        const y0 = rrY(RR7.L), CON = { tex: 'concrete', color: '#8a8982' }, PAR = { tex: 'concrete', color: '#96958d' };
+        K.box(125, y0 - 6, -16.75, 58, 6, 46.5, { tex: 'bitumen', color: '#5e5e5a' }, { shadow: false });
+        K.box(125.15, y0 - 6, 18.25, 57.7, 6, 23.5, { tex: 'concrete', color: '#76756e' }, { shadow: false });
+        K.box(97.6, y0, -27.5, 0.35, 0.7, 25, { tex: 'brick', color: '#7a6a5a' }, { shadow: false });
+        for (let z = -39; z < -15.5; z += 2.2) K.prop('shrub', 98.3, z, 0, { w: 2.1, h: 1.1, dead: z % 3 < 1, y: y0, collide: false });
+        for (const z of [-4.3, 4.3]) K.prop('bollard', 96.6, z, 0, { variant: 'concrete', y: y0 });
+        for (let z = -36; z < -8; z += 2.6) K.box(106, y0 + 0.004, z, 5, 0.01, 0.09, { color: '#c8c6bc', roughness: 0.8 }, { shadow: false });
+        K.prop('car', 108.5, -14.3, 92, { color: '#3a4a58', y: y0 });
+        K.prop('hatchback', 108.4, -22.1, 88, { color: '#6d2622', y: y0 });
+        K.prop('streetlight', 99, -8.5, 90, { lit: false, y: y0, collide: false });
+        // the multi-storey on the south side (the car park's west edge seen from the road): three decks
+        K.box(115, y0, 17.25, 37, 0.02, 18.5, { tex: 'concrete', color: '#5f5e59' }, { shadow: false });
+        for (const dy of [2.9, 5.8, 8.7]) {
+          K.box(115, y0 + dy, 17.25, 37, 0.35, 18.5, CON, { shadow: false });
+          K.box(96.6, y0 + dy + 0.35, 17.25, 0.2, 0.95, 18.5, PAR, { shadow: false });
+          K.box(115, y0 + dy + 0.35, 8.1, 37, 0.95, 0.2, PAR, { shadow: false });
+        }
+        for (let z = 8.5; z <= 26.1; z += 5.85) K.box(96.8, y0, z, 0.5, 8.7, 0.5, CON, { shadow: false });
+        for (let x = 102; x < 133; x += 6.8) K.box(x, y0, 8.3, 0.5, 8.7, 0.5, CON, { shadow: false });
+        for (const dy of [0, 2.9, 5.8]) K.box(117, y0 + dy + 0.35, 18, 32, 2.55, 15, { color: '#111414', roughness: 1 }, { shadow: false });
+        K.box(115, y0, 26.4, 37, 9.95, 0.25, { tex: 'concrete', color: '#7c7b74' }, { shadow: false });
+        K.box(98.4, y0, 24.6, 3.6, 11.2, 3.6, { tex: 'render_cracked', color: '#8e8c82' }, { shadow: false });
+        K.plane(96.45, y0 + 3.9, 17.5, 1.8, 0.62, fullTex(), { rotY: -90, emissive: 1.3 });
+        // the hill's retaining wall turns north at the corner; the grass behind it
+        K.box(RR7.L + 1.15, -0.2, -fp - 4.25, 0.3, 3.0, 8.3, { tex: 'concrete', color: '#7e7d76' }, { shadow: false });
+        K.box(RR7.L + 0.55, -0.2, -fp - 0.1, 1.1, 3.0, 0.3, { tex: 'concrete', color: '#7e7d76' }, { shadow: false });
+      }
 
       // ---- exits ----------------------------------------------------------------------------------------------------
       K.exit({ id: 'c7_ringroad:office', box: [0, -6.4, 0.9, 6.4], to: 'c5_ringroad', entry: 'office', when: () => !!ROOMS.c5_ringroad, blockedMsg: 'The office is behind me. [beat] Keep going.' });
@@ -871,17 +902,57 @@
       K.examine(12.6, 0.9, 1.0, ['A sand bin full of butts. The nurses come out here.', 'Came.'], { id: 'c7cp:butts', r: 1.2 });
       K.examine(22.2, 1.5, 0.45, ['"District Hospital." [beat] She\'s in there.', 'Somewhere in there.'], { id: 'c7cp:doors', r: 1.2, when: () => !flag('c7_arrived') });   // (the dark glass beside the doors — never in front of them: it would take their E)
       K.examine(36.2, 2.6, 0.6, ['Emergency\'s round the side.', 'The side is just fog.'], { id: 'c7cp:emerg', r: 1.6 });
+      // (gap sweep) the hospital behind its facade: the ground floor's block (the lobby behind the doors left clear), a
+      // taller block set back above it with its window bands, the plant room — the facade was a card over the fog
+      {
+        const HM = { tex: 'render_cracked', color: '#9c9c90' }, HCAP = { tex: 'concrete', color: '#7e7d76' }, GL = { color: '#161c1c', roughness: 0.15, metalness: 0.45 };
+        K.box(8.35, 0, -13.15, 17.5, 9.2, 25.7, HM, { shadow: false });
+        K.box(31.05, 0, -13.15, 18.7, 9.2, 25.7, HM, { shadow: false });
+        K.box(19.4, 0, -14.2, 4.6, 9.2, 23.6, HM, { shadow: false });
+        K.box(20, 9.2, -13.3, 40.9, 0.3, 25.8, HCAP, { shadow: false });
+        K.box(20, 9.5, -17, 34, 6.3, 18, HM, { shadow: false });
+        K.box(20, 15.8, -17, 34.4, 0.35, 18.4, HCAP, { shadow: false });
+        for (const y of [10.4, 13.4]) K.box(20, y, -7.97, 32, 1.4, 0.08, GL, { shadow: false });
+        for (const y of [10.4, 13.4]) K.box(37.03, y, -17, 0.08, 1.4, 16, GL, { shadow: false });
+        K.box(26, 16.15, -19, 10, 2.6, 6, { tex: 'metal', color: '#4d5250' }, { shadow: false });
+        for (let i = 0; i < 6; i++) for (const y of [1.0, 4.3]) K.box(40.44, y, -3.2 - i * 4.1, 0.08, 1.5, 2.3, GL, { shadow: false });
+        for (let i = 0; i < 6; i++) K.box(40.46, 0.95, -3.2 - i * 4.1, 0.12, 0.06, 2.4, HCAP, { shadow: false });
+      }
 
       // ---- the multi-storey on the west: three decks, parapets, a ramp, FULL ------------------------------------------
       const MS = { x0: -17, x1: -0.35 };
+      const MSC = { tex: 'concrete', color: '#8a8982' }, MSP = { tex: 'concrete', color: '#96958d' };
       for (const y of [2.9, 5.8, 8.7]) {
-        K.box((MS.x0 + MS.x1) / 2, y, 14, MS.x1 - MS.x0, 0.35, 36, { tex: 'concrete', color: '#8a8982' }, { shadow: false });
+        // (the first deck has the ramp's hole in it: x −17…−11.8, z 9…26)
+        if (y === 2.9) {
+          K.box((MS.x0 + MS.x1) / 2, y, 2.5, MS.x1 - MS.x0, 0.35, 13, MSC, { shadow: false });
+          K.box((-11.8 + MS.x1) / 2, y, 17.5, MS.x1 + 11.8, 0.35, 17, MSC, { shadow: false });
+          K.box((MS.x0 + MS.x1) / 2, y, 29, MS.x1 - MS.x0, 0.35, 6, MSC, { shadow: false });
+          K.box(-11.9, y + 0.35, 17.5, 0.2, 0.95, 17, MSP, { shadow: false });
+        } else K.box((MS.x0 + MS.x1) / 2, y, 14, MS.x1 - MS.x0, 0.35, 36, MSC, { shadow: false });
+        for (const z of [-3.9, 31.9]) K.box((MS.x0 + MS.x1) / 2, y + 0.35, z, MS.x1 - MS.x0, 0.95, 0.2, MSP, { shadow: false });
         K.box(MS.x1 - 0.1, y + 0.35, 14, 0.2, 0.95, 36, { tex: 'concrete', color: '#96958d' }, { shadow: false });
         K.box(MS.x1 - 0.1, y - 0.25, 14, 0.24, 0.25, 36, { tex: 'concrete', color: '#6e6d67' }, { shadow: false });
       }
       for (let z = -3; z <= 31; z += 6.8) K.box(MS.x1 - 0.3, 0, z, 0.5, 8.7, 0.5, { tex: 'concrete', color: '#8f8e86' }, { shadow: false });
       K.box(-9, 0, 27, 6, 2.9, 0.3, { tex: 'concrete', color: '#7a7972' }, { shadow: false, rot: 0 });
-      K.box(-8, 1.2, 12, 10, 0.3, 4.2, { tex: 'concrete', color: '#7f7e77' }, { shadow: false, rot: 0 });
+      // (gap sweep) inside it: the rows of columns, the ground slab, the ramp up to the first deck along the back wall,
+      // the blank back wall with the level numbers, the stair cores at both ends, the roof's lamps — through the open
+      // decks the cameras used to see straight out into the fog, and the ramp was a slab hanging in the air
+      {
+        const MSW = { tex: 'concrete', color: '#7c7b74' }, CORE = { tex: 'render_cracked', color: '#8e8c82' }, HCAP0 = { tex: 'concrete', color: '#6e6d67' };
+        for (const x of [-5.9, -11.75]) for (let z = -3; z <= 31; z += 6.8) K.box(x, 0, z, 0.5, 8.7, 0.5, { tex: 'concrete', color: '#8f8e86' }, { shadow: false });
+        K.box(-8.5, 0, 14, 17, 0.02, 36, { tex: 'concrete', color: '#5f5e59' }, { shadow: false });                 // (to x 0: a crack showed under the low wall)
+        K.box(-17.12, 0, 14, 0.25, 9.95, 36.2, MSW, { shadow: false });
+        for (const [y, t] of [[1.6, 'G'], [4.5, 'LEVEL 1'], [7.4, 'LEVEL 2'], [10.3, 'ROOF']]) if (t !== 'ROOF') K.sign(t, -16.98, y, 3.6, 1.6, 0.5, { style: 'council', bg: '#1d5d78', fg: '#ffffff', rotY: 90 });
+        for (const z of [-2.35, 30.35]) { K.box(-15.2, 0, z, 3.6, 11.2, 3.7, CORE, { shadow: false }); K.box(-15.2, 11.2, z, 3.8, 0.15, 3.9, HCAP0, { shadow: false }); }
+        K.box(-13.38, 0, 30.35, 0.05, 2.1, 1.0, { tex: 'metal', color: '#5a6a6a' }, { shadow: false });
+        K.sign('STAIRS', -13.36, 2.4, 30.35, 0.8, 0.25, { style: 'council', bg: '#2e7d4a', fg: '#ffffff', rotY: 90 });
+        const run = 17, rise = 3.23, L = Math.hypot(run, rise), a = Math.atan2(rise, run) / D2R;
+        K.plane(-14.4, 0.02 + rise / 2, 17.5, 4.8, L, { tex: 'concrete', color: '#6e6d67' }, { rot: [-(90 - a), 0, 0], double: true });
+        K.plane(-11.95, 0.02 + rise / 2 + 0.44, 17.58, L, 0.9, MSP, { rot: [0, 90, a], double: true });
+        for (const z of [3, 25]) K.prop('streetlight', -8.5, z, 90, { y: 9.05, lit: false, collide: false });
+      }
       // ground level: a low wall along the edge, the entrance with its boom and the FULL sign
       for (const [z0, z1] of [[-1, 19], [25, 31]]) K.box(-0.5, 0, (z0 + z1) / 2, 0.3, 1.1, z1 - z0, { tex: 'concrete', color: '#8a8982' });
       K.collider(-0.8, -1, -0.2, 19, { h: 3 });
@@ -899,6 +970,28 @@
       for (let x = 13; x < 40; x += 2.2) K.prop('shrub', x, 30.9, 0, { w: 2.1, h: 1.1, dead: x % 3 < 1 });
       for (const x of [3.6, 12.4]) K.prop('bollard', x, 29.7, 0, { variant: 'concrete' });
       K.prop('sign_post', 12.8, 28.9, 180, { style: 'council', text: 'ENTRY\nVISITORS', bg: '#1d5d78', fg: '#ffffff', w: 0.5, h: 0.45 });
+      // (gap sweep) outside the south wall: the grass, the road in running south into the fog with its footpaths, gums
+      // and poles; east of the fence the ground falls away (a raw earth edge under the car park's side). The south
+      // cameras stand out past the wall — there used to be nothing under them.
+      {
+        const GR = { tex: 'grass', color: '#4a5244' };
+        K.box(10, -0.5, 55.2, 60, 0.49, 49.6, GR, { shadow: false });
+        K.box(8, -0.3, 55.1, 10, 0.3, 49.8, { tex: 'bitumen', color: '#3c3e3c' }, { shadow: false });
+        for (const x of [2.1, 13.9]) K.box(x, -0.3, 55.2, 1.8, 0.45, 49.6, 'footpath', { shadow: false });
+        for (let z = 33; z < 80; z += 6) K.box(8, 0.004, z, 0.12, 0.01, 3, { color: '#c8c6bc', roughness: 0.8 }, { shadow: false });
+        for (const [x, z, sc] of [[23.5, 38.5, 0.9], [34.5, 46, 1.0], [-7.5, 41, 0.85], [27, 58, 1.05]]) K.prop('gum_tree', x, z, x * 17, { scale: sc, collide: false });
+        for (const z of [40, 62]) K.prop('power_pole', 15.2, z, 0, { span: 22 });
+        K.prop('streetlight', 0.9, 48, 90, { lit: false, collide: false });
+        K.box(40.21, -5, 43.75, 0.42, 4.99, 72.5, { tex: 'dirt', color: '#5a5446' }, { shadow: false });
+        slab(K, 40.3, 26, 60, 60, [-2.5, -0.5, -4.2, -3.2], { tex: 'grass', color: '#353c32' });
+        slab(K, 40.3, 60, 60, 80, [-4.2, -3.2, -5.2, -4.6], { tex: 'grass', color: '#353c32' });
+        // past the road's blocker Summit Road climbs on east into the fog, the hillside with it
+        slab(K, 56, 1.5, 88, 7.5, [2.6, 6.8, 2.6, 6.8], { tex: 'bitumen', color: '#4a4b48' });
+        slab(K, 60, -14, 88, 1.5, [7.5, 11, 3.07, 6.75], { tex: 'grass', color: '#3a4236' });
+        slab(K, 60, 7.5, 88, 26, [3.07, 6.75, -0.5, 1.8], { tex: 'grass', color: '#353c32' });
+        slab(K, 60, 26, 88, 60, [-0.5, 1.8, -3.2, -1.2], { tex: 'grass', color: '#353c32' });
+        slab(K, 60, 60, 88, 80, [-3.2, -1.2, -4.6, -3.4], { tex: 'grass', color: '#353c32' });
+      }
 
       // ---- the east edge: chain-link, the Summit Road gate (z 1.5–7.5) -------------------------------------------------
       K.collider(40, 7.5, 40.3, 30.4, { h: 2.2 });
@@ -944,8 +1037,11 @@
       // (from the car park's own edge: a gap between the two floors would leave the open gate unwalkable)
       K.road(39.95, 1.5, 56, 7.5, { axis: 'x', markings: 'none', footpath: 0, kerb: false, slope: { y0: 0, y1: 2.6 } });
       K.collider(40.3, 1.2, 56, 1.5, { h: 2.5 }); K.collider(40.3, 7.5, 56, 7.8, { h: 2.5 });
-      slab(K, 40.3, -14, 60, 1.5, [2.2, 7.5, 0.1, 2.7], { tex: 'grass', color: '#3a4236' });
-      slab(K, 40.3, 7.5, 60, 26, [0.05, 2.6, -2.5, -0.5], { tex: 'grass', color: '#353c32' });
+      // (the banks meet the road's edges a little below them all the way up: a crack showed under the road)
+      slab(K, 40.3, -14, 56, 1.5, [2.2, 6.5, 0.02, 2.55], { tex: 'grass', color: '#3a4236' });
+      slab(K, 56, -14, 60, 1.5, [6.5, 7.5, 2.55, 3.07], { tex: 'grass', color: '#3a4236' });
+      slab(K, 40.3, 7.5, 56, 26, [0.02, 2.55, -2.5, -0.9], { tex: 'grass', color: '#353c32' });
+      slab(K, 56, 7.5, 60, 26, [2.55, 3.07, -0.9, -0.5], { tex: 'grass', color: '#353c32' });
       for (let x = 42; x < 56; x += 4.5) { K.prop('guardrail', x + 2.2, 1.35, 180, { len: 4.5, y: lerp(0, 2.6, (x + 2.2 - 40.3) / 15.7), collide: false }); }
       K.prop('power_pole', 47, 8.4, 0, { span: 20, y: 1.2 });
       K.prop('rf_sign', 52, 7.9, 180, { variant: 'post', y: lerp(0, 2.6, 11.7 / 15.7) });

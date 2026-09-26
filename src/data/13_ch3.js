@@ -723,6 +723,11 @@
       K.wall(10, 0, 10, 8, H, wall, { skirting: true });
       K.wall(10.075, 8, -0.075, 8, H, { tex: 'brick', color: '#7a6250' }, { openings: [{ at: 10.075 - FY.doorX, w: 1.9, h: 2.25 }, { at: 10.075 - 2.3, w: 2.2, h: 1.5, sill: 0.9, glass: true }] });
       K.door({ id: 'c3_foyer:doors', x: FY.doorX, z: 8, rot: 0, w: 1.8, style: 'glass_double', to: 'c3_forecourt', entry: 'doors' });
+      // outside the cutaway north wall, round the high camera: the floor, the east wall and the ceiling run on (its lens
+      // looked down past the end of the room into nothing)
+      K.box(5, -0.2, -1.1, 10.3, 0.2, 2.2, { tex: 'tile', color: '#8f8a7c' }, { shadow: false });
+      K.box(10.15, 0, -1.1, 0.3, H, 2.2, wall, { shadow: false });
+      K.box(5, H, -1.1, 10.3, 0.2, 2.2, { tex: 'plaster', color: '#b8b3a4' }, { shadow: false });
       K.door({ id: 'c3_foyer:hall', x: FY.hallX, z: 0, rot: 180, w: 0.95, style: 'wood', to: 'c3_hall', entry: 'foyer', sign: "OPERATORS' HALL", color: '#b89a72' });
       // the fog light through the glass, cold; the EXIT sign
       K.light('point', FY.doorX, 2.2, 9.3, { color: '#9fb4b0', intensity: 3.0, distance: 7.5, bank: 1, name: 'c3fy:fog' });
@@ -750,7 +755,7 @@
       K.animate(() => { if (S.taken && S.taken['c3_foyer:map']) { const p = World.obj && World.obj('c3fy_plan'); if (p && p.material && p.material.map) { p.material = K.mat({ color: '#c9c2ae', roughness: 1 }); } } });
       K.plane(0.06, 1.75, 2.3, 0.62, 0.97, honourTex(), { rotY: 90 });
       // ---- the north wall: the 1961 staff photo, the letter board, the stopped clock --------------------------------------
-      K.box(6.3, 1.2, 0.09, 1.46, 1.0, 0.05, { tex: 'wood', color: '#3a2a1a' });
+      K.plane(6.3, 1.7, 0.1, 1.46, 1.0, { tex: 'wood', color: '#3a2a1a' }, {});          // (a plane: the high camera sees the cutaway wall from behind)
       K.plane(6.3, 1.7, 0.12, 1.32, 0.87, staffTex(), {});
       K.plane(4.2, 1.55, 0.06, 0.8, 0.64, letterboardTex(), {});
       K.prop('clock', FY.hallX, 0.075, 0, { mount: 2.75, time: [2, 40] });

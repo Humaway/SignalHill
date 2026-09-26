@@ -50,6 +50,22 @@
   const C4 = { ring: null, far: [], esc: null, chase: null, fight: null, arm: null, armCam: false, podLed: null, bag: [], logs: null, pieces: null, lastCam: null };
   try { if (typeof window !== 'undefined' && window.SH) window.SH.c4 = C4; } catch (e) { /* tests only */ }
 
+  // a quad of ground in room coordinates, corners at heights yf(x, z) (planar when yf is linear over the box): drawn
+  // only, no floor — the land round a street beyond where he can walk
+  function C4_ground(K, x0, z0, x1, z1, yf, mat) {
+    const P = (x, z) => [x, yf(x, z), z];
+    const a = P(x0, z0), b = P(x0, z1), c = P(x1, z1), d = P(x1, z0);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([...a, ...b, ...c, ...d], 3));
+    const s = typeof mat === 'string' ? 1 / Tex.size(mat) : 0.3;
+    g.setAttribute('uv', new THREE.Float32BufferAttribute([a[0] * s, -a[2] * s, b[0] * s, -b[2] * s, c[0] * s, -c[2] * s, d[0] * s, -d[2] * s], 2));
+    g.setIndex([0, 1, 2, 0, 2, 3]); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, K.mat(mat)); m.receiveShadow = true; m.castShadow = false;
+    m.userData.ownedGeo = true;
+    K.mesh(m, { static: true });
+    return m;
+  }
+
   // ---------------------------------------------------------------------------------------------------------------
   // Canvas textures (drawn once, shared, never disposed)
   // ---------------------------------------------------------------------------------------------------------------
@@ -353,6 +369,17 @@
       // ---- NORTH: the cable company's despatch wall ----------------------------------------------------------------------
       K.wall(6, -4.36, 44.5, -4.36, 6.2, { tex: 'brick', color: '#8d7462' }, { thick: 0.3, grime: true });
       K.box(25.25, 6.2, -4.45, 38.8, 0.3, 0.55, { tex: 'concrete', color: '#7b7d77' });
+      // the despatch building behind its wall (never a card with the fog behind it): one block back 18 m, a taller store
+      // at its west end, parapet caps, a downpipe on each end
+      {
+        const BRK = { tex: 'brick', color: '#8d7462' }, CAP = { tex: 'concrete', color: '#7b7d77' }, NS = { shadow: false };
+        K.box(25.25, 0, -13.35, 38.5, 6.2, 17.7, BRK, NS);
+        K.box(25.25, 6.2, -22.1, 38.8, 0.3, 0.4, CAP, NS);
+        for (const x of [6.05, 44.45]) K.box(x, 6.2, -13.3, 0.4, 0.3, 17.8, CAP, NS);
+        K.box(14, 6.2, -14.5, 16, 1.9, 13, { tex: 'brick', color: '#7f6858' }, NS);
+        K.box(14, 8.1, -14.5, 16.3, 0.25, 13.3, CAP, NS);
+        for (const x of [5.9, 44.6]) K.cyl(x, 0, -4.7, 0.06, 6.2, { tex: 'metal', color: '#4a4f4c' }, { seg: 6 });
+      }
       K.prop('roller_door', 24, -4.15, 0, { w: 3.6, h: 3.0, open: 0, color: '#8a9088', y: wlY(24) + 0.15 });
       K.sign('SIGNAL HILL CABLE & LINE — DESPATCH', 24, wlY(24) + 3.8, -4.2, 4.8, 0.45, { style: 'shop', bg: '#2a3a44', fg: '#e8e4d2' });
       K.sign('NO PARKING\nDRIVEWAY IN CONSTANT USE', 30.4, wlY(30.4) + 1.9, -4.2, 0.9, 0.5, { style: 'council' });
@@ -367,7 +394,7 @@
       DR.forEach(([x, z, r], i) => K.prop('cable_drum', x, z, i % 2 ? 90 : 0, { radius: r, y: wlY(x) }));
       for (const [x, z] of [[51, -7.4], [69, -8.4], [82.4, -8.3]]) K.prop('cable_drum', x, z, 90, { radius: 0.6, y: wlY(x) + 1.62, variant: 'flat' });
       K.prop('hut', 76, -11.5, 0, { w: 4, d: 3, text: 'LINES DEPOT', y: wlY(76) - 0.05 });
-      K.box(66, wlY(66) - 0.1, -9, 42, 0.1, 9, { tex: 'gravel', color: '#77766c' }, { shadow: false });
+      C4_ground(K, 45, -16, 90, -4.45, (x) => wlY(x) - 0.01, { tex: 'gravel', color: '#77766c' });   // (it climbs with the lane: the drums sit on it)
       K.sign('TELECOM LINES DEPOT\nAUTHORISED VEHICLES ONLY', 47.4, wlY(47.4) + 1.55, -4.32, 1.4, 0.6, { style: 'council', bg: '#e8e4d2' });
       // ---- street furniture -------------------------------------------------------------------------------------------
       K.prop('streetlight', 14, -3.95, 0, { bank: 1 });
@@ -383,7 +410,19 @@
       K.box(17, wlY(17) - 1.4, 7.5, 32, 1.2, 6, { tex: 'grass', color: '#636b58' }, { shadow: false });
       K.prop('substation', 38.5, 7.2, 180, { w: 7, d: 5.2, y: wlY(38.5) });
       K.box(38.5, wlY(38.5) - 0.02, 7.2, 7.2, 0.05, 5.4, { tex: 'gravel', color: '#6f6e66' }, { shadow: false });
-      K.box(66, wlY(66) - 0.05, 6.5, 44, 0.06, 4.4, { tex: 'grass', color: '#5f6656' }, { shadow: false });
+      // the land round the lane: north behind the despatch and the depot, south from the substation on (falling away
+      // gently), round the bend at the bottom and on past the exchange's gate at the top
+      {
+        const GR = { tex: 'grass', color: '#5f6656' };
+        for (const [x0, x1] of [[-40, 0], [0, 90], [90, 125]]) {
+          C4_ground(K, x0, -50, x1, x1 > 0 ? -4.3 : -2.8, (x) => wlY(x) - 0.04, GR);    // (round the bend: under its footpath)
+          if (x1 > 33) for (const [z0, z1] of [[4.3, 10], [10, 45]]) C4_ground(K, Math.max(x0, 33), z0, x1, z1, (x, z) => wlY(x) - 0.04 - Math.max(0, z - 10) * 0.25, GR);
+        }
+        K.box(33.2, wlY(33) - 6, 24.6, 0.6, 6.05, 40.6, { tex: 'dirt', color: '#5a5448' }, { shadow: false });   // the end of that land above the drop
+        K.box(33.2, wlY(33) - 1.4, 7.2, 0.6, 1.4, 5.8, { tex: 'dirt', color: '#5a5448' }, { shadow: false });
+        K.prop('gum_tree', -8, -12, 30, { y: 0.05, seed: 44 });
+        K.prop('gum_tree', 58, 14, 150, { y: wlY(58) - 0.9, seed: 45 });
+      }
       K.prop('cable_drum', 52.2, 6.2, 0, { radius: 0.8, y: wlY(52.2) });
       K.prop('cable_drum', 55, 6.0, 0, { radius: 0.7, y: wlY(55), variant: 'flat' });
       K.prop('cable_drum', 74.5, 6.3, 90, { radius: 0.8, y: wlY(74.5) });

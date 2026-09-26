@@ -121,7 +121,7 @@ const META_KEY = 'signalhill.meta';
 function defaultMeta() {
   return {
     endingsSeen: [], results: [], stickers: {}, calibrated: false, completed: false,
-    options: { brightness: 1, noise: true, grain: 1, subs: 'medium', control: 'camera', shake: true, master: 0.9, effects: 0.9, music: 0.8, invertExamine: false, vibration: true },
+    options: { brightness: 1, noise: true, grain: 1, subs: 'medium', control: 'camera', shake: true, master: 0.9, effects: 0.9, music: 0.8, invertExamine: false, vibration: true, signal: 'unreliable' },
   };
 }
 let META = (() => {

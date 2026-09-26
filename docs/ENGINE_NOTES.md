@@ -498,6 +498,15 @@ other dead enemies aren't spawned again.
   hp, radius, hitbox(e), downs:false, invincible, threat, tell})`; `defineBoss(id, {async run(G, o)})` →
   `await G.boss(id)`.
 * Events: `Bus 'enemy:freed'(e)`, `'enemy:killed'(e)`. `Enemies.freedRow(points, {face})` for 8-1.
+* **Awareness** (the phone's UNRELIABLE signal reads only what has found Aidan): `Enemies.aware(e)` is true while the
+  enemy has noticed him and for `Enemies.AWARE.warm` (4) s after it lost him. Tethered: turning, offering, whipping,
+  holding him, knocked / downed / getting up — never idle facing away, seated, watching or freed. Reach: while it sees
+  him, any rage left, winding up / lunging / recovering, fists on a door. Unread: swarming or scattered — never resting.
+  Standard: the gaze and the 8 s it follows what it saw, hunt / follow mode, "Got a sec?", a puppet — never a plain
+  patrol. Borrowed: revealed (its tell is 'none' anyway). A **custom type or boss is aware whenever it is a threat**
+  unless its type has `aware: (e) => bool` (or `aware:false`); a spawn def's `aware` (bool | fn) overrides the type's.
+  `Enemies.nearestThreat(pos, {aware:true})` → only aware threats (the Phone's source); without the option every threat
+  counts, as before (the Player's torch flicker within 6 m, the CLASSIC signal).
 * **Hiding / AI:** `Enemies.visible(e, on)` (or `e.hidden = true`) hides an enemy — it is also no threat, not hittable
   and has no body collider; `Enemies.update` sets `e.obj.visible` from `e.hidden` every frame, so `actor.visible()`
   alone is undone. While a blocking script runs, during transitions and once Aidan is dead enemies get `ai=false`
@@ -537,6 +546,22 @@ other dead enemies aren't spawned again.
   voice played like any other (`G.sfx`, `Snd.loop`, positional, ducked with the rest); wrap every node in `own(node)`.
 * Phone: `Phone.ring(id, {until, cancelOnLeave})`, `Phone.cancel(id?)`, `Phone.bars(override)`, `Phone.note(text, {id, done})`, `Phone.display({title, big, lines,
   button})` for inserts (e.g. "CASE 118-2231 … CALL").
+* **The signal: UNRELIABLE (default) or CLASSIC** — `META.options.signal` (Options → SIGNAL; a missing key reads as
+  `'unreliable'`; `Phone.signalMode`), read every frame. CLASSIC is the old radar: the nearest threat of any kind within
+  20 m, its distance mapped to 1–5 bars at once. UNRELIABLE: only an **aware** threat transmits (above, §5); the shown
+  strength trails the true one (rise τ 1.2 s, fall τ 2.5 s, never slower than 0.2 bar/s) with a slow random walk of
+  ±0.6 bar; 5 bars only within 3 m; the static and the tells (beep per bar, pulse, battery drain, vibration) follow the
+  lagged reading and keep sounding while it fades. **Phantoms:** from Chapter 1 on, once `S.done['signal:real']` is set
+  (one second of play reading an aware threat — either mode; Bus `'signal:real'`), a quiet 50–140 s (Fog) / 35–90 s
+  (Outage) with no aware threat within 20 m brings a reading that is not there: 1–3 bars (rarely 4) over 1–2 s, 2–6 s
+  under rising static (~40 % with one fake tell: an EFTPOS beep, a buzz, distant keys), then gone (Bus
+  `'signal:phantom'({peak, tell})`). Never while an override, a call, a `Phone.display` insert, a cutscene or blocking
+  script, a menu, a keypad, an Outage transition or death owns things (one under way ends at once). Game time and a
+  seeded RNG (reseeded from S after `Phone.reset()`: a load replays the same schedule); every number is in `Phone.TUNE`.
+  **Scripted bars are untouched:** `G.bars` / `Phone.override` (numbers, `'noservice'`, `'flicker'`, climbs, fns) show
+  exactly as authored in both modes; an fn override's `auto` argument is the mode's own reading. `Phone.reading` adds
+  `signal, source (enemy id), aware, target (true bars), lag, jitter, phantom, phantomPeak, phantomTell, phantoms,
+  quiet` (the unreliable fields are null in CLASSIC). `tools/tests/signal.mjs` checks all of it.
 * Save: slots 0–2 + `'auto'`. `Game.startChapter(n)` takes `Save.autosave({room, entry, chapterStart:n})` with the
   chapter's start — always, even when Aidan already stands in that room — and continuing from it resumes at that entry
   and **re-runs the chapter's `begin(G, {resumed:true})`** (the envelope's `chapterStart` flag decides). A plain

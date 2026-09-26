@@ -1451,6 +1451,7 @@ const Enemies = (() => {
       }
     }
   }
+  const TETH_AWARE = new Set(['turn', 'offer', 'lash', 'hold', 'stun']);
   defineType('tethered', {
     hp: 30, radius: 0.3, height: 1.35, tell: 'eftpos', downs: true, rebuildDead: true, idleAnim: 'idle_hunched',
     create: tetheredCreate, update: tetheredUpdate, post: tethPost,
@@ -1462,6 +1463,9 @@ const Enemies = (() => {
     knockdown(e) { tethLashEnd(e, true); later(e, 0.85, () => { if (e.knocked && !e.resolved) e.actor.setAnim('lie_side', { blend: 0.5 }); }); return true; },
     onFreed: tetheredFreed, onDie: tetheredDie,
     threat: (e) => !e.resolved,
+    // (Enemies.aware) once it has noticed him: turning, offering, whipping, holding, fighting, getting up — never idle
+    // facing away, seated, watching or freed
+    aware: (e) => !e.resolved && !e.data.watching && e.state !== 'watch' && (e.aware === true || e.downed || e.knocked || TETH_AWARE.has(e.state)),
   });
 
   // per-enemy timers (game time)
@@ -1650,6 +1654,7 @@ const Enemies = (() => {
     const hit = hasWorld() && World.raycast ? World.raycast(e.pos.x, e.pos.z, p.x - e.pos.x, p.z - e.pos.z, d, { minH: 1.5, ignore: isEnemyCol }) : null;
     if (!hit || !hit.collider || hit.dist > 1.8) return;
     sfx('glass_knock', { pos: [hit.x, e.pos.y + 1.4, hit.z], n: 3 + Math.floor(Math.random() * 3), hard: D.rage > 60 });
+    D.knockAt = clock;
     e.actor.gesture('swing', { hand: 'L', dur: 0.7 });
     if (D.rage > 40 && Math.random() < 0.5) reachShout(e);
   }
@@ -1711,6 +1716,8 @@ const Enemies = (() => {
     knockdown(e) { if (e.state === 'lunge' || e.state === 'windup') e.state = 'rage'; later(e, 0.85, () => { if (e.knocked && !e.resolved) e.actor.setAnim('lie', { blend: 0.5 }); }); return true; },
     onDie(e, o) { e.actor.setTint('#7a2a20', 0.1, { skin: true }); defaultDeath(e, o); },
     threat: (e) => !e.resolved,
+    // (Enemies.aware) while it sees him, any rage left, winding up / lunging / recovering, fists on a door
+    aware: (e) => { const D = e.data; return D.rage > 0 || e.state === 'windup' || e.state === 'lunge' || e.state === 'recover' || clock - (D.seenT ?? -99) < 0.3 || clock - (D.knockAt ?? -99) < 2.5; },
   });
 
   // =================================================================================================================
@@ -1971,6 +1978,15 @@ const Enemies = (() => {
     onHit(e) { sfx('thud', { pos: P3(e.pos, 1.4), vol: 0.4 }); if (Math.random() < 0.4) e.actor.gesture('pen_click', { hand: 'L' }); return false; },
     stun() { return false; }, knockdown() { return false; },
     threat: (e) => !e.data.vanished && !e.hidden,
+    // (Enemies.aware) once it has seen him: the gaze and the 8 s it follows what it saw, hunt / follow mode, "Got a
+    // sec?" — never a plain patrol. A puppet (a script walks it at him) counts as aware.
+    aware: (e) => {
+      const D = e.data;
+      if (D.vanished || e.hidden) return false;
+      if (D._stdContact || e.puppet || e.def.puppet) return true;
+      if (D.seenT && clock - D.seenT < 8) return true;
+      return ctlOwns(e) ? ctl.mode === 'hunt' || ctl.mode === 'follow' : D.mode === 'hunt';
+    },
     remove(e) { const M = e.data.mirror; if (M && M.rt) { M.rt.dispose(); M.rt = null; } if (e.data.form) e.data.form.tex.dispose(); if (hasPlayer() && e.data._stdContact) Player.lock('standard', false); if (ctl && ctl.e === e) ctl.e = null; },
   });
   // e.clipboard(false): lowers the clipboard from the face (8-1 "The Mirror"); true raises it again
@@ -2401,6 +2417,7 @@ const Enemies = (() => {
       if (c && c.parent && hasWorld()) { c.parent.remove(c); World.build.group.add(c); e.data.keepCard = null; }
     },
     threat: (e) => !e.disguised && !e.resolved,
+    aware: (e) => !e.disguised,                              // (its tell is 'none' either way)
   });
 
   // =================================================================================================================
@@ -2664,6 +2681,7 @@ const Enemies = (() => {
     },
     stun() { return false; }, knockdown() { return false; },
     threat: () => true,
+    aware: (e) => e.data.swarm === 'swarm' || e.data.swarm === 'scatter',   // stirred, never resting on its wall
     threatDist(e, pos) { return unreadNearest(e, pos).d; },
     hitbox(e) { return e.data.M.filter((m, i) => i % 3 === 0).map((m) => ({ x: m.p.x, z: m.p.z, r: 0.15, y0: m.p.y - 0.3, y1: m.p.y + 0.3 })); },
   });
@@ -2695,6 +2713,7 @@ const Enemies = (() => {
       if (e.data.straight) stepStraight(e, dt);
       try { if (e.T.update) e.T.update(e, dt, ai); } catch (err) { console.error(`[Enemies] update ${e.id}`, err); }
       if (e.removed) continue;
+      if (!e.resolved) noteAware(e);
       stepFade(e, dt);
       if (e.removed) continue;
       if (e.actor && on) { e.actor.update(dt); }
@@ -2717,11 +2736,32 @@ const Enemies = (() => {
     const base = typeof t === 'function' ? !!t(e) : t !== false;
     return base && e.threat !== false;
   }
-  function nearestThreat(pos) {
+  // CONTRACT+ awareness — the Phone's unreliable signal (only what has found Aidan transmits). Enemies.aware(e) → true
+  //   while the enemy has noticed him and for AWARE.warm (4) s after it lost him. Each type decides through T.aware(e)
+  //   (the five above: see their defineType); a spawn def's `aware` (bool | fn(e)) overrides its type's; a type without
+  //   one (custom enemies, bosses) is aware whenever it is a threat. Enemies.AWARE = {warm} (tests may tune it).
+  const AWARE = { warm: 4 };
+  function rawAware(e) {
+    const f = e.def && e.def.aware !== undefined && e.def.aware !== null ? e.def.aware : e.T.aware;
+    if (f === undefined || f === null) return true;
+    if (typeof f !== 'function') return !!f;
+    try { return !!f(e); } catch (err) { console.error('[Enemies] aware', err); return false; }
+  }
+  function noteAware(e) { if (rawAware(e)) e.awareAt = clock; }
+  function aware(e) {
+    if (!e || e.removed || e.resolved || !active(e) || e.hidden) return false;
+    if (rawAware(e)) { e.awareAt = clock; return true; }
+    return clock - (e.awareAt ?? -Infinity) < AWARE.warm;
+  }
+  // nearestThreat(pos, {aware}) → {e, dist, tell} | null; CONTRACT+ o.aware: only enemies that are aware (above). Without
+  //   it every threat counts (the Player's torch flicker within 6 m; the CLASSIC signal).
+  function nearestThreat(pos, o) {
     if (!pos) return null;
+    const onlyAware = !!(o && o.aware);
     let best = null, bd = Infinity;
     for (const e of list) {
       if (!threatOf(e)) continue;
+      if (onlyAware && !aware(e)) continue;
       let d;
       if (e.T.threatDist) d = e.T.threatDist(e, pos);
       else d = Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) + Math.max(0, Math.abs(e.pos.y - pos.y) - 1.5);
@@ -2806,7 +2846,7 @@ const Enemies = (() => {
   Bus.on('chapter', () => { standard.stop(); lastTethVoice = -Infinity; });
 
   const api = {
-    spawn, update, clear, get: (id) => byId.get(id) || null, byType, nearestThreat, hitTest, lockTarget, defineType,
+    spawn, update, clear, get: (id) => byId.get(id) || null, byType, nearestThreat, aware, AWARE, hitTest, lockTarget, defineType,
     cutFree: (e) => (e && e.canCutFree ? cutFreeEnemy(e) : false), kill: (e, how = 'dead') => (e ? resolve(e, how) : false),
     freedRow, visible, standard,
     path: (ax, az, bx, bz, o) => Nav.path(ax, az, bx, bz, o || {}),

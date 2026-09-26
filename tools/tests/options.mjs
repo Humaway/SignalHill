@@ -17,7 +17,9 @@
 //   CAMERA SHAKE    → OFF: Cam.shake moves nothing (and a shake under way stops); ON: the camera shakes;
 //   MASTER / EFFECTS / MUSIC VOLUME → the audio bus gains follow;
 //   INVERT EXAMINE ROTATION → holding D in the items examine view turns the model the other way;
-//   VIBRATION       → OFF: no rumble reaches a (synthesised) gamepad; ON: it does.
+//   VIBRATION       → OFF: no rumble reaches a (synthesised) gamepad; ON: it does;
+//   SIGNAL          → CLASSIC: a dormant Tethered 8 m away (facing away, torch off) shows bars at once;
+//                     UNRELIABLE (the default): the same Tethered reads nothing (only what has found Aidan transmits).
 // Then the page is RELOADED: META.options come back exactly as set and apply at boot (brightness, grain, volumes, the
 // subtitle size). Prints `PASS options`.
 import fs from 'node:fs';
@@ -78,8 +80,10 @@ export default async function (page, h) {
   if (!(await openOptions())) { report('options', false, notes.join(' | ')); return; }
   const labels = await ev(h, 'return SH.mod.Menus._top.st.rows.map((r) => r.o.label)');
   notes.push(`Options rows: ${labels.join(', ')}`);
-  const want = ['BRIGHTNESS', 'NOISE EFFECT', 'GRAIN STRENGTH', 'SUBTITLE SIZE', 'CONTROL TYPE', 'CAMERA SHAKE', 'MASTER VOLUME', 'EFFECTS VOLUME', 'MUSIC VOLUME', 'INVERT EXAMINE ROTATION', 'VIBRATION'];
-  if (JSON.stringify(labels) !== JSON.stringify(want)) bad(`the Options list is not §2A's: ${labels.join(', ')}`);
+  // (§2A's list, plus SIGNAL — the unreliable-signal design's CLASSIC switch)
+  const want = ['BRIGHTNESS', 'NOISE EFFECT', 'GRAIN STRENGTH', 'SUBTITLE SIZE', 'CONTROL TYPE', 'CAMERA SHAKE', 'MASTER VOLUME', 'EFFECTS VOLUME', 'MUSIC VOLUME', 'INVERT EXAMINE ROTATION', 'VIBRATION', 'SIGNAL'];
+  if (JSON.stringify(labels) !== JSON.stringify(want)) bad(`the Options list is not §2A's (+ SIGNAL): ${labels.join(', ')}`);
+  if (defaults.signal !== 'unreliable') bad(`the SIGNAL default is ${JSON.stringify(defaults.signal)}, not 'unreliable'`);
   await ev(h, 'SH.mod.Render.render(0); return 1'); await h.shot(`${OUT}/options.png`);
 
   // ---- BRIGHTNESS: the calibration screen ---------------------------------------------------------------------------
@@ -221,9 +225,26 @@ export default async function (page, h) {
     notes.push(`VIBRATION: ON → ${r0} rumble effect(s) reach the pad; ${v1 ? 'ON' : 'OFF'} → ${r1}; ${v2 ? 'ON' : 'OFF'} → ${r2} (switching it on buzzes the pad once: ${r2menu} so far)`);
     if (!(r0 === 1 && v1 === false && r1 === 0 && v2 === true && r2 === 1)) bad('VIBRATION does not switch the rumble off and on');
   }
+  // ---- SIGNAL (a dormant Tethered 8 m away: CLASSIC reads it at once, UNRELIABLE not at all) ----------------------------
+  {
+    const probe = () => ev(h, `const P = SH.mod.Player; P.setTorch(false); const p = P.pos, y = P.yaw;
+      const x = p.x + Math.sin(y) * 8, z = p.z + Math.cos(y) * 8;
+      const e = SH.mod.Enemies.spawn({ id: 'options:teth', type: 'tethered', pos: [x, z], rot: y * 180 / Math.PI, anchor: [x, z], persist: false });
+      await SH.advance(0.6); const r = SH.mod.Phone.reading; const out = { bars: r.bars, signal: SH.mod.Phone.signalMode, aware: SH.mod.Enemies.aware(e), state: e.state };
+      e.remove(); await SH.advance(3); return out`);
+    const r0 = await probe();
+    await openOptions(); await row('SIGNAL'); await key('e');
+    const s1 = await persisted('signal', 'SIGNAL'); const live1 = await ev(h, 'return SH.mod.Phone.signalMode'); await closeAll();
+    const r1 = await probe();
+    await openOptions(); await row('SIGNAL'); await key('d');
+    const s2 = await persisted('signal', 'SIGNAL'); await closeAll();
+    const r2 = await probe();
+    notes.push(`SIGNAL: ${r0.signal} → a dormant Tethered 8 m off reads ${r0.bars} bar(s) (aware ${r0.aware}, ${r0.state}); ${s1} (Phone.signalMode ${live1} with the menu still open) → ${r1.bars}; ${s2} → ${r2.bars}`);
+    if (!(r0.signal === 'unreliable' && r0.bars === 0 && s1 === 'classic' && live1 === 'classic' && r1.bars > 0 && s2 === 'unreliable' && r2.bars === 0)) bad('SIGNAL does not switch between UNRELIABLE and CLASSIC live');
+  }
   // ---- persistence: reload the page ---------------------------------------------------------------------------------
   {
-    const setTo = { brightness: 1.35, noise: true, grain: 0.6, subs: 'large', control: 'tank', shake: false, master: 0.5, effects: 0.7, music: 0.3, invertExamine: true, vibration: false };
+    const setTo = { brightness: 1.35, noise: true, grain: 0.6, subs: 'large', control: 'tank', shake: false, master: 0.5, effects: 0.7, music: 0.3, invertExamine: true, vibration: false, signal: 'classic' };
     // set the rest through the screen as a player would (the values the steps above left are real already)
     await openOptions();
     await row('GRAIN STRENGTH'); while ((await opts()).grain > 0.61) await key('a');
@@ -235,6 +256,7 @@ export default async function (page, h) {
     await row('MUSIC VOLUME'); while ((await opts()).music > 0.31) await key('a');
     await row('INVERT EXAMINE ROTATION'); if (!(await opts()).invertExamine) await key('e');
     await row('VIBRATION'); if ((await opts()).vibration) await key('e');
+    await row('SIGNAL'); if ((await opts()).signal !== 'classic') await key('e');
     await row('BRIGHTNESS'); await key('e'); await waitMenu('calibrate');
     while ((await opts()).brightness < 1.34) await key('d');
     while ((await opts()).brightness > 1.36) await key('a');

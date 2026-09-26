@@ -34,6 +34,25 @@
 //   scripted voicemails.
 // CONTRACT+: Phone.answer() / Phone.decline() (tests, SH), ringing (call id | null), inCall, reading (bars, mode,
 //   battery, static, tell, dist), callLog(), voicemails(), voicemailText(i), reset(), tellOf(threat), unplayed.
+// CONTRACT+ THE UNRELIABLE SIGNAL (META.options.signal: 'unreliable' — the default, also for a missing key — or
+//   'classic'; read every frame, so a change in Options applies at once). CLASSIC is the radar above, unchanged: every
+//   threat, the bars mapped from its distance at once. UNRELIABLE:
+//   * only what has found Aidan transmits — the source is Enemies.nearestThreat(pos, {aware:true}) (Enemies.aware:
+//     a Tethered that has noticed him, a Reach that sees him / still rages / pounds a door, a stirred Unread, a
+//     Standard that has seen him or hunts; dormant ones read nothing; awareness stays warm 4 s);
+//   * the shown strength trails the true reading (rise τ 1.2 s, fall τ 2.5 s) with a slow random walk of about ±0.6
+//     bar on top; 5 bars only within 3 m; the static and every tell (the EFTPOS beep per bar, the pulse, the battery
+//     drain, the vibration) follow the lagged reading, and a tell keeps sounding while its reading fades;
+//   * phantoms: with no aware threat within 20 m and nothing else owning the phone or the player (override, call,
+//     Phone.display insert, cutscene or blocking script, menu, keypad, Outage transition, death, no control), after a
+//     quiet 50–140 s (Fog world) / 35–90 s (Outage) the reading climbs to 1–3 bars (rarely 4) over 1–2 s, holds 2–6 s
+//     under rising static — ~40 % of them with one subtle fake tell (an EFTPOS beep, a buzz, distant keys) — then
+//     fades. Only from Chapter 1 on, once S.done['signal:real'] is set (the first second of play with an aware threat
+//     reading in range — set in either mode; Bus 'signal:real'). Bus 'signal:phantom'({peak, tell}) as one starts.
+//   Game time (Phone.update's dt) and a seeded RNG (U.rng, reseeded from S at the first update after reset()); every
+//   number is in Phone.TUNE (PHONE_TUNE — tests may change it). Overrides (G.bars …) still show exactly as authored and
+//   fn overrides get this reading as `auto`. reading adds {signal, source, aware, target, lag, jitter, phantom,
+//   phantoms}. Phone.signalMode → 'unreliable' | 'classic'.
 const Phone = (() => {
   const LCD_ON = '#38d2c6', LCD_MID = '#1f9d94', LCD_DIM = '#0f5a55', LCD_OFF = '#07201e', LCD_BG = '#010504';
   const clamp = U.clamp;
@@ -52,6 +71,23 @@ const Phone = (() => {
     scrKey: '', scrT: 0,
   };
   let clock = 0;
+  // ---- the unreliable signal: tuning (Phone.TUNE) and state ----
+  const PHONE_TUNE = {
+    range: 20, full: 3,                        // m: nothing beyond `range`; 5 bars only within `full`
+    riseTau: 1.2, fallTau: 2.5,                // s: the shown strength trails the true one (time constants up / down)
+    minRate: 0.2,                              // bars/s: … and always arrives (an exponential alone never reaches a bar)
+    jitter: 0.6, jitterTau: 2.2,               // bars: the random walk's limit (σ ≈ 0.55 × that); s: its pace
+    hyst: 0.08,                                // bars: hysteresis on the bar count
+    realAfter: 1.0,                            // s of play reading an aware threat before S.done['signal:real']
+    quiet: { fog: [50, 140], outage: [35, 90] },   // s of quiet before a phantom (drawn once per interval)
+    minChapter: 1,                             // phantoms from this chapter on (and after a real reading)
+    phantomBars: [1, 3], phantomFour: 0.1,     // the peak: 1–3 bars, 4 with this chance
+    phantomRise: [1, 2], phantomHold: [2, 6], phantomFall: [1.5, 3],   // s
+    phantomStatic: [0.12, 0.4],                // the static through the hold: from → to (× peak / 3, at least half)
+    phantomTell: 0.4,                          // the chance of one fake tell: an EFTPOS beep, a buzz or distant keys
+    seed: 0x51c4a1,
+  };
+  const un = { mode: null, L: 0, J: 0, n: 0, kind: null, src: null, target: 0, dist: Infinity, quietT: 0, quietU: null, ph: null, realT: 0, rng: null, jrng: null, phantoms: 0, fromPh: false };
 
   // ---------------------------------------------------------------------------------------------------------------
   // Tells
@@ -134,6 +170,176 @@ const Phone = (() => {
   }
 
   // ---------------------------------------------------------------------------------------------------------------
+  // The unreliable signal (the default; see the header)
+  // ---------------------------------------------------------------------------------------------------------------
+  const signalMode = () => { try { return META && META.options && META.options.signal === 'classic' ? 'classic' : 'unreliable'; } catch (e) { return 'unreliable'; } };
+  const hasEnemies = () => typeof Enemies !== 'undefined' && !!Enemies && typeof Enemies.nearestThreat === 'function';
+  const hasPlayer = () => typeof Player !== 'undefined' && !!Player && !!Player.actor;
+  function awareNear() {
+    try { if (hasEnemies() && hasPlayer()) return Enemies.nearestThreat(Player.pos, { aware: true }); } catch (e) { /* not ready */ }
+    return null;
+  }
+  const scriptBusy = () => { try { return typeof Script !== 'undefined' && !!Script && (!!Script.busy || !!Script.cutscene); } catch (e) { return false; } };
+  // the player is playing: control, no blocking script, no menu
+  const playerFree = () => { try { return hasPlayer() && !Player.dead && !!Player.canControl && !scriptBusy() && !menusOpen(); } catch (e) { return false; } };
+  // anything that owns the phone or the player rules a phantom out (and ends one under way)
+  function phantomBlocked() {
+    if (st.ov || st.ring || st.inCall || st.display) return true;
+    if (!playerFree()) return true;
+    try { if (typeof UI !== 'undefined' && UI && UI.capturing && UI.capturing()) return true; } catch (e) { /* ui */ }
+    try { if (typeof World !== 'undefined' && World && (World.outageBusy || World.transitioning)) return true; } catch (e) { /* world */ }
+    return false;
+  }
+  const phantomGate = () => !!S && (S.chapter || 0) >= PHONE_TUNE.minChapter && !!(S.done && S.done['signal:real']);
+  function seedSignal() {
+    const base = ((PHONE_TUNE.seed >>> 0) ^ U.hash(`${(S && S.chapter) || 0}|${Math.floor((S && S.stats && S.stats.time) || 0)}|${(S && S.playthrough) || 1}`)) >>> 0;
+    un.rng = U.rng(base);
+    un.jrng = U.rng((base ^ 0x9e3779b9) >>> 0);
+  }
+  const between = (r, a) => a[0] + r() * (a[1] - a[0]);
+  function gauss(r) { const a = Math.max(1e-9, r()), b = r(); return Math.sqrt(-2 * Math.log(a)) * Math.cos(2 * Math.PI * b); }
+  // S.done['signal:real']: the first second of play with an aware threat reading in range (either mode)
+  function markReal(real, dt, shown) {
+    if (!real || !playerFree()) { un.realT = 0; return; }
+    un.realT += dt;
+    if (un.realT < PHONE_TUNE.realAfter || !shown || !S || (S.done && S.done['signal:real'])) return;
+    S.done = S.done || {};
+    S.done['signal:real'] = true;
+    try { Bus.emit('signal:real'); } catch (e) { console.error('[Phone] signal:real', e); }
+  }
+  function startPhantom() {
+    const T = PHONE_TUNE, r = un.rng;
+    const lo = Math.round(T.phantomBars[0]), hi = Math.round(T.phantomBars[1]);
+    const peak = r() < T.phantomFour ? 4 : clamp(lo + Math.floor(r() * (hi - lo + 1)), 1, 4);
+    const rise = between(r, T.phantomRise), hold = between(r, T.phantomHold), fall = between(r, T.phantomFall);
+    const tell = r() < T.phantomTell ? ['eftpos', 'vibrate', 'keys'][Math.floor(r() * 3) % 3] : null;
+    un.ph = { t: 0, peak, rise, hold, fall, tell, tellAt: rise + r() * Math.min(1.5, hold * 0.5), told: false, top: 0 };
+    un.phantoms++;
+    try { Bus.emit('signal:phantom', { peak, tell }); } catch (e) { console.error('[Phone] signal:phantom', e); }
+  }
+  function endPhantom() { un.ph = null; un.quietT = 0; un.quietU = null; }
+  // the phantom's own envelope → {v (bars, continuous), stat}
+  function phantomStep(dt) {
+    const P = un.ph, T = PHONE_TUNE;
+    P.t += dt;
+    const top = P.peak + 0.5, t = P.t;
+    let k;
+    if (t < P.rise) k = U.ease.inOut(t / P.rise);
+    else if (t < P.rise + P.hold) k = 1;
+    else if (t < P.rise + P.hold + P.fall) k = 1 - U.ease.inOut((t - P.rise - P.hold) / P.fall);
+    else { endPhantom(); return null; }
+    if (P.tell && !P.told && t >= P.tellAt) {
+      P.told = true;
+      if (P.tell === 'eftpos') sfx('eftpos', { vol: 0.24, lp: 3600 });
+      else if (P.tell === 'vibrate') sfx('vibrate', { short: true, vol: 0.28 });
+      else sfx('keys_far', { vol: 0.38, pan: (un.rng() - 0.5) * 1.2 });
+    }
+    const hk = clamp((t - P.rise) / Math.max(0.01, P.hold));
+    const stat = k * U.lerp(T.phantomStatic[0], T.phantomStatic[1], hk) * Math.max(0.5, P.peak / 3);
+    return { v: top * k, stat };
+  }
+  function unreliableReading(dt) {
+    const T = PHONE_TUNE;
+    if (!un.rng) seedSignal();
+    const near = awareNear();
+    const d = near && isFinite(+near.dist) ? +near.dist : Infinity;
+    const kind = near && d < T.range ? tellOf(near) : null;
+    const silent = kind === 'none' || kind === 'nobars';
+    const target = !kind || silent ? 0 : d <= T.full ? 5 : 1 + ((T.range - d) / (T.range - T.full)) * 4;
+    un.src = kind ? near.e : null; un.dist = d; un.target = target;
+    // the lag: exponential toward the true strength (rise faster than fall), never slower than minRate
+    const diff = target - un.L;
+    if (diff !== 0 && dt > 0) {
+      let step = diff * (1 - Math.exp(-dt / (diff > 0 ? T.riseTau : T.fallTau)));
+      const minStep = T.minRate * dt;
+      if (Math.abs(step) < minStep) step = Math.sign(diff) * Math.min(minStep, Math.abs(diff));
+      un.L = clamp(un.L + step, 0, 5);
+    }
+    // the tell follows the reading: a silent source takes over at once; any other keeps its tell while its reading fades
+    if (kind && (silent || target > 0)) un.kind = kind;
+    else if (un.L <= 1e-3) un.kind = null;
+    // the slow random walk (Ornstein–Uhlenbeck, σ ≈ 0.55 × jitter, clamped at ±jitter)
+    if (dt > 0) {
+      const tau = Math.max(0.05, T.jitterTau), sd = T.jitter * 0.55;
+      un.J = clamp(un.J - (un.J * dt) / tau + sd * Math.sqrt((2 * dt) / tau) * gauss(un.jrng), -T.jitter, T.jitter);
+    }
+    // phantoms
+    const quiet = !(near && d < T.range);
+    const blocked = phantomBlocked(), gate = phantomGate();
+    if (!quiet) { un.quietT = 0; un.quietU = null; if (un.ph) endPhantom(); }
+    else if (un.ph && (blocked || !gate)) endPhantom();
+    else if (!un.ph && gate && !blocked && dt > 0) {
+      if (un.quietU === null) un.quietU = un.rng();
+      un.quietT += dt;
+      const q = S.outage ? T.quiet.outage : T.quiet.fog;
+      if (un.quietT >= U.lerp(q[0], q[1], un.quietU)) startPhantom();
+    }
+    const ph = un.ph ? phantomStep(dt) : null;
+    // what shows
+    let eff = un.L + un.J * clamp(un.L), fromPh = false, phStat = 0;
+    if (ph) { const e2 = ph.v + un.J * clamp(ph.v) * 0.7; phStat = ph.stat; if (e2 > eff) { eff = e2; fromPh = true; } }
+    eff = Math.max(0, eff);
+    let n = un.n;
+    const f = Math.min(5, Math.floor(eff));
+    if (f > n) n = eff >= f + T.hyst || f === 5 ? f : Math.max(n, f - 1);
+    else if (f < n && eff < n - T.hyst) n = f;
+    if (fromPh) n = Math.min(n, 4, un.ph ? un.ph.peak + 1 : 4);
+    else if (!(kind && d <= T.full)) n = Math.min(n, 4);
+    un.n = n; un.fromPh = fromPh;
+    const prox = clamp((eff - 1) / 4);
+    const tk = fromPh ? 'phantom' : un.kind;
+    st.tell = fromPh ? null : un.kind; st.dist = d; st.prox = prox;
+    markReal(!!kind && !silent, dt, un.L >= 1 || kind === 'battery');
+    // the Standard drains the battery instead; everything else lets it creep back
+    if (tk === 'battery') {
+      const tgt = 1 - prox * 0.999;
+      st.batt = st.batt > tgt ? Math.max(tgt, st.batt - 0.3 * dt) : Math.min(1, st.batt + 0.04 * dt);
+    } else st.batt = Math.min(1, st.batt + 0.05 * dt);
+    let shown = n, mode = 'normal', stat = prox * 0.85;
+    const live = eff >= 0.5;                     // a tell sounds while there is a reading at all
+    switch (tk) {
+      case 'phantom': stat = Math.max(stat, phStat); break;
+      case 'none': shown = 0; n = 0; stat = 0; break;
+      case 'nobars': shown = 0; n = 0; mode = 'none'; stat = 0; break;
+      case 'battery': shown = 0; stat = prox * 0.55; break;
+      case 'pulse': {
+        const period = U.lerp(0.8, 0.42, prox);
+        const before = st.pulse;
+        st.pulse = (st.pulse + dt / period) % 1;
+        if (live && st.pulse < before) sfx('heartbeat', { vol: 0.12 + 0.4 * prox });
+        shown = Math.round(heart(st.pulse) * n);
+        break;
+      }
+      case 'vibrate': {
+        st.vibT -= dt;
+        if (live && st.vibT <= 0) {
+          st.vibT = U.lerp(1.0, 0.45, prox);
+          const h = sfx('vibrate', { short: true, vol: 0.25 + 0.45 * prox });
+          if (!h || !h.dur) inp('rumble', 0.05, 0.3 + 0.4 * prox, 300);
+        }
+        break;
+      }
+      case 'eftpos':
+        if (n > st.beepN) sfx('eftpos', { vol: 0.3 + 0.4 * prox, lp: 5000 });
+        break;
+      default: break;
+    }
+    st.autoN = n;
+    st.beepN = n;
+    return { n: shown, mode, battery: st.batt, static: stat };
+  }
+  // a switch of META.options.signal mid-game: the new mode starts from what the phone shows
+  function switchSignal(to) {
+    const from = un.mode;
+    un.mode = to;
+    if (from === null) return;
+    endPhantom();
+    un.J = 0; un.realT = 0;
+    if (to === 'unreliable') { un.L = st.n; un.n = st.n; un.kind = st.tell; }
+    else st.autoN = st.n;
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
   // Overrides
   // ---------------------------------------------------------------------------------------------------------------
   function flickerFn() {
@@ -178,7 +384,17 @@ const Phone = (() => {
     if (dt === undefined) dt = (typeof Time !== 'undefined' && Time.dt) || 0;
     dt = Math.max(0, +dt || 0);
     clock += dt;
-    const auto = autoReading(dt);
+    const sm = signalMode();
+    if (sm !== un.mode) switchSignal(sm);
+    let auto;
+    if (sm === 'classic') {
+      auto = autoReading(dt);
+      // (the classic radar reads every threat; the gate for phantoms still notes a first real, aware reading)
+      if (!(S && S.done && S.done['signal:real'])) {
+        const a = awareNear(), ad = a && isFinite(+a.dist) ? +a.dist : Infinity, ak = a && ad < PHONE_TUNE.range ? tellOf(a) : null;
+        markReal(!!ak && ak !== 'none' && ak !== 'nobars', dt, true);
+      }
+    } else auto = unreliableReading(dt);
     let r = auto, fromOv = false;
     if (st.ov) {
       let v = null;
@@ -578,11 +794,17 @@ const Phone = (() => {
     if (st.ring) { st.ring.force = 'declined'; }
     st.ring = null; st.inCall = null; st.ov = null; st.display = null;
     st.batt = 1; st.battSeg = 4; st.autoN = 0; st.beepN = 0; st.n = 0; st.staticV = 0; st.scrKey = '';
+    resetSignal();
     ui('callPrompt', null);
     ui('bars', 0, { mode: 'normal', battery: 1 });
     try { if (typeof Snd !== 'undefined' && Snd.staticLevel) Snd.staticLevel(0); } catch (e) { /* audio */ }
   }
-  Bus.on('room:leave', () => { if (st.ov && st.ov.room) st.ov = null; st.autoN = 0; st.beepN = 0; });
+  // the unreliable signal starts clean (and reseeds from S at the next update: a load replays the same phantoms)
+  function resetSignal() {
+    un.L = 0; un.J = 0; un.n = 0; un.kind = null; un.src = null; un.target = 0; un.dist = Infinity; un.realT = 0; un.fromPh = false;
+    un.ph = null; un.quietT = 0; un.quietU = null; un.rng = null; un.jrng = null;
+  }
+  Bus.on('room:leave', () => { if (st.ov && st.ov.room) st.ov = null; st.autoN = 0; st.beepN = 0; un.L = 0; un.J = 0; un.n = 0; un.kind = null; if (un.ph) endPhantom(); });
   Bus.on('death', () => { st.ring = null; st.inCall = null; ui('callPrompt', null); });
 
   return {
@@ -592,6 +814,17 @@ const Phone = (() => {
     get ringing() { return st.ring ? st.ring.id : null; },
     get inCall() { return st.inCall ? st.inCall.id : null; },
     get unplayed() { return (S.voicemails || []).filter((v) => !v.played).length; },
-    get reading() { return { bars: st.n, mode: st.mode, battery: st.battery ?? st.batt, static: st.staticV, tell: st.tell, dist: st.dist, override: !!st.ov }; },
+    get reading() {
+      const unrel = un.mode !== 'classic';
+      return {
+        bars: st.n, mode: st.mode, battery: st.battery ?? st.batt, static: st.staticV, tell: st.tell, dist: st.dist, override: !!st.ov,
+        signal: un.mode || signalMode(), source: unrel && un.src ? un.src.id : null, aware: unrel ? !!un.src : null,
+        target: unrel ? un.target : null, lag: unrel ? un.L : null, jitter: unrel ? un.J : null,
+        phantom: unrel && !!un.ph, phantomPeak: un.ph ? un.ph.peak : null, phantomTell: un.ph ? un.ph.tell : null, phantoms: un.phantoms,
+        quiet: unrel ? un.quietT : null,
+      };
+    },
+    get signalMode() { return signalMode(); },
+    TUNE: PHONE_TUNE,
   };
 })();

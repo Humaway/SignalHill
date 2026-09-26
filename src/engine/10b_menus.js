@@ -2858,6 +2858,9 @@ const Menus = (() => {
     { k: 'music', label: 'MUSIC VOLUME', type: 'range', min: 0, max: 1, step: 0.1, vol: true },
     { k: 'invertExamine', label: 'INVERT EXAMINE ROTATION', type: 'bool' },
     { k: 'vibration', label: 'VIBRATION', type: 'bool' },
+    // CONTRACT+ the phone's signal: UNRELIABLE (only what has found Aidan transmits; lag, wobble, phantoms) or CLASSIC
+    // (every threat in range, mapped at once) — Phone reads META.options.signal every frame
+    { k: 'signal', label: 'SIGNAL', type: 'enum', values: ['unreliable', 'classic'], names: ['UNRELIABLE', 'CLASSIC'] },
   ];
   function optValue(o) {
     const v = META.options[o.k];

@@ -80,8 +80,12 @@ open it again later from Options → Brightness.
 ### Options
 
 Brightness, Noise Effect, Grain Strength, Subtitle Size (small / medium / large), Control Type (camera-relative or
-tank), Camera Shake, Master / Effects / Music volume, Invert Examine Rotation and Vibration (gamepad rumble). Choices
-are saved and applied the next time the game starts.
+tank), Camera Shake, Master / Effects / Music volume, Invert Examine Rotation, Vibration (gamepad rumble) and Signal.
+Choices are saved and applied the next time the game starts.
+
+**Signal** decides how far you can trust Aidan's phone. **Unreliable** (the default): the phone only picks up what has
+already found him, the bars are slow to catch up and never sit still, and now and then they show something that isn't
+there. **Classic**: the phone reacts to every monster within 20 m, at once, like a radar.
 
 ### The debug overlay
 

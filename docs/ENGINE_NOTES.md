@@ -611,7 +611,8 @@ tomorrow, yes: `SH.preset(name)`, `SH.ending(name)`, then `SH.skip()` + `SH.nav(
 
 **The whole game in one session** — `tools/tests/chain.mjs` (the chapter tests `tools/tests/ch0.mjs … ch8.mjs` export
 `play(h, {path, riddle, saveLoad})`; the chain runs them back to back from a real NEW GAME on the title, checks every
-hand-off, the ending, credits → fates → results → title, then LOAD GAME on the payphone saves and CONTINUE from every
+hand-off, the ending (the path's, chosen through its spec §4 branch — the deal / A ≥ F / F > A — with its scenes in
+order), credits → fates → results → title, then LOAD GAME on the payphone saves and CONTINUE from every
 chapter-start autosave, and prints a per-chapter timeline):
 ```
 node tools/build.mjs --out .build/chain.html

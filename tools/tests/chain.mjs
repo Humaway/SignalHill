@@ -31,8 +31,10 @@
 //      them, freed Tethered consistent, fate flags as the path decides them), no Outage / Outage bed / Outage textures
 //      leaking into a chapter that starts in the Fog world, the player gets control, zero errors.
 //   3. Chapter 8 hands over to Game.ending: the ending must be the path's (connected → connected, coverage → coverage,
-//      tomorrow → tomorrow, deal → tomorrow via 8-2A), its cutscenes must run, then credits → fates (not after
-//      tomorrow) → results → the title with EXTRA (tools/tests/endings.mjs playEnding).
+//      tomorrow → tomorrow, deal → tomorrow via 8-2A), chosen through the path's branch of spec §4 (read off F/A and
+//      acceptedDeal as the in-room scene starts: the deal / A ≥ F / F > A), its cutscenes must run in order, each over
+//      before the next (8-4 → E-C1 → E-C2 → E-C3 · 8-4 → E-OC0 → E-OC · 8-4 → E-FT0 → E-FT · 8-2A → E-FT), then
+//      credits → fates (not after tomorrow) → results → the title with EXTRA (tools/tests/endings.mjs playEnding).
 //   4. §14 saves: every payphone save the chapters made in 2 / 5 / 7 (the last one of each) is loaded from the title's
 //      LOAD GAME and must restore room, inventory, F/A, fate flags, chaseHits, calls, voicemails and the freed
 //      Tethered exactly as saved; then pause → QUIT TO TITLE. Every chapter-start autosave (0–8) is continued from
@@ -66,6 +68,15 @@ const ENDING_CS = {
   tomorrow: { must: ['E-FT0', 'E-FT'], never: ['E-C1', 'E-C2', 'E-C3', 'E-OC0', 'E-OC', '8-2A'] },
   deal: { must: ['8-2A', 'E-FT'], never: ['E-FT0', 'E-C1', 'E-C2', 'E-C3', 'E-OC0', 'E-OC'] },
 };
+// the ending's scenes in the order they must run, each one over before the next starts (8-4 "Ringing" → Game.endingFor →
+// the in-room scene → Game.ending's scenes; the deal: 8-2A → E-FT); `at` is the scene that starts once the ending is
+// chosen: F/A and acceptedDeal as it starts are what spec §4 decided on
+const ENDING_ORDER = {
+  connected: { order: ['8-4', 'E-C1', 'E-C2', 'E-C3'], at: 'E-C1' },
+  coverage: { order: ['8-4', 'E-OC0', 'E-OC'], at: 'E-OC0' },
+  tomorrow: { order: ['8-4', 'E-FT0', 'E-FT'], at: 'E-FT0' },
+  deal: { order: ['8-2A', 'E-FT'], at: 'E-FT' },
+};
 
 // ---- the page-side recorder (Bus events, teleports, begin() calls, saves) -----------------------------------------
 async function install(h, o = {}) {
@@ -77,7 +88,7 @@ async function install(h, o = {}) {
     const C = window.__chain = { ev: [], tp: {}, tpN: {}, begins: [], saves: [], autos: [], vm: 0 };
     const M = SH.mod, B = M.Bus;
     const at = () => ({ t: +((M.S.stats && M.S.stats.time) || 0).toFixed(1), real: +M.Time.real.toFixed(1), ch: M.S.chapter });
-    B.on('cutscene', (id, what) => C.ev.push({ k: 'cs', id, what, ...at() }));
+    B.on('cutscene', (id, what) => C.ev.push({ k: 'cs', id, what, F: M.S.F, A: M.S.A, deal: !!(M.S.flags && M.S.flags.acceptedDeal), ...at() }));
     B.on('call:ring', (id) => C.ev.push({ k: 'ring', id, ...at() }));
     B.on('call:end', (id, how) => C.ev.push({ k: 'call', id, how, ...at() }));
     B.on('chapter', (n) => C.ev.push({ k: 'chapter', n, room: M.World.room, ...at() }));
@@ -600,6 +611,27 @@ export default async function (page, h) {
       const started = new Set(evs.filter((e) => e.k === 'cs' && e.what === 'start').map((e) => e.id));
       for (const id of ENDING_CS[path].must) if (!started.has(id)) all.push(`BUG: the ${path} ending never ran ${id}`);
       for (const id of ENDING_CS[path].never) if (started.has(id)) all.push(`BUG: the ${path} ending ran ${id}`);
+      // in order, each scene over before the next starts (the last run of each: a CONTINUE may have replayed one)
+      const EO = ENDING_ORDER[path], idx = (id, what, from = 0) => { for (let i = evs.length - 1; i >= from; i--) if (evs[i].k === 'cs' && evs[i].id === id && evs[i].what === what) return i; return -1; };
+      const seq = [];
+      for (let k = 0; k < EO.order.length; k++) {
+        const id = EO.order[k], s = idx(id, 'start');
+        if (s < 0) { all.push(`BUG: the ${path} ending: ${id} never started`); continue; }
+        const e = idx(id, 'end', s);
+        if (e < 0) all.push(`BUG: the ${path} ending: ${id} never ended`);
+        const prevId = EO.order[k - 1];
+        if (prevId) { const pEnd = idx(prevId, 'end'); if (pEnd < 0 || pEnd > s) all.push(`BUG: the ${path} ending: ${id} started before ${prevId} was over`); }
+        seq.push(id + (evs.slice(s, e < 0 ? undefined : e + 1).some((x) => x.k === 'cs' && x.id === id && x.what === 'skip') ? ' (skipped)' : ''));
+      }
+      // how the ending was chosen (spec §4): the deal, else A ≥ F → Follow Up Tomorrow, else Connected / Out of Coverage
+      const atS = evs[idx(EO.at, 'start')];
+      let branch = '?';
+      if (atS) {
+        branch = atS.deal ? 'the accepted deal' : atS.A >= atS.F ? 'A ≥ F' : 'F > A';
+        const wantBranch = path === 'deal' ? 'the accepted deal' : path === 'tomorrow' ? 'A ≥ F' : 'F > A';
+        if (branch !== wantBranch) all.push(`BUG: the ${path} ending was chosen through ${branch} (F ${atS.F} / A ${atS.A}, acceptedDeal ${atS.deal}), want ${wantBranch}`);
+      }
+      console.log(`ending ${want} via ${branch}${atS ? ` (F ${atS.F} / A ${atS.A} as ${EO.at} starts${atS.deal ? ', deal accepted' : ''})` : ''}: ${seq.join(' → ')} → ${(pe.flow || ['?']).join(' → ')}${pe.flow && !pe.flow.includes('fates') ? ' (no fate cards)' : ''}`);
       const meta = await ev(h, 'return { seen: SH.mod.META.endingsSeen, results: (SH.mod.META.results || []).map((r) => r.ending), mode: SH.mode, items: SH.mod.Menus._top && SH.mod.Menus._top.st.list ? SH.mod.Menus._top.st.list.items.map((x) => x.label) : null }');
       console.log(`ending ${want}: scenes ${[...started].filter((id) => /^E-|^8-2A/.test(id)).join(' ')} · META.endingsSeen ${JSON.stringify(meta.seen)} · title menu ${JSON.stringify(meta.items)}`);
       if (meta.mode !== 'title') all.push(`BUG: not back at the title after the ending (${meta.mode})`);

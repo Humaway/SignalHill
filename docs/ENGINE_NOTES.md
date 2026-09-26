@@ -549,8 +549,11 @@ other dead enemies aren't spawned again.
 * `DIALOGUE.credits` (credits lines: strings, '' gaps, `{title}`, `{head}`, `{role,name}`, `{text,italic}`),
   `DIALOGUE.wai_payphone`, `DIALOGUE.reach` (Reach shouts).
 * UI for scripts: `UI.say`, `UI.subtitle`, `UI.message`, `UI.prompt(text, {id})` (once per id; `{interact}` style
-  tokens become key labels), `UI.card`, `UI.titleText`, `UI.textOnBlack`, `UI.keypad`, `UI.screen` (+ `UI.crmHtml`),
-  `UI.bars`, `UI.sting`, `UI.stamp`, `UI.letterbox`, `UI.fade`, `UI.noSignal`. Keypads keep digits typed while they
+  tokens — any Input action: `{phone}`, `{decline}` … — become the current device's key label: "Hold {phone}" reads
+  "Hold C" on a keyboard, "Hold D-PAD UP" on a pad), `UI.card`, `UI.titleText`, `UI.textOnBlack`, `UI.keypad`,
+  `UI.screen` (+ `UI.crmHtml`), `UI.bars(n, {mode, battery, letterbox, show})` (CONTRACT+ `show`: true = up, false =
+  hidden, null = the old rule — up with bars, gone 2.5 s after the last; the Phone decides it every frame, see the
+  signal below; `UI.barsShown` = the indicator's opacity), `UI.sting`, `UI.stamp`, `UI.letterbox`, `UI.fade`, `UI.noSignal`. Keypads keep digits typed while they
   are locked (opening, the wrong-code shake) and replay them; the press that opened one never counts; `check()`
   messages may use `[beat]` / `[long beat]`. UI acts on each press / typed character once per `Input.update`
   (`Input.frame`): when the game loop stalls for > 0.25 s (a slow SwiftShader frame) UI ticks itself, and a keypad used
@@ -713,9 +716,11 @@ screen's CONTINUE restores the latest save exactly before the chapter's test pla
 the death still count); `SH_RESUME=1` continues every
 chapter from its autosave before playing it; `SH_FROM_AUTO=.build/chainlogs/<path>_<riddle>_chN.auto.json` replays from
 a chapter-start autosave a run wrote; `SH_SIGNAL=unreliable|classic` sets Options → SIGNAL before NEW GAME (default:
-none, i.e. the game's UNRELIABLE) — the chain checks the Phone plays that mode, and its timeline ends with where the
-first real reading came and the phantoms each chapter met (Bus `'signal:real'` / `'signal:phantom'`). The release matrix: connected (normal, `SH_RIDDLE=hard`, `SH_RIDDLE=easy
-SH_ACTION=easy`, `SH_DEATH=1`), coverage, tomorrow (normal, `SH_ACTION=hard`), deal — each must end `PASS chain …` —
+none, i.e. the game's UNRELIABLE) — the chain checks the Phone plays that mode and that no phantom came in CLASSIC,
+before Chapter 1 or (from the title) before the first real reading, and its timeline ends with where the first real
+reading came and the phantoms each chapter met (Bus `'signal:real'` / `'signal:phantom'`). The release matrix: connected (normal, `SH_RIDDLE=hard`, `SH_RIDDLE=easy
+SH_ACTION=easy`, `SH_DEATH=1`, `SH_SIGNAL=classic`), coverage, tomorrow (normal, `SH_ACTION=hard`), deal — each must end
+`PASS chain …` —
 plus `tools/tests/stickers.mjs` (each Ollie sticker placed once in `src/data` and taken in its room; the first
 playthrough is not Yes; after its ending, EXTRA → NEW GAME+ starts playthrough 2 with the stickers and the bar, and
 Chapter 8's hut door opens onto E-YES → credits over the hold music → results → title), `tools/tests/endings.mjs`

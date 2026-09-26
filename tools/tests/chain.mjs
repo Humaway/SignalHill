@@ -625,6 +625,20 @@ export default async function (page, h) {
       mark = { err: await ev(h, 'return SH.errors.length'), begin: await ev(h, 'return window.__chain.begins.length') };
       if (bugs.length || row.ok === false) { failed = `chapter ${n}`; break; }
     }
+    // the phantoms keep their gate: none in CLASSIC, none before Chapter 1, none before the first real (aware) reading
+    // (that one only from the title: a chain started mid-game may carry S.done['signal:real'] in)
+    {
+      const fromTitle = !fromAuto && from === 0;
+      const sev = (await chainEv(h)).filter((e) => e.k === 'phantom' || e.k === 'sigreal');
+      const realAt = sev.findIndex((e) => e.k === 'sigreal');
+      sev.forEach((e, i) => {
+        if (e.k !== 'phantom') return;
+        const at = `chapter ${e.ch}, ${e.room}, ${e.t} s`;
+        if (sigMode === 'classic') all.push(`BUG: a phantom reading in CLASSIC (${at})`);
+        else if (!(e.ch >= 1)) all.push(`BUG: a phantom reading before Chapter 1 (${at})`);
+        else if (fromTitle && (realAt < 0 || i < realAt)) all.push(`BUG: a phantom reading before the first real one (${at})`);
+      });
+    }
     // ---- 3. the ending → credits → fates → results → title -------------------------------------------------------
     if (!failed) {
       const want = WANT_ENDING[path];

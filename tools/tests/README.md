@@ -84,10 +84,11 @@ They don't fail a run.
   * `SH_RESUME=1` plays every chapter from its autosave. `SH_FROM_AUTO=<file>` replays from an autosave a run wrote to
     `.build/chainlogs/`. `SH_SHOTS=<dir>` takes screenshots at the hand-offs.
   * `SH_SIGNAL`: `unreliable` | `classic`, set in Options before NEW GAME. Without it the chain plays the game's
-    default, the unreliable signal. The chain checks that the phone plays that mode. The timeline ends with a line
-    that says where the first real signal reading came and how many phantoms each chapter met.
-  * The wider release matrix adds connected with `SH_RIDDLE=hard`, with `SH_RIDDLE=easy SH_ACTION=easy` and with
-    `SH_DEATH=1`, plus tomorrow with `SH_ACTION=hard`.
+    default, the unreliable signal. The chain checks that the phone plays that mode, and that no phantom came in
+    classic, before Chapter 1 or before the first real reading. The timeline ends with a line that says where the
+    first real signal reading came and how many phantoms each chapter met.
+  * The wider release matrix adds connected with `SH_RIDDLE=hard`, with `SH_RIDDLE=easy SH_ACTION=easy`, with
+    `SH_DEATH=1` and with `SH_SIGNAL=classic`, plus tomorrow with `SH_ACTION=hard`.
 * **`ch0.mjs` … `ch8.mjs`**: one chapter each, played start to finish with the real mechanics. Aidan walks with real
   keys and uses doors, props and pickups with E. Keypads are typed on the keyboard, calls are answered with E or
   declined with Q, and payphone saves go through the §2A flow. Bosses are fought with real swings. Each test checks the

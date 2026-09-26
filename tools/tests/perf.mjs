@@ -383,7 +383,7 @@ export default async function (page, h) {
     for (const v of over.sort((a, b) => b.calls - a.calls)) console.log(`  ${v.id} (${v.world}${v.variant !== 'play' ? ', ' + v.variant : ''}) ${v.cam}: ${v.calls} calls, ${v.tris} tris, ${v.lights} lights, ${v.actors} actors in view (Aidan at ${v.pt})`);
   }
   if (devOver.length) console.log(`\n(the developer test rooms — ${[...new Set(devOver.map((v) => v.id))].join(', ')}, reachable only from the debug panel and deliberately overstuffed (ENGINE_NOTES §0.10) — have ${devOver.length} views over the game's budget, worst ${Math.max(...devOver.map((v) => v.calls))} calls: listed, not failed)`);
-  report('perf views', !over.length && !fails.length, over.length ? `${over.length} views over budget` : fails.length ? fails.slice(0, 5).join(' | ') : `${allViews} views within ${BUDGET.calls} calls / ${BUDGET.tris} triangles / ${BUDGET.lights} lights`);
+  report('perf views', !over.length && !fails.length, over.length ? `${over.length} views over budget` : fails.length ? fails.slice(0, 5).join(' | ') : `${allViews - devOver.length} views within ${BUDGET.calls} calls / ${BUDGET.tris} triangles / ${BUDGET.lights} lights${devOver.length ? ` (+ ${devOver.length} dev-room views listed above)` : ''}`);
 
   // ---- memory + program stability across 30 transitions ----
   if (MEM && runs.length > 1) {

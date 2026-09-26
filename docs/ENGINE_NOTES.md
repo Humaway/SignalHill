@@ -51,14 +51,15 @@ from it.
    within ~10 m of Aidan, or lighten the room with `fog:{density:0.05}`.
 10. **The draw-call budget (spec §2 / §14: ≤ 400 calls and ≤ 250k triangles per view — `tools/tests/perf.mjs`).**
     Every Rig figure is drawn by **one skinned batch per material** (`Rig.batch`, below): Aidan ≈ 28–30 calls, a
-    person / monster ≈ 16–22 (was 39–66), + ≈ 3–4 in the torch's shadow pass (one caster per major body segment —
+    person / monster ≈ 10–26 (most ≈ 20; was 39–66), + ≈ 3–4 in the torch's shadow pass (one caster per major body segment —
     `actor.trimShadows()`; held props and small parts don't cast; the torch shadow reaches 12 m). There is no
     occlusion culling: figures behind walls still draw if they're in the camera frustum — keep ≤ ~8 in any frustum.
     Game skips figures the fog already hides (beyond ≈ 2.45 / density m: 33 m outdoors, 80 m indoors — `Game.culled`)
     and every piece of the room wholly beyond 3 / density (`Game.staticCulled`), so long foggy streets full of figures
     are fine. The rest of the room: the static batches (§3 above) in cells sized by their weight, and everything that
-    moves or switches (door leaves, pickups, live props' parts) in skinned room batches — together ~100–250 calls per
-    view in the game's rooms. The developer `test_room` stays over budget by design (~45 props, 5 doors, one of every
+    moves or switches (door leaves, pickups, live props' parts) in skinned room batches — together ~70–200 calls per
+    view in the game's rooms (the worst game view, the summit road with 24 freed Tethered seated along it and ten
+    figures in frame: ≈ 350 calls, 232k triangles). The developer `test_room` stays over budget by design (~45 props, 5 doors, one of every
     monster, two worlds; its yard view ≈ 430 calls with five figures in frame — perf.mjs lists it, never fails it).
     **Batching, what to know:** `Rig.batch(root, {filter, cell, keepHidden})` draws the meshes under `root` that share
     a material as one `SkinnedMesh` whose bones are the meshes themselves (each keeps its own transform, animation and

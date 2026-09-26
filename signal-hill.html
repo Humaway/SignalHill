@@ -31084,6 +31084,7 @@ const Game = (() => {
     stage.t += dt;
     const a = stage.rb.animated;
     for (let i = 0; i < a.length; i++) { try { a[i](dt, stage.t); } catch (e) { a.splice(i--, 1); console.error('[Game] stage animation', e); } }
+    if (stage.rb.batch) { try { stage.rb.batch.check(); } catch (e) { console.error('[Game] stage batch', e); stage.rb.batch = null; } }
   }
   function stageClear() {
     if (!stage.rb) return;
@@ -31192,7 +31193,7 @@ const Game = (() => {
   // the Tethered's tether and box — set by Enemies) are culled with it
   function setCulled(a, off) {
     if (off) culled.add(a); else culled.delete(a);
-    // (parts drawn by the figure's batch — Rig.batch — stay on no layer at all: userData.rigHidden)
+    // (parts drawn by the figure's batch — Rig.batch — stay on the hidden layer 30: userData.rigHidden)
     const set = (o) => { if (o.userData.rigHidden) return; if (off) o.layers.set(CULL_LAYER); else o.layers.set(0); };
     a.root.traverse(set);
     if (Array.isArray(a.cullWith)) for (const g of a.cullWith) if (g && g.traverse) g.traverse(set);

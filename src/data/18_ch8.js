@@ -662,6 +662,15 @@
       K.prop('sign_post', 36.9, 11.3, 0, { style: 'council', text: 'SUMMIT RD\nMAST ACCESS ONLY\nNO THROUGH ROAD', w: 0.8, h: 0.6, post: 2.2 });
       K.examine(39.6, 0.4, 11.3, ['The chain\'s on the ground. The padlock\'s still locked.', 'Somebody cut the chain instead. [beat] Or it just let go.'], { id: 'c8su:chain', r: 1.4 });
       K.examine(36.9, 1.6, 11.0, ['"Summit Road. Mast access only. No through road."', 'No through road. [beat] It only goes up.'], { id: 'c8su:sign', r: 1.3 });
+      // (gap sweep) the hospital car park the gate opens from — its bitumen, the chain-link along its edges, a parked car,
+      // a dead lamp: the gate camera stood over nothing and the apron ended at an edge
+      K.box(45, -6, 26.1, 30, 5.995, 28, { tex: 'bitumen', color: '#5e5e5a' }, { shadow: false });
+      for (const [x0, x1] of [[30, 36.25], [43.75, 51.9], [51.9, 60]]) K.prop('chainlink', (x0 + x1) / 2, 12.2, 0, { len: x1 - x0, h: 2.2, collide: false });
+      for (let z = 12.2; z < 39; z += 6.8) K.prop('chainlink', 30.1, z + 3.4, 90, { len: 6.8, h: 2.2, collide: false });
+      for (let x = 32.5; x < 59; x += 2.6) K.box(x, 0.004, 21, 0.09, 0.01, 4.6, { color: '#c8c6bc', roughness: 0.8 }, { shadow: false });
+      K.prop('hatchback', 48.5, 21.2, 2, { color: '#1f2629' });
+      K.prop('car', 35.1, 21.4, 178, { color: '#6d2622' });
+      K.prop('streetlight', 31, 15.5, 90, { lit: false, collide: false });
 
       // ---- the telco work car on the apron (the tech who couldn't get up the hill) ---------------------------------------
       K.prop('car', 41.6, 2.2, 180, { color: '#e3e1da', variant: 'wagon', plate: 'TEL 4401', hazards: true, name: 'c8su:car' });
@@ -997,7 +1006,14 @@
       const dt = bags.g('dirt', { tex: 'dirt', color: '#6d6252' }), vg = bags.g('grass', { tex: 'grass', color: '#56604d' });
       for (const [a, b, c, d] of [[[0, -0.02, 0], [0, -0.02, 34], [-10, -6, 34], [-10, -6, 0]], [[30, -0.02, 34], [30, -0.02, 0], [40, -6, 0], [40, -6, 34]], [[30, -0.02, 0], [0, -0.02, 0], [0, -5, -10], [30, -5, -10]]]) quad(dt, a, b, c, d, 0.4, [0, 1, 0]);
       quad(vg, [0, 0, 20.1], [3, 0, 20.1], [3, 0, 34.2], [0, 0, 34.2], 0.5, [0, 1, 0]); quad(vg, [27, 0, 20.1], [30, 0, 20.1], [30, 0, 34.2], [27, 0, 34.2], 0.5, [0, 1, 0]);
-      K.box(15, -0.06, 40, 8, 0.06, 12, 'bitumen', { shadow: false });
+      // (gap sweep) south of the apron the hilltop falls away with the road coming up: the apron used to end at an edge
+      // over nothing under the apron camera
+      const bt = bags.g('road', { tex: 'bitumen', color: '#4a4b48' });
+      quad(bt, [11, -0.01, 34.2], [19, -0.01, 34.2], [19, -4, 62], [11, -4, 62], 0.4, [0, 1, 0]);
+      quad(vg, [0, 0, 34.2], [11, 0, 34.2], [11, -4, 62], [0, -5, 62], 0.5, [0, 1, 0]);
+      quad(vg, [19, 0, 34.2], [30, 0, 34.2], [30, -5, 62], [19, -4, 62], 0.5, [0, 1, 0]);
+      quad(dt, [0, -0.02, 34], [0, -5, 62], [-10, -11, 62], [-10, -6, 34], 0.4, [0, 1, 0]);
+      quad(dt, [30, -0.02, 34], [40, -6, 34], [40, -11, 62], [30, -5, 62], 0.4, [0, 1, 0]);
       bags.flush(K);
       C8_townLights(K, { cx: 15, cz: 10, y: -58, r0: 60, r1: 150, n: 220, seed: 812, opacity: 0.45 });
       K.exit({ id: 'c8_compound:road', box: [8, 33.5, 22, 34.3], to: 'c8_summit', entry: 'top', sound: 'steps' });

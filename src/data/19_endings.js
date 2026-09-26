@@ -611,6 +611,7 @@
       K.ceiling(OW, -4, W, 0, 2.7, 'ceiling_tile');
       K.wall(OW - 0.075, 0, OW - 0.075, -4.15, 2.7, wallM, { skirting: true });
       K.wall(OW - 0.1, -4.075, W + 0.15, -4.075, 2.7, wallM, { skirting: true });
+      K.wall(W + 0.075, -4.15, W + 0.075, -0.15, 2.7, wallM, { skirting: true });             // (gap sweep: its east side was open)
       K.prop('desk', CS.mon[0], -3.55, 0, { clutter: false, w: 1.6 });
       // (the chair pushed back from the desk: whoever sat here got up in a hurry)
       K.prop('office_chair', CS.mon[0] + 1.35, -2.35, 130, {});
@@ -634,9 +635,34 @@
       K.prop('poster', 14.2, -4.0, 0, { style: 'notice', text: 'CALL BACKS\nWITHIN 24 HRS', mount: 1.55 });
       K.light('fluoro', 14.5, 2.68, -2, { len: 1.2, diffuser: true, intensity: 6, distance: 7 });
       // ---- outside the glass: the footpath, the road, the facades opposite, bright overcast morning ----------------
-      K.box(W / 2, -0.06, 15, 40, 0.06, 4, { tex: 'footpath', color: '#c9c6bd' }, { shadow: false });
-      K.box(W / 2, -0.08, 20.5, 40, 0.06, 7, { tex: 'bitumen', color: '#5d5f5c' }, { shadow: false });
-      K.box(W / 2, -0.06, 25, 40, 0.06, 2, { tex: 'footpath', color: '#c9c6bd' }, { shadow: false });
+      K.box(W / 2, -0.06, 15, 78, 0.06, 4, { tex: 'footpath', color: '#c9c6bd' }, { shadow: false });
+      K.box(W / 2, -0.08, 20.5, 78, 0.06, 7, { tex: 'bitumen', color: '#5d5f5c' }, { shadow: false });
+      K.box(W / 2, -0.06, 25, 78, 0.06, 2, { tex: 'footpath', color: '#c9c6bd' }, { shadow: false });
+      // (gap sweep) the store is the ground floor of a building on a city street: offices above it, the shops either
+      // side, the block behind them — it used to stand alone, a box on a footpath with the morning sky round it
+      {
+        const UP = { tex: 'render_cracked', color: '#d8d2c4' }, UP2 = { tex: 'brick', color: '#a88e78' }, CAPM = { tex: 'concrete', color: '#b8b3a6' };
+        const GL = { color: '#3c4648', roughness: 0.12, metalness: 0.5 }, MUL = { tex: 'metal', color: '#9aa09c' };
+        K.box(W / 2, 3.18, D + 0.12, W + 0.8, 0.3, 0.14, CAPM, { shadow: false });
+        K.box(W / 2, 3.22, 4.44, W + 0.5, 8.4, 17.48, UP, { shadow: false });
+        for (const [x0, x1, mat] of [[-30, -0.25, UP2], [W + 0.25, 48, UP2]]) {
+          K.box((x0 + x1) / 2, 0, 3.07, x1 - x0, 4.5, 14.74, mat, { shadow: false });
+          K.box((x0 + x1) / 2, 4.5, 4.44, x1 - x0, 7.12, 17.48, mat, { shadow: false });
+        }
+        K.box(W / 2, 11.62, 4.44, 78.4, 0.4, 17.9, CAPM, { shadow: false });
+        for (const y of [4.3, 7.3]) {
+          K.box(W / 2, y + 0.9, D + 0.2, W - 0.6, 1.6, 0.06, GL, { shadow: false });
+          for (let x = 0.3; x <= W - 0.2; x += 2.9) K.box(x, y + 0.9, D + 0.24, 0.08, 1.6, 0.06, MUL, { shadow: false });
+        }
+        K.box(W / 2, 10.2, D + 0.2, W - 0.6, 1.1, 0.06, GL, { shadow: false });
+        for (const cx of [-15, -5.2, W + 5.2, W + 15]) for (const y of [5.6, 8.5]) K.box(cx, y, D + 0.2, 7.4, 1.5, 0.06, GL, { shadow: false });
+        for (const x of [-0.28, -8.55, W + 0.28, W + 8.55]) K.box(x, 0, D - 1.2, x === -0.28 || x === W + 0.28 ? 0.36 : 0.3, 4.5, 2.8, CAPM, { shadow: false });
+        for (const [x0, x1] of [[-30, -16.7], [W + 16.7, 48]]) K.box((x0 + x1) / 2, 0, 11.81, x1 - x0, 4.5, 2.74, UP2, { shadow: false });
+        K.prop('shopfront', -4.45, D + 0.12, 0, { w: 8, name: 'THE DAILY GRIND', variant: 'shop', lit: true, awning: true });
+        K.prop('shopfront', -12.65, D + 0.12, 0, { w: 8, name: 'DRY CLEANING', variant: 'shop', lit: true, awning: true });
+        K.prop('shopfront', W + 4.45, D + 0.12, 0, { w: 8, name: 'CITY POST', variant: 'shop', lit: true, awning: true });
+        K.prop('shopfront', W + 12.65, D + 0.12, 0, { w: 8, name: 'SHOE REPAIRS · KEYS', variant: 'repair', lit: true, awning: true });
+      }
       for (const x of [-1, 5, 13, 19]) K.plane(x, 0.0 - 0.045, 20.5, 2.4, 0.14, { color: '#e8e6dc', roughness: 0.6 }, { rot: [-90, 0, 0] });
       [['bank', 'CITY BANK'], ['pharmacy', 'CHEMIST'], ['shop', 'NEWS & LOTTO'], ['shop', 'SUSHI TRAIN']].forEach(([v, n], i) => K.prop('shopfront', -4 + i * 8.4, 26.2, 180, { w: 8, name: n, variant: v, lit: true, awning: true }));
       K.plane(W / 2, 11, 27.5, 60, 22, cityTex(), { rotY: 180, emissive: true, emissiveIntensity: 0.85 });

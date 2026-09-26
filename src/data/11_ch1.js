@@ -492,6 +492,19 @@
       K.door({ id: 'c1_carpark:fireexit', x: 14, z: -0.15, rot: 0, w: 0.95, style: 'fire', locked: true, lockMsg: 'It won\'t open from this side.', window: false });
       K.door({ id: 'c1_carpark:goods', x: 28, z: -0.15, rot: 0, w: 3.2, h: 2.9, style: 'roller', locked: true, lockMsg: 'It\'s locked.' });
       for (let x = 2; x < 41; x += 8.5) K.box(x, 0, 0.02, 0.25, 6.5, 0.12, { tex: 'concrete', color: '#857e70' });
+      // the Plaza itself behind that wall: one block of building (its west face turns the corner onto Relay Street, it
+      // runs on east past the retaining wall), a parapet cap, a plant room and a roof sign frame set back on the roof —
+      // never a free-standing wall with the fog behind it
+      K.box(28.2, 0, -14.3, 59.7, 6.5, 28, FAC, { shadow: false });
+      K.box(28.2, 6.5, -0.28, 59.9, 0.16, 0.56, { tex: 'concrete', color: '#6c6860' }, { shadow: false });
+      K.box(-1.52, 6.5, -14.3, 0.56, 0.16, 28, { tex: 'concrete', color: '#6c6860' }, { shadow: false });
+      K.box(24, 6.5, -9.5, 9, 2.4, 6, { tex: 'concrete', color: '#7a7468' }, { shadow: false });
+      K.box(24, 8.9, -9.5, 9.2, 0.12, 6.2, { tex: 'concrete', color: '#6c6860' }, { shadow: false });
+      for (const x of [34, 38]) K.box(x, 6.5, -2.2, 0.14, 2.6, 0.14, { tex: 'metal', color: '#4a4f4c' }, { shadow: false });
+      K.box(36, 8.3, -2.2, 4.6, 0.9, 0.1, { tex: 'metal', color: '#4a4f4c' }, { shadow: false });
+      // the far side of Relay Street through the driveway: the shops across the road, grey in the fog
+      K.box(-21.5, 0, 5, 3, 5.6, 30, { tex: 'render_cracked', color: '#8a8276' }, { shadow: false });
+      K.box(-19.9, 3.05, 5, 0.3, 0.35, 30, { color: '#2b2f2d' }, { shadow: false });
       K.sign('STAFF PARKING ONLY', 6.5, 2.4, 0.03, 2.6, 0.5, { style: 'council', bg: '#e8e2cc', fg: '#8a1f1a' });
       K.sign('FIRE EXIT\nDO NOT OBSTRUCT', 14, 2.55, 0.03, 0.9, 0.36, { style: 'council', bg: '#1f6b3c', fg: '#f2f4ee' });
       K.writing('WHO ARE YOU TRYING TO REACH', 21.5, 1.6, 0.03, 2.8, { world: 'fog' });
@@ -605,6 +618,19 @@
       K.box(5, py, -0.9, 3.4, 0.02, 1.4, { tex: 'concrete', color: '#4a4842' });
       K.door({ id: 'c1_dock:door', x: 15.5, z: -0.15, y: py, rot: 0, w: 0.95, style: 'metal', to: 'c1_corridor', entry: 'dock', open: 0.72, sign: 'GOODS IN' });
       K.box(15.5, py, -0.7, 1.2, 2.1, 0.05, { color: '#0a0b0b', roughness: 1 });
+      // the Plaza behind the back wall: one block of building running on past both ends of the dock (its front 1.9 m
+      // back behind the two doorways, so the dark behind the roller door and the goods-in door stays dark), a roof slab
+      // over it all at the parapet, a plant room set back on the roof
+      {
+        const MB_ = { tex: 'concrete', color: '#7e776a' }, CAP = { tex: 'concrete', color: '#6c6860' };
+        K.box(10, 0, -11.25, 44, 5.8, 18.1, MB_, { shadow: false });
+        for (const [a, b] of [[-1.2, 3.3], [6.7, 14.85], [16.15, 20.5]]) K.box((a + b) / 2, 0, -1.25, b - a, 5.8, 1.9, MB_, { shadow: false });
+        for (const [a, b] of [[-12, -1.2], [20.5, 32]]) K.box((a + b) / 2, 0, -1.1, b - a, 5.8, 2.2, MB_, { shadow: false });
+        K.box(10, 5.8, -10.18, 44.2, 0.16, 20.46, CAP, { shadow: false });
+        K.box(9, 5.96, -9, 7, 2.2, 5, { tex: 'concrete', color: '#77726a' }, { shadow: false });
+        // the lane back to the car park: the brick boundary wall runs on west along it
+        K.box(-6.7, 0, 12.8, 10.6, 2.6, 0.3, 'brick', { shadow: false });
+      }
       K.box(15.05, py, 0.42, 0.14, 0.06, 0.1, { tex: 'wood', color: '#7a6040' }, { rot: 20 });            // the wedge
       K.box(8.8, 4.3, 2.4, 20.6, 0.14, 5.4, { tex: 'metal', color: '#6a6f6c' });                  // canopy
       for (const x of [-0.8, 8.8, 18.6]) K.box(x, 0, 5.05, 0.18, 4.3, 0.18, { tex: 'metal', color: '#5d625f' }, { collide: true });

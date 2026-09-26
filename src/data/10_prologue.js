@@ -527,22 +527,25 @@
       quad(tq, [34.9, -0.75, -5.9], [41.7, -0.75, -5.9], [41.7, -2.4, -16], [34.9, -2.4, -16], 1 / Tex.size('bitumen'), [0, 1, 0]);
       // the valley falls away beyond the rails (grass, then dirt, into white)
       const vq = bags.g('grass', { tex: 'grass', color: '#7c8470' }), vd = bags.g('dirt', 'dirt');
-      quad(vq, [0, -0.02, 0.95], [34.7, -0.02, 0.95], [34.7, -4.8, -3.6], [0, -4.8, -3.6], 0.5, [0, 1, 0]);
-      quad(vd, [0, -4.8, -3.6], [34.7, -4.8, -3.6], [34.7, -12, -9], [0, -12, -9], 0.5, [0, 1, 0]);
-      quad(vq, [41.9, -0.02, 1.0], [48, -0.02, 1.0], [48, -4.6, -4.6], [41.9, -4.6, -4.6], 0.5, [0, 1, 0]);
+      // (both run on well past the fog walls: the hillside fades into the fog, it never ends at a cut)
+      quad(vq, [-30, -0.02, 0.95], [34.7, -0.02, 0.95], [34.7, -4.8, -3.6], [-30, -4.8, -3.6], 0.5, [0, 1, 0]);
+      quad(vd, [-30, -4.8, -3.6], [34.7, -4.8, -3.6], [34.7, -12, -9], [-30, -12, -9], 0.5, [0, 1, 0]);
+      quad(vq, [41.9, -0.02, 1.0], [74, -0.02, 1.0], [74, -4.6, -4.6], [41.9, -4.6, -4.6], 0.5, [0, 1, 0]);
+      quad(vd, [41.9, -4.6, -4.6], [74, -4.6, -4.6], [74, -12, -9], [45.5, -12, -9], 0.5, [0, 1, 0]);
       quad(vq, [34.7, -0.8, -5.9], [34.7, -0.02, 0.95], [31, -5, 0.95], [31, -5.5, -5.9], 0.5, [-1, 1, 0]);
       quad(vq, [41.9, -0.02, 1.0], [41.9, -0.8, -5.9], [45.5, -5.2, -5.9], [45.5, -4.6, 1.0], 0.5, [1, 1, 0]);
       // the cutting on the south side, above the verge
       const cq = bags.g('cut', { tex: 'dirt', color: '#8a7a64' });
-      quad(cq, [-2, 0, 16.9], [46, 0, 16.9], [46, 3.6, 19.2], [-2, 3.6, 19.2], 0.5, [0, 0.5, -1]);
-      quad(bags.g('grasstop', { tex: 'grass', color: '#6f7a62' }), [-2, 3.6, 19.2], [46, 3.6, 19.2], [46, 4.4, 26], [-2, 4.4, 26], 0.5, [0, 1, 0]);
+      quad(cq, [-30, 0, 16.9], [74, 0, 16.9], [74, 3.6, 19.2], [-30, 3.6, 19.2], 0.5, [0, 0.5, -1]);
+      quad(bags.g('grasstop', { tex: 'grass', color: '#6f7a62' }), [-30, 3.6, 19.2], [74, 3.6, 19.2], [74, 4.4, 26], [-30, 4.4, 26], 0.5, [0, 1, 0]);
+      quad(bags.g('grasstop', { tex: 'grass', color: '#6f7a62' }), [-30, 4.4, 26], [74, 4.4, 26], [74, 6.5, 40], [-30, 6.5, 40], 0.5, [0, 1, 0]);
       bags.flush(K);
 
       // ---- guardrails: along the valley, both sides of the turn-off; the wire fence on the south verge ----------------
       for (let x = 1.6; x < 34.7; x += 8.3) railSeg(K, [Math.min(x + 8.3, 34.8), 0, 1.08], [x, 0, 1.08], { ends: x === 1.6 });
       railSeg(K, [34.75, -0.75, -5.9], [34.75, 0, 1.08], { ends: true });
       railSeg(K, [41.85, 0, 1.08], [41.85, -0.75, -5.9], { ends: true });
-      for (let x = 3; x < 44; x += 6) K.prop('fence', x, 16.45, 180, { variant: 'wire', len: 6 });
+      for (let x = -27; x < 72; x += 6) K.prop('fence', x, 16.45, 180, { variant: 'wire', len: 6 });
       K.collider(-1, 16.45, 45, 17.6, { h: 3 });
       K.examine(27.5, 0.7, 1.35, 'Can\'t see the valley. Can\'t see anything.', { id: 'p2:guardrail' });
       K.examine(38.3, 0.7, -5.2, ['The road drops away into the fog. Hill Road. [beat] Town\'s down there somewhere.', 'Somewhere.'], { id: 'p2:turnoff', r: 1.6 });
@@ -644,7 +647,7 @@
   // the south. The fire-trail gate at 60 m (the figure crosses there), a driveway and letterbox at 90 m.
   // =================================================================================================================
   const XS = []; for (let x = -3; x <= 123.001; x += 1) XS.push(+x.toFixed(3));
-  const XW = []; for (let x = -16; x <= 134.001; x += 1) XW.push(+x.toFixed(3));        // terrain + road run on past the ends into the fog
+  const XW = []; for (let x = -16; x <= 172.001; x += 1) XW.push(+x.toFixed(3));        // terrain + road run on past the ends into the fog
   const bumpy = (x) => 1 + 0.13 * Math.sin(x * 0.83) + 0.08 * Math.sin(x * 2.1 + 1.3) + 0.05 * Math.sin(x * 4.7);
   const bankY = { toe: 0, mid: (x) => 2.9 * bumpy(x) * (1 - 0.72 * gully(x) - 0.6 * drive(x)), lip: (x) => 3.3 * bumpy(x + 3) * (1 - 0.7 * gully(x) - 0.55 * drive(x)), top: (x) => 4.3 * (1 - 0.4 * gully(x) - 0.4 * drive(x)), far: (x) => 9.5 + 1.5 * Math.sin(x * 0.21) };
   defineRoom({
@@ -727,7 +730,7 @@
       bags.flush(K);
 
       // ---- guardrail along the valley side (2 m segments following the curve and the grade), the fire-trail gate ----
-      for (let x = -15; x < 133; x += 2) {
+      for (let x = -15; x < 171; x += 2) {
         const xb = x + 2;
         if (x + 1 > 58.2 && x + 1 < 61.8) continue;
         const [ax, az] = hrPt(x, HR.rail), [bx, bz] = hrPt(xb, HR.rail);
@@ -926,6 +929,18 @@
       K.prop('shrub', 13.8, -3.2, 0, { w: 1.6, h: 1.3 }); K.prop('shrub', 13.9, 8.6, 0, { w: 1.3, h: 1.1, dead: true });
       K.prop('gum_tree', 16.5, 2.5, 0, {}); K.prop('gum_tree_small', -1.5, -1.8, 0, {});
       K.prop('power_pole', 13.6, -6.8, 0, { span: 0 });
+      // the bush all round the clearing (seen over the fences and through the wire, from the high shots): scrub ground
+      // west of the footpath and behind the paling fences, the paddock past the wire fence, both fences running on
+      // north beside Relay Street into the fog — never the fog's floor
+      { const SCRUB = { tex: 'grass', color: '#6c745f' }, DRY = { tex: 'grass', color: '#77765e' };
+        K.box(-9.3, 0, -4.25, 15.4, 0.08, 15.5, SCRUB, { shadow: false });                         // x −17 … −1.6, z −12 … 3.5
+        K.box(2.35, 0, -11.85, 7.9, 0.08, 20.5, SCRUB, { shadow: false });                          // behind the paling fences (… z −1.6)
+        K.box(22.2, 0, -5.25, 15.6, 0.05, 29.5, DRY, { shadow: false });                            // past the wire fence (x 14.4 … 30)
+        K.box(13.45, 0.06, -14.05, 1.9, 0.01, 12.9, { tex: 'grass', color: '#77806a' }, { shadow: false });   // the verge on north
+        for (const z of [-9.1, -12.1, -15.1, -18.1]) K.prop('fence', 6.3, z, -90, { variant: 'paling', len: 3 });
+        for (const z of [-10, -14, -18]) K.prop('fence', 14.35, z, -90, { variant: 'wire', len: 4 });
+        for (const [x, z, w, h, d] of [[-4.2, -3.5, 1.8, 1.4, 0], [-7.5, 1.2, 1.5, 1.2, 1], [-3.0, -7.8, 1.6, 1.3, 0], [1.8, -4.4, 1.4, 1.1, 1], [4.6, -9.5, 1.5, 1.2, 0], [17.5, -2.5, 1.6, 1.0, 1], [19.8, 6.2, 1.3, 0.9, 0], [16.4, 9.2, 1.2, 1.0, 1]]) K.prop('shrub', x, z, 0, { y: 0.08, w, h, dead: !!d, collide: false });
+        K.prop('gum_tree', -8.5, -6.5, 120, { y: 0.08, collide: false }); K.prop('gum_tree_small', 2.8, -8.2, 40, { y: 0.08, collide: false }); K.prop('gum_tree', 23.5, -8.5, 210, { y: 0.05, collide: false }); }
       bags.flush(K);
 
       // ---- the Route 44 shelter and the only working streetlight -----------------------------------------------------

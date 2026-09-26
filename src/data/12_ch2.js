@@ -566,10 +566,22 @@
       }
       // the wall's end at the hairpin H1 (x 48), the bank top running on to the top's edge, the scrub falling away east
       // (the wall runs on east past the hairpin into the fog, its foot following the drop; the bank top above it)
-      quad(wa, [48, 3.4, -13.98], [54, -2.1, -13.98], [54, 10.5, -13.98], [48, 10.5, -13.98], 0.5, [0, 0, 1]);
-      quad(wa, [54, -2.1, -13.98], [62, -2.1, -13.98], [62, 10.5, -13.98], [54, 10.5, -13.98], 0.5, [0, 0, 1]);
-      quad(cp, [48, 10.62, -13.92], [62, 10.62, -13.92], [62, 10.62, -14.25], [48, 10.62, -14.25], 1, [0, 1, 0]);
-      quad(vg, [48, 10.5, -14], [62, 10.5, -14], [62, 10.5, -20.05], [48, 10.5, -20.05], 0.5, [0, 1, 0]);
+      // east of the hairpin both levels fall away into the valley: the ground south of the wall follows yE (the drop off
+      // H1), north of it yNE (the drop off G); the wall steps down between the two and dies out where they meet
+      const yE = (xx) => (xx <= 48 ? HR.yA(clamp(xx, 0, 40)) + (xx > 0 && xx < 40 ? 0.15 : 0) : xx <= 54 ? 3.5 - (xx - 48) * 0.9167 : Math.max(-20, -2 - (xx - 54) * 0.69));
+      const yNE = (xx) => (xx <= 52 ? 10.5 : Math.max(-20, 10.4 - (xx - 52) * 1.07));
+      quad(wa, [48, 3.4, -13.98], [52, yE(52) - 0.1, -13.98], [52, 10.5, -13.98], [48, 10.5, -13.98], 0.5, [0, 0, 1]);
+      quad(cp, [48, 10.62, -13.92], [52, 10.62, -13.92], [52, 10.62, -14.25], [48, 10.62, -14.25], 1, [0, 1, 0]);
+      quad(vg, [48, 10.5, -14], [52, 10.5, -14], [52, 10.5, -20.05], [48, 10.5, -20.05], 0.5, [0, 1, 0]);
+      for (let x = 52; x < 96; x += 2) {
+        const x1 = x + 2, a = yE(x) - 0.1, b = yE(x1) - 0.1, c = yNE(x), d = yNE(x1);
+        if (c - a > 0.05 || d - b > 0.05) {
+          quad(wa, [x, a, -13.98], [x1, b, -13.98], [x1, Math.max(b, d), -13.98], [x, Math.max(a, c), -13.98], 0.5, [0, 0, 1]);
+          quad(cp, [x, c + 0.12, -13.92], [x1, d + 0.12, -13.92], [x1, d + 0.12, -14.25], [x, c + 0.12, -14.25], 1, [0, 1, 0]);
+        }
+        quad(x < 60 ? vg : dirt, [x, c, -14], [x1, d, -14], [x1, d, -46], [x, c, -46], 0.5, [0, 1, 0]);
+        if (x >= 54) quad(x < 64 ? dirt : vg, [x, yE(x), 8.05], [x1, yE(x1), 8.05], [x1, yE(x1), -14], [x, yE(x), -14], 0.5, [0, 1, 0]);
+      }
       for (let x = -2; x < 52; x += 2) {
         const x1 = x + 2, y0 = (xx) => (xx <= 8 ? 7.0 : xx >= 44 ? 10.5 : HR.yC(xx)) + (xx > 8 && xx < 44 ? 0.15 : 0);
         if (x >= 44) continue;
@@ -578,20 +590,34 @@
       }
       // the cutting's east end, where the gate's brick fence meets it (closes the slope's open wedge)
       quad(dirt, [44.02, 10.4, -28], [44.02, 10.4, -40], [44.02, 14.5, -40], [44.02, 13.1, -30.5], 0.5, [1, 0, 0]);
-      // the drop below A (south): scrub falling away, the roofs of the houses below
-      for (let x = -3; x < 50; x += 2) {
-        const x1 = x + 2, y0 = (xx) => HR.yA(clamp(xx, 0, 40)) + (xx > 0 && xx < 40 ? 0.15 : 0);
-        quad(dirt, [x, y0(x) - 0.02, 8.05], [x1, y0(x1) - 0.02, 8.05], [x1, y0(x1) - 4.5, 13], [x, y0(x) - 4.5, 13], 0.5, [0, 1, 0.4]);
-        quad(vg, [x, y0(x) - 4.5, 13], [x1, y0(x1) - 4.5, 13], [x1, y0(x1) - 9, 26], [x, y0(x) - 9, 26], 0.4, [0, 1, 0]);
-      }
-      // the drop off H1's east side, H2's west side, G's east side
+      // the drop below A (south): scrub falling away past the roofs of the houses below, on down into the valley; level
+      // with Relay Street at the west end (k0), round the corner under the hairpin at the east end (yE)
+      { const k0 = (xx) => clamp((xx + 3) / 10, 0, 1), rs = [[8.05, 0.02], [13, 4.5], [26, 9], [52, 24]];
+        const ry = (xx, i) => Math.max(-24, yE(xx) - rs[i][1] * k0(xx));
+        for (let x = -3; x < 96; x += 2) {
+          const x1 = x + 2;
+          for (let i = 0; i < 3; i++) quad(i ? vg : dirt, [x, ry(x, i), rs[i][0]], [x1, ry(x1, i), rs[i][0]], [x1, ry(x1, i + 1), rs[i + 1][0]], [x, ry(x, i + 1), rs[i + 1][0]], i ? 0.4 : 0.5, [0, 1, 0.4]);
+        } }
+      // the drop off H1's east side, H2's west side (down onto Relay Street's verge), the cutting's west end over it
       quad(dirt, [48.05, 3.4, -14], [48.05, 3.4, 8], [54, -2, 8], [54, -2, -14], 0.5, [1, 1, 0]);
-      quad(dirt, [-0.05, 6.9, -6], [-0.05, 6.9, -28], [-6, 1, -28], [-6, 1, -6], 0.5, [-1, 1, 0]);
+      quad(dirt, [-0.05, 6.9, -6], [-0.05, 6.9, -28], [-3.05, 0.0, -28], [-3.05, 0.0, -6], 0.5, [-1, 1, 0]);
       quad(dirt, [-3.05, -0.05, 8], [-3.05, -0.05, -6], [-3.05, 7.0, -6], [-3.05, 7.0, 0], 0.5, [-1, 0, 0]);
-      quad(dirt, [52.05, 10.4, -38], [52.05, 10.4, -20], [58, 4, -20], [58, 4, -38], 0.5, [1, 1, 0]);
-      // Relay Street runs north–south below the junction (in the fog), the drop beside the bank
-      K.box(-10, -0.05, 4, 14, 0.05, 50, 'bitumen', { shadow: false });
-      K.box(-3.9, 0, 4, 0.16, 0.15, 50, 'kerb', { shadow: false });
+      K.box(-1.52, 0, -3.0, 3.06, 7.0, 6.0, { tex: 'dirt', color: '#86765e' }, { shadow: false });          // the bank's toe at the junction
+      quad(dirt, [-2.02, 0, -28], [-2.02, 0, -30.5], [-2.02, 9.6, -30.5], [-2.02, 6.9, -28], 0.5, [-1, 0, 0]);
+      quad(dirt, [-2.02, 0, -30.5], [-2.02, 0, -46], [-2.02, 11.0, -46], [-2.02, 9.6, -30.5], 0.5, [-1, 0, 0]);
+      quad(dirt, [-3.05, 0, -28], [-2.02, 0, -28], [-2.02, 0, -46], [-3.05, 0, -46], 0.5, [0, 1, 0]);
+      for (let x = -2; x < 44; x += 2) { const x1 = x + 2, y0 = (xx) => (xx <= 8 ? 7.0 : HR.yC(xx)) + (xx > 8 ? 0.15 : 0); quad(vg, [x, y0(x) + 4.0, -40], [x1, y0(x1) + 4.0, -40], [x1, y0(x1) + 4.6, -46], [x, y0(x) + 4.6, -46], 0.4, [0, 1, 0]); }
+      // Relay Street runs north–south below the junction (in the fog) past its footpaths, and the shops on its far side
+      K.box(-10, -0.05, 4, 14, 0.05, 100, 'bitumen', { shadow: false });
+      K.box(-3.9, 0, 4, 0.16, 0.15, 100, 'kerb', { shadow: false });
+      K.box(-18.3, 0, 4, 2.6, 0.15, 100, 'footpath', { shadow: false });
+      K.box(-40, -0.05, 4, 40, 0.05, 100, { tex: 'concrete', color: '#7e786c' }, { shadow: false });
+      for (const [z0, z1, h, c] of [[-46, -30, 5.8, '#8a8276'], [-30, -17, 4.9, '#7a6c60'], [-17, -4, 6.4, '#948c7e'], [-4, 9, 5.2, '#76665a'], [9, 22, 6.0, '#877f73'], [22, 36, 4.8, '#8a8276'], [36, 54, 5.6, '#7a6c60']]) {
+        K.box(-26.6, 0, (z0 + z1) / 2, 13, h, z1 - z0, { tex: z0 % 2 ? 'render_cracked' : 'brick', color: c }, { shadow: false });
+        K.box(-26.5, h, (z0 + z1) / 2, 13.2, 0.16, z1 - z0 + 0.1, { tex: 'concrete', color: '#6c6860' }, { shadow: false });
+        K.box(-19.92, 0.3, (z0 + z1) / 2, 0.08, 2.4, z1 - z0 - 1.6, { color: '#1c201f', roughness: 0.4 }, { shadow: false });
+        K.box(-19.6, 2.9, (z0 + z1) / 2, 0.8, 0.12, z1 - z0 - 0.4, { tex: 'metal', color: '#5a605c' }, { shadow: false });
+      }
       bags.flush(K);
 
       // ---- guardrails and the edge colliders ----------------------------------------------------------------------------
@@ -934,6 +960,74 @@
   function setChaseWalls(on) {
     for (const fw of C2.chaseWalls) { if (fw.mesh) fw.mesh.visible = !!on; if (fw.collider) fw.collider.enabled = !!on; }
   }
+  // behind the building lines: the units' side and back yards (grass, colorbond dividing and back fences, sheds, tanks,
+  // gum trees), the garage lane behind units 7–9 with the bay block across it (the NE lane turns into it), the road on
+  // out past the gate, the ground beside Exchange Road. Every gap between two units is a fenced yard, never the fog.
+  // (All visual: the building-line fences keep their colliders; nothing here is walkable.)
+  function crescentBacks(K) {
+    const YARD = { tex: 'grass', color: '#6a755e' }, VERGE = { tex: 'grass', color: '#667058' };
+    const FC = '#5f6b64', Y0 = 0.13;
+    const ground = (x0, z0, x1, z1, mat = YARD, top = Y0) => K.box((x0 + x1) / 2, 0, (z0 + z1) / 2, x1 - x0, top, z1 - z0, mat, { shadow: false });
+    const fx = (x0, x1, z, o = {}) => K.prop('fence', (x0 + x1) / 2, z, 0, { variant: 'colorbond', len: x1 - x0, y: o.y ?? Y0, color: o.color || FC, h: o.h, collide: false });
+    const fz = (z0, z1, x, o = {}) => K.prop('fence', x, (z0 + z1) / 2, 90, { variant: 'colorbond', len: z1 - z0, y: o.y ?? Y0, color: o.color || FC, h: o.h, collide: false });
+    const shed = (x, z, rot, c = '#7d837a') => {
+      K.box(x, Y0, z, 2.3, 1.95, 1.7, { tex: 'metal', color: c }, { rot, shadow: false });
+      K.box(x, Y0 + 1.95, z, 2.5, 0.08, 1.95, { tex: 'metal', color: '#8a8f88' }, { rot, shadow: false });
+      K.box(x + Math.sin(rot * D2R) * 0.86, Y0 + 0.05, z + Math.cos(rot * D2R) * 0.86, 1.3, 1.75, 0.03, { tex: 'metal', color: '#6a706a' }, { rot, shadow: false });
+    };
+    const tank = (x, z, c = '#8f9892') => { K.cyl(x, Y0, z, 0.8, 1.9, { tex: 'metal', color: c }, { seg: 14 }); K.cyl(x, Y0 + 1.9, z, 0.82, 0.08, { tex: 'metal', color: '#7a827c' }, { seg: 14 }); K.cyl(x + 0.6, Y0, z + 0.55, 0.035, 1.7, { tex: 'metal', color: '#b9bcb4' }, { seg: 6 }); };
+    // ---- the lots: grass from the building line back to the back fences (lanes left out) --------------------------
+    const NB = -15.5, EB = 75.5, SB = 55.5, WB = -15.5;                       // back fence lines
+    ground(WB, -12, 0.7, -5.0); ground(WB, NB, -0.15, -12);                    // NW corner lot (the back-gate lane beside it)
+    ground(7.3, -12, 54.7, -5.0); ground(8.15, NB, 54.7, -12);                 // behind units 9, 8, 7
+    ground(61.3, -21.6, EB, -5.0);                                             // NE corner lot
+    ground(65.0, -5.0, EB, 45.0);                                              // behind units 6, 5, 4
+    ground(8.0, 45.0, EB, SB);                                                 // behind units 1–3, the SE corner, beside the parking
+    ground(WB, -5.0, -5.0, 52.1); ground(-5.0, 41.2, -2.2, 52.1);              // behind units 10–12, round the office
+    // back fences (the lots' rear boundaries), the office's side fence, the NE lane's east fence on round the corner
+    fx(WB, -0.15, NB); fx(8.15, 54.7, NB); fx(61.3, EB, NB);
+    fz(NB, SB, EB); fx(8.0, EB, SB); fz(NB, 52.0, WB);
+    fx(WB, -5.2, 41.5);
+    // dividing fences down the middle of every gap between two units, from the building line to the back fence
+    for (const x of [23, 40]) fz(NB, -5.2, x);
+    for (const z of [13.25, 26.75]) fx(65.2, EB, z);
+    for (const x of [26.5, 42.5, 60]) fz(45.2, SB, x);
+    for (const z of [16.25, 29.75]) fx(WB, -5.2, z);
+    fx(65.2, EB, 2.0); fx(WB, -5.2, 5.0);                                      // the corner lots' boundaries with units 6 and 10
+    // what stands in the side yards (it shows over the building-line fences, between the houses)
+    shed(25.3, -9.0, 0); tank(20.1, -7.2);                                     // between 9 and 8
+    tank(42.2, -7.4, '#7e8a84'); shed(37.8, -10.2, 90, '#6f786f');              // between 8 and 7
+    shed(69.5, 13.25 + 1.1, 90, '#7a7f76'); tank(68.8, 25.6);                   // east gaps
+    tank(24.6, 48.0); shed(28.6, 49.5, 180, '#737a72');                          // south gaps
+    shed(44.5, 50.0, 180); tank(57.5, 48.6, '#7e8a84'); shed(62.6, 50.8, 180, '#6f786f');
+    tank(-8.2, 17.4); shed(-9.5, 29.75 - 1.0, -90, '#737a72');                  // west gaps
+    shed(-9.5, 0.2, -90); tank(-3.2, -9.0); tank(69.0, -8.8, '#7e8a84'); shed(71.6, 41.2, -90);   // the corner lots
+    // gum trees in the back yards and past the back fences: the skyline between the roofs
+    for (const [x, z, k] of [[22.2, -13.4, 0], [41.0, -14.2, 1], [-11.5, -11.5, 0], [70.5, -12.5, 1], [72.5, 12.0, 0], [73.5, 28.5, 1], [79.5, 20, 0],
+      [27.5, 54.0, 0], [44.0, 54.2, 1], [61.5, 53.8, 0], [36, 59.5, 0], [-12.5, 15.5, 1], [-13.5, 30.5, 0], [-19.5, 22, 0], [-12.8, 47.5, 1]]) {
+      K.prop(k ? 'gum_tree_small' : 'gum_tree', x, z, (x * 53 + z * 31) % 360, { y: Y0, collide: false });
+    }
+    // the slot between Unit 12 and the office: a shrub against the office's corner
+    K.prop('shrub', -3.6, 41.65, 0, { y: Y0, w: 1.4, h: 1.2, collide: false });
+    // ---- the garage lane behind units 7–9 (the NE lane turns west into it), the bay block across it ---------------------
+    ground(8.15, -21.5, 61.3, NB - 0.1, { tex: 'concrete', color: '#8a867a' }, 0.14);
+    fz(-21.6, -15.6, 61.3); fx(8.15, 24.2, -21.6); fx(45.0, 61.3, -21.6);
+    { const BR = { tex: 'brick', color: '#b8a494' };
+      K.box(34.6, 0, -24.7, 20.8, 2.6, 6.2, BR, { shadow: false });
+      K.box(34.6, 2.6, -24.6, 21.2, 0.12, 6.8, { tex: 'metal', color: '#7a817d' }, { shadow: false });
+      for (let k = 0; k < 6; k++) K.box(24.2 + 1.73 + k * 3.47, 0.05, -21.55, 3.0, 2.3, 0.06, { tex: 'metal', color: ['#c9c4b2', '#8a9a8a', '#b8a888', '#9aa0a8', '#c0b4a0', '#8a8f8a'][k] }, { shadow: false });
+      for (let k = 0; k <= 6; k++) K.box(24.2 + k * 3.47, 0, -21.5, 0.3, 2.62, 0.25, BR, { shadow: false }); }
+    // ---- the hill climbing north behind the lane and beside Exchange Road (behind its paling fences) ---------------------
+    { const g = MB(), exY = (z) => lerp(2.6, 0.15, clamp((z + 33.3) / 21.3, 0, 1)) - 0.08, upY = (z) => lerp(Y0, 2.5, clamp((-21.6 - z) / 12.4, 0, 1));
+      quad(g, [WB, exY(-12), -12], [-0.15, exY(-12), -12], [-0.15, exY(-34), -34], [WB, exY(-34), -34], 0.5, [0, 1, 0]);
+      quad(g, [8.15, Y0, -21.6], [EB, Y0, -21.6], [EB, upY(-34), -34], [8.15, upY(-34), -34], 0.5, [0, 1, 0]);
+      mesh(K, g, VERGE);
+      K.prop('gum_tree', 52.5, -26.5, 40, { y: upY(-26.5) - 0.1, collide: false }); K.prop('gum_tree', 14.0, -25.5, 200, { y: upY(-25.5) - 0.1, collide: false }); }
+    // ---- out past the gate: the drive on down toward Hilltop Road, verges either side ----------------------------------
+    K.fogOnly(() => K.box(4, -0.05, 63.15, 8, 0.05, 17.7, 'bitumen', { shadow: false }));
+    K.outageOnly(() => { K.box(4, -0.6, 63.1, 8, 0.62, 17.8, { color: '#0c0f0f', roughness: 1 }, { shadow: false }); K.dress('cables', [0.2, 54.4, 7.8, 62], 18, { seed: 212 }); });
+    ground(WB, 52.1, 0, 72, VERGE, 0.1); ground(8.0, SB, 30, 72, VERGE, 0.1);
+  }
 
   defineRoom({
     id: 'c2_crescent', name: 'THE CRESCENT', area: 'HILLTOP VILLAGE', chapter: 2, outdoor: true, surface: 'bitumen', ambient: 'wind',
@@ -1022,6 +1116,8 @@
       flatShape(K, roundedRect(8.18, 8.18, 51.82, 31.82, 4.2), 0.15, { tex: 'grass', color: '#66725a' }, 1 / Tex.size('grass'));
       { const s = roundedRect(8, 8, 52, 32, 4.4); s.holes.push(new THREE.Path(roundedRect(8.18, 8.18, 51.82, 31.82, 4.2).getPoints(24).reverse()));
         flatShape(K, s, 0.16, 'kerb', 1 / Tex.size('kerb')); }
+      // the bitumen under the island (the loop's four floors stop at its square corners; the kerb is rounded)
+      K.box(30, -0.04, 20, 44, 0.04, 24, 'bitumen', { shadow: false });
       K.collider(8, 8, 52, 25.85, { h: 1.0 }); K.collider(8, 25.85, 22.4, 32, { h: 1.0 }); K.collider(37.6, 25.85, 52, 32, { h: 1.0 });
       K.collider(22.4, 28.3, 28.4, 32, { h: 1.0 }); K.collider(31.6, 28.3, 37.6, 32, { h: 1.0 });
       // the hall: weatherboard walls on a brick base, a gable roof, the double glass doors under a porch roof
@@ -1064,6 +1160,7 @@
       fenceZ(-12, -5.2, 0.7); fenceZ(-12, -5.2, 7.3);
       K.collider(8.1, 41.2, 8.5, 52, { h: 1.4 });
       for (let z = 42.5; z < 52; z += 1.6) K.prop('shrub', 9.4, z, 0, { y: 0.15, w: 1.5, h: 1.3, collide: false });
+      crescentBacks(K);
 
       // ---- the gate (south), the office (SW), the visitor parking ------------------------------------------------------
       for (const px of [-2.7, 8.7]) { K.box(px, 0, 51.8, 0.72, 2.1, 0.72, 'brick', { collide: true }); K.box(px, 2.1, 51.8, 0.86, 0.14, 0.86, 'concrete'); K.sphere(px, 2.42, 51.8, 0.18, 'concrete'); }
@@ -1362,6 +1459,22 @@
       K.wall(10.6, 0, 10.6, 6, H, PW, { skirting: true, both: false, openings: [{ at: 3.8, w: 1.1, h: 2.25 }, { at: 1.3, w: 1.2, h: 1.1, sill: 1.0, glass: true, frame: true }] });   // east (cutaway)
       K.wall(8, 0, 8, 6, H, PW, { skirting: true, openings: [{ at: 3.8, w: 1.8, h: 2.3 }] });            // office | foyer
       K.door({ id: 'c2_office:door', x: 10.6, z: 3.8, rot: 90, w: 1.0, h: 2.2, style: 'glass', to: 'c2_crescent', entry: 'office' });
+      // outside the window (the window camera stands out by the gate): the office's brick face round the glass, the
+      // fascia and the hip roof over it, the path and the drive in the grey daylight — the Crescent's office, not a lit
+      // window floating in the dark
+      { const OB = { tex: 'brick', color: '#c4ae9a' }, zs = 6.14;
+        K.box(0.45, 0, zs, 1.5, 3.05, 0.13, OB, { shadow: false }); K.box(7.3, 0, zs, 7.0, 3.05, 0.13, OB, { shadow: false });
+        K.box(2.5, 0, zs, 2.6, 0.9, 0.13, OB, { shadow: false }); K.box(2.5, 2.2, zs, 2.6, 0.85, 0.13, OB, { shadow: false });
+        K.box(2.5, 0.84, 6.3, 2.8, 0.06, 0.2, { tex: 'concrete', color: '#b3ab96' }, { shadow: false });
+        K.box(5.3, 2.9, 6.62, 11.6, 0.2, 0.08, { color: '#e6e1d4', roughness: 0.7 }, { shadow: false });
+        K.box(5.3, 2.78, 6.72, 11.6, 0.14, 0.14, { tex: 'metal', color: '#b9bcb4' }, { shadow: false });
+        { const rb = MB(); hipRoof(rb, 5.3, 2.95, 3.0, 11.0, 6.4, 1.6, 0, 0.55, 1.1); mesh(K, rb, { tex: 'metal', color: '#5a6360', roughness: 0.6 }); }
+        K.box(5.3, -0.05, 11.2, 14, 0.05, 10, 'footpath', { shadow: false });
+        K.box(-4.5, 0, 12.0, 5, 0.15, 12, { tex: 'grass', color: '#6f7a62' }, { shadow: false });
+        K.prop('bench', 4.6, 6.75, 0, { len: 1.3, collide: false });
+        K.prop('bin', 7.8, 6.6, 0, { variant: 'street', collide: false });
+        K.light('point', 2.6, 3.6, 9.6, { color: '#9aa8a6', intensity: 1.6, distance: 7.5, world: 'fog' });
+        K.light('point', 2.6, 3.6, 9.6, { color: '#1f6f6a', intensity: 1.0, distance: 7, world: 'outage' }); }
       // the counter (staff behind to the west), the visitor book with its pen on a chain, the bell
       K.prop('counter', 4.6, 2.55, 90, { len: 4.0, variant: 'reception', clutter: false });
       // (on the raised visitors' ledge: top at 1.14 m, x 4.68…4.94)
@@ -1887,8 +2000,10 @@
       { id: 'c2_kitchen_out:fridge', vol: [10.5, 0, 20, 6.2], pri: 1, type: 'static', pos: [8.2, 3.3, 12.4], target: [15.6, 0.6, 2.2], fov: 'fit' },
     ],
     build(K) {
-      const H = 4.6;
+      // (the walls keep going up into the dark, to a ceiling nobody can see: no wall top against the haze)
+      const H = 9.0;
       K.ambient('#23827a', 0.8);                                      // the Outage's sick teal, just enough to read the room
+      K.ceiling(0, 0, 20, 20, H, { color: '#0c1413', roughness: 1 });
       K.floor(0, 0, 20, 20, { tex: 'lino', color: '#9a8e6a' });
       const WK = { tex: 'plaster', color: '#c3c0a6' };
       K.wall(-0.075, 0, 20.075, 0, H, WK, { skirting: true });
@@ -1932,7 +2047,7 @@
       K.interact(KO.pendant[0], 0.3, KO.pendant[1], (G) => takePendant(G), { id: 'c2_kitchen_out:pendantpick', r: 1.2, when: () => !(S.taken && S.taken['c2_kitchen_out:pendant']) });
       // the Outage dressing, kept to the edges: receipt paper curling down out of the dark, contracts stacked along the
       // walls, receipts drifted across the floor, the writing
-      for (const [x, z, len] of [[3.5, 3.5, 3.0], [16.5, 3.5, 2.6], [3.2, 17, 2.8], [17, 16.5, 3.4], [16.8, 9.8, 2.2], [9.5, 2.6, 2.8]]) K.prop('receipt_strip', x, z, (x * 31) % 180, { ceil: H, len });
+      for (const [x, z, len] of [[3.5, 3.5, 3.0], [16.5, 3.5, 2.6], [3.2, 17, 2.8], [17, 16.5, 3.4], [16.8, 9.8, 2.2], [9.5, 2.6, 2.8]]) K.prop('receipt_strip', x, z, (x * 31) % 180, { ceil: H, len: len + 4.4 });
       for (let i = 0; i < 9; i++) K.prop('contract_stack', 19.4 - (i % 2) * 0.35, 2 + i * 1.9, i * 23, { h: 0.9 + (i % 3) * 0.4 });
       for (let i = 0; i < 6; i++) K.prop('contract_stack', 2.6 + i * 2.7 + (i > 2 ? 1.6 : 0), 19.4, i * 41, { h: 0.7 + (i % 2) * 0.5 });
       K.dress('receipts', [2, 2, 18, 18], 40, { seed: 261 });
@@ -2136,7 +2251,20 @@
       K.collider(-0.4, -0.2, 0.05, 6.4, { h: 2.2, blocker: 'Just the fence. Fog on the other side.' });
       K.prop('chainlink', 0.1, 3, 90, { len: 6, h: 2.1 });
       for (const [x, rot] of [[4.5, 0], [14.5, 180], [24.5, 0]]) { const rb = MB(); hipRoof(rb, x, 2.9, 12.5, 9, 8, 1.6, rot); mesh(K, rb, { tex: 'metal', color: '#6f3b30', roughness: 0.7 }); K.box(x, 0, 12.5, 9, 2.9, 8, { tex: 'brick', color: '#c4ae9a' }); }
-      K.cyl(9.5, 0, 9.2, 0.04, 2.2, { tex: 'metal', color: '#9aa39c' }); for (let i = 0; i < 4; i++) K.box(9.5, 2.1, 9.2, 2.6, 0.02, 0.02, '#b9bcb6', { rot: i * 45 });
+      // ...and the rest of the row on past both ends of the lane, the back yards they stand in (grass, dividing fences),
+      // the ground behind the bays and round both ends, the fences on along the lane: never the fog under a house
+      { const YD = { tex: 'grass', color: '#6a755e' }, FC = '#5f6b64';
+        for (const [x, c] of [[-5.5, '#7a4a3a'], [34.5, '#7a4a3a'], [44.5, '#6f3b30']]) { const rb = MB(); hipRoof(rb, x, 2.9, 12.5, 9, 8, 1.6, 0); mesh(K, rb, { tex: 'metal', color: c, roughness: 0.7 }); K.box(x, 0, 12.5, 9, 2.9, 8, { tex: 'brick', color: '#bfa894' }, { shadow: false }); }
+        K.box(18, 0, 13.2, 60, 0.02, 13.8, YD, { shadow: false });                                  // the back yards (z 6.3 … 20.1)
+        K.box(18, 0, -10.15, 60, 0.02, 20, YD, { shadow: false });                                  // behind the bays (… z −0.15)
+        K.box(-6, 0, 3.07, 12, 0.02, 6.44, YD, { shadow: false });                                  // past the dead end
+        K.box(46, -0.05, 3, 8, 0.05, 6, { tex: 'concrete', color: '#8a867a' }, { shadow: false });   // the lane on east
+        for (const x of [-0.5, 9.5, 19.5, 29.5, 39.5]) K.prop('fence', x, 11.4, 90, { variant: 'colorbond', len: 10.2, color: FC, collide: false });
+        K.prop('fence', 1.9, -0.1, 0, { variant: 'colorbond', len: 3.8, color: FC, collide: false });
+        K.prop('fence', 40.2, -0.1, 0, { variant: 'colorbond', len: 16.4, color: FC, collide: false });
+        K.prop('fence', 41.0, 6.15, 180, { variant: 'colorbond', len: 14, color: FC, collide: false });
+        K.prop('gum_tree_small', 36.5, 17.5, 70, { collide: false }); K.prop('gum_tree', 12.0, -9.5, 150, { collide: false }); }
+      K.cyl(6.0, 0, 18.2, 0.04, 2.2, { tex: 'metal', color: '#9aa39c' }); for (let i = 0; i < 4; i++) K.box(6.0, 2.1, 18.2, 2.6, 0.02, 0.02, '#b9bcb6', { rot: i * 45 });
       K.prop('couch', 18.2, 5.35, 180, { len: 1.8, color: '#5a5040', collide: true });
       K.examine(18.2, 0.8, 5.0, ['Somebody dumped a couch against the fence. It\'s been rained on a hundred times.'], { id: 'c2ga:couch', r: 1.3 });
       for (const [x, z, lid] of [[27.5, 5.5, '#8f2a22'], [28.3, 5.5, '#2a5a2a'], [8.2, 5.5, '#8f2a22']]) K.prop('bin', x, z, 180, { variant: 'wheelie', lid });

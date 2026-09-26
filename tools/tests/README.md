@@ -83,6 +83,9 @@ They don't fail a run.
   * `SH_DEATH=1`: Aidan dies once in every boss fight, and CONTINUE must restore the save exactly.
   * `SH_RESUME=1` plays every chapter from its autosave. `SH_FROM_AUTO=<file>` replays from an autosave a run wrote to
     `.build/chainlogs/`. `SH_SHOTS=<dir>` takes screenshots at the hand-offs.
+  * `SH_SIGNAL`: `unreliable` | `classic`, set in Options before NEW GAME. Without it the chain plays the game's
+    default, the unreliable signal. The chain checks that the phone plays that mode. The timeline ends with a line
+    that says where the first real signal reading came and how many phantoms each chapter met.
   * The wider release matrix adds connected with `SH_RIDDLE=hard`, with `SH_RIDDLE=easy SH_ACTION=easy` and with
     `SH_DEATH=1`, plus tomorrow with `SH_ACTION=hard`.
 * **`ch0.mjs` … `ch8.mjs`**: one chapter each, played start to finish with the real mechanics. Aidan walks with real
@@ -170,5 +173,12 @@ SH_CHROME_ARGS="--autoplay-policy=document-user-activation-required" \
   `takeHealPickup`, `payphoneSave`, `titleNewGame`, `report` and others. Call `report()` for the final PASS/FAIL line so `run.mjs` sets the exit code.
 * The game keeps `Math.random`. A check on something random must sample until it has seen enough, and a walk must
   survive a monster in the way. To replay a flaky run, seed `Math.random` in the page before the chapter starts.
+* The suite plays the game's default signal, UNRELIABLE. In that mode the bars HUD is hidden unless Aidan glances at
+  the phone or a scripted beat shows it. Only monsters that have noticed him read, the reading lags and wobbles, and
+  phantoms come from Chapter 1 on. Scripted bars (`G.bars`, `Phone.override`) show exactly as authored in both modes,
+  so check a scripted beat through `Phone.reading` in the default mode. Only a check whose subject is the old radar
+  (bars from a dormant monster, the HUD up on its own, the instant distance mapping) switches to CLASSIC:
+  `SH.mod.Save.setOption('signal', 'classic')`, then back. `options.mjs` and `signal.mjs` do this, and nothing else
+  does. A check that must not meet a phantom in a long quiet stretch can raise `Phone.TUNE.quiet` while it runs.
 * Never weaken a check to make it pass. When a test's expectation is wrong about the spec, fix the test and say so in
   the commit.

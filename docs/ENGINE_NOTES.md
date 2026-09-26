@@ -460,6 +460,10 @@ name); `switchboard/lamp_panel.setLamp`;
   E, climbing, crawling, grabbed, down, dead or without control — readying / a swing / a scene ends one at once. A
   script that takes the body mid-glance keeps any pose it sets; the glance's pose is recorded as the plain 'phone'
   carry by `poseSnapshot`, so it never comes back after a scene. The Unread's torch-spill check sees the lowered beam.
+  Input side: the phone action is still one action (`'phone'`: C, D-pad up, LB); Game tells the tap from the hold with
+  `Input.releasedAfter('phone')` (CONTRACT+: the length of the hold that ended this frame) and Player with
+  `Input.heldTime('phone')`, so `SH.press('phone')` (a 0 s press) is a tap that opens the menu, and a script that
+  wants the glance holds a real C across `SH.advance` (`tools/tests/signal.mjs` does).
 * Weapons: `ITEMS[id].weapon = {dmg, speed:'fast'|'slow', range, arc, knock, spray}`; defaults exist for
   box_cutter / steel_bar / extinguisher. Extinguisher: ready + attack sprays (`S.ammo.extinguisher`), attack alone bashes.
   Every extinguisher picked up adds its `ITEMS.extinguisher.ammo` (6) sprays (the first one sets the count); the
@@ -708,7 +712,9 @@ setup screen); `SH_DEATH=1` kills Aidan once in every boss fight (Chapters 1 3 4
 screen's CONTINUE restores the latest save exactly before the chapter's test plays on (the notes the test wrote before
 the death still count); `SH_RESUME=1` continues every
 chapter from its autosave before playing it; `SH_FROM_AUTO=.build/chainlogs/<path>_<riddle>_chN.auto.json` replays from
-a chapter-start autosave a run wrote. The release matrix: connected (normal, `SH_RIDDLE=hard`, `SH_RIDDLE=easy
+a chapter-start autosave a run wrote; `SH_SIGNAL=unreliable|classic` sets Options → SIGNAL before NEW GAME (default:
+none, i.e. the game's UNRELIABLE) — the chain checks the Phone plays that mode, and its timeline ends with where the
+first real reading came and the phantoms each chapter met (Bus `'signal:real'` / `'signal:phantom'`). The release matrix: connected (normal, `SH_RIDDLE=hard`, `SH_RIDDLE=easy
 SH_ACTION=easy`, `SH_DEATH=1`), coverage, tomorrow (normal, `SH_ACTION=hard`), deal — each must end `PASS chain …` —
 plus `tools/tests/stickers.mjs` (each Ollie sticker placed once in `src/data` and taken in its room; the first
 playthrough is not Yes; after its ending, EXTRA → NEW GAME+ starts playthrough 2 with the stickers and the bar, and
@@ -855,6 +861,16 @@ Chromium hangs while it boots, with several browsers running). `run.mjs` exits 1
   direction, after 2 s a sidestep now and then: the camera-relative 8-way keys can drift him up to 22° into a cubicle
   mouth, and a target a few degrees off the pressed axis then never frees him). To replay a flaky run, seed it: `let s = N;
   Math.random = () => …` (a small PRNG) in the test before the chapter starts.
+* **The signal in the suite.** Every script plays the game's default, the UNRELIABLE signal (no always-on bars HUD,
+  only aware monsters read, lag and wobble, phantoms from Chapter 1). No chapter, chain, ending, skipall or title check
+  reads the automatic bars; the scripted beats they do check (the hospital's NO SERVICE, the mast's flicker, the
+  Outage climb) are overrides and show exactly as authored in both modes, and a skip resolves the lag, so skipall's
+  played and skipped runs leave the same static. The old radar is asserted on purpose only where CLASSIC is the
+  subject — `options.mjs` (the SIGNAL row) and `signal.mjs` (CLASSIC against the old radar tick for tick, CLASSIC's
+  HUD) switch to `'classic'` for those checks and back; `SH_SIGNAL=classic` plays the chain on the radar. A new check
+  that needs the radar's instant, always-on reading (bars from a dormant monster, the HUD up with nothing scripted)
+  must set CLASSIC for that check (`SH.mod.Save.setOption('signal', 'classic')`, or `META.options.signal` in memory);
+  one that must not meet a phantom in a long quiet stretch can raise `Phone.TUNE.quiet` for its duration.
 * **Canvas textures that are read back** (`Tex.util.age`, `pix`, any `getImageData`) must be created with
   `getContext('2d', { willReadFrequently: true })` (every chapter's `ctex` helper does now; Tex / Kit / props always did).
   A GPU-backed canvas makes each readback wait for the GPU process: entering Stairwell A stalled for 10 s to minutes in

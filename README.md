@@ -87,7 +87,9 @@ Choices are saved and applied the next time the game starts.
 **Signal** decides how far you can trust Aidan's phone. **Unreliable** (the default): the phone only picks up what has
 already found him, the bars are slow to catch up and never sit still, and now and then they show something that isn't
 there. The bars stay off the screen: listen for the static, or hold C to check the phone. **Classic**: the phone
-reacts to every monster within 20 m, at once, like a radar, and the bars appear on screen by themselves.
+reacts to every monster within 20 m, at once, like a radar, and the bars appear on screen by themselves. Either way,
+the moments the story scripts (a call coming in, a place with no service) show on screen as they always have, and a
+change takes effect at once, even in the middle of a chapter.
 
 ### The debug overlay
 

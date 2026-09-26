@@ -18,6 +18,9 @@
 //                 boss fights (a few seconds in; Chapter 8 once Phase 2 starts); the death screen → CONTINUE (as a
 //                 player: the latest save) must restore the save exactly, with nothing of the death, the fight or the
 //                 Outage left over; then the chapter's test carries on from there (play(h, {resume:true})) to the end
+//      SH_SIGNAL  unreliable | classic — META.options.signal before NEW GAME (default: none set, i.e. the game's default,
+//                 UNRELIABLE); the chain checks the Phone plays that mode and prints the first real reading and the
+//                 phantoms per chapter (Bus 'signal:real' / 'signal:phantom')
 //      SH_VERBOSE 1 — print every chapter's notes
 //      SH_RENDER  1 — keep drawing frames (by default renderer.render is a no-op: see install())
 //
@@ -95,6 +98,8 @@ async function install(h, o = {}) {
     B.on('load', (slot) => C.ev.push({ k: 'load', slot, calls: { ...M.S.calls }, ...at() }));
     B.on('outage', (on) => C.ev.push({ k: 'outage', on, room: M.World.room, ...at() }));
     B.on('voicemail', (id) => C.ev.push({ k: 'vm', id, ...at() }));
+    B.on('signal:real', () => C.ev.push({ k: 'sigreal', room: M.World.room, ...at() }));
+    B.on('signal:phantom', (p) => C.ev.push({ k: 'phantom', peak: p ? p.peak : null, tell: (p && p.tell) || null, room: M.World.room, outage: !!M.S.outage, ...at() }));
     B.on('save', (slot) => {
       try {
         const raw = localStorage.getItem(M.Save._key(slot));
@@ -472,22 +477,27 @@ export default async function (page, h) {
   let from = process.env.SH_FROM ? Number(process.env.SH_FROM) : 0;
   const fromAuto = process.env.SH_FROM_AUTO || '';
   const deathArg = process.env.SH_DEATH || '';
+  const signal = process.env.SH_SIGNAL || '';
+  if (signal && !['unreliable', 'classic'].includes(signal)) throw new Error('SH_SIGNAL must be unreliable|classic');
   // '1' → every boss fight; 'std' → the Standard roaming (Chapters 5 and 6); or a list: '4,8,s5' (s = the Standard)
   const DEATH = new Map(deathArg === '1' ? [1, 3, 4, 5, 6, 8].map((n) => [n, 'boss']) : deathArg === 'std' ? [[5, 'std'], [6, 'std']]
     : deathArg.split(',').filter(Boolean).map((x) => (x[0] === 's' ? [Number(x.slice(1)), 'std'] : [Number(x), 'boss'])));
   if (!WANT_ENDING[path]) throw new Error('SH_PATH must be connected|coverage|tomorrow|deal');
   if (shots) fs.mkdirSync(shots, { recursive: true });
   const T0 = Date.now();
-  const tag = `${path}/${riddle}${action !== 'normal' ? '/action-' + action : ''}${resume ? '/resume' : ''}${DEATH.size ? '/death-' + [...DEATH].map(([n, k]) => (k === 'std' ? 's' : '') + n).join('') : ''}`;
+  const tag = `${path}/${riddle}${action !== 'normal' ? '/action-' + action : ''}${signal ? '/signal-' + signal : ''}${resume ? '/resume' : ''}${DEATH.size ? '/death-' + [...DEATH].map(([n, k]) => (k === 'std' ? 's' : '') + n).join('') : ''}`;
   const all = [];                    // BUG lines
   const timeline = [];
   const handoffs = [];
   const shot = async (name) => { if (!shots) return; try { await ev(h, 'const r = SH.mod.Render.renderer, nr = r.render; if (r.__render) r.render = r.__render; try { SH.mod.Render.render(0); } finally { r.render = nr; } return 1'); await h.shot(`${shots}/${name}.png`); } catch (e) { /* optional */ } };
   let failed = null;
+  let sigMode = null;
 
   try {
     await install(h, { death: DEATH.size > 0 });
     await endSpy(h);
+    // SH_SIGNAL: the SIGNAL option as Options sets it (META.options.signal, persisted); none → the game's default
+    if (signal) await ev(h, `SH.mod.Save.setOption('signal', ${JSON.stringify(signal)}); return 1`);
     // (Chapter 8: the death comes in Phase 2, "The Close", when the Closer fights back — on the deal path, which never
     // gets there, during the Pitch)
     if (DEATH.size && path !== 'deal') await ev(h, 'const D = window.__chain.death; D.cond[8] = () => !!(SH.c8 && SH.c8.fight && SH.c8.fight.phase === 2); return 1');
@@ -522,6 +532,13 @@ export default async function (page, h) {
       await shot('p1');
       if (path !== 'connected') { await ev(h, 'SH.skip(); return 1'); console.log(`P-1 started (${p1.room}); skipped`); }
       else console.log(`P-1 started (${p1.room}); played through`);
+    }
+    // the signal the chain plays: SH_SIGNAL, else the default (UNRELIABLE, with no key in META.options)
+    {
+      const sg = await ev(h, 'return { mode: SH.mod.Phone.signalMode, opt: (SH.mod.META.options || {}).signal ?? null }');
+      sigMode = sg.mode;
+      console.log(`signal: ${sg.mode} (META.options.signal ${JSON.stringify(sg.opt)})`);
+      if (sg.mode !== (signal || 'unreliable')) all.push(`BUG: the phone plays the ${sg.mode} signal, want ${signal || 'unreliable (the default)'}`);
     }
     // ---- 2. the chapters -------------------------------------------------------------------------------------------
     let prev = null, lineMark8 = 0;
@@ -598,6 +615,8 @@ export default async function (page, h) {
       row.tp = await ev(h, `return +((window.__chain.tp[${n}] || 0)).toFixed(0)`);
       row.cs = csTime(evs, n);
       row.docs = (row.s.docs || 0) - (s0.docs || 0);
+      row.ph = evs.filter((e) => e.k === 'phantom' && e.ch === n);
+      row.sigReal = evs.find((e) => e.k === 'sigreal') || null;
       timeline.push(row);
       const fl = FATES.filter((k) => row.s.flags[k]).map((k) => k.replace('Saved', '')).join(' ') || '-';
       console.log(`${row.ok === false || bugs.length ? 'FAIL' : 'ok  '} chapter ${n} → ${n < 8 ? 'chapter ' + (n + 1) + ' at ' + row.s.room : 'the ending ' + r.ending}: F ${row.s.F} A ${row.s.A} · fates ${fl} · chaseHits ${row.s.chaseHits} · ${row.min.toFixed(1)} game-min · ${real.toFixed(0)} s real`);
@@ -690,6 +709,12 @@ export default async function (page, h) {
     totG += r.min; totE += est; totR += r.min + (r.tp || 0) / 3.5 / 60 + (r.docs || 0) * 20 / 60;
     const fl = FATES.filter((k) => r.s.flags[k]).map((k) => k.replace('Saved', '')).join(',') || '-';
     console.log(`  ${String(r.n).padStart(2)}  ${TITLES[r.n].padEnd(22)}  ${String(TARGET[r.n]).padStart(5)}  ${r.min.toFixed(1).padStart(8)}  ${walk.toFixed(1).padStart(8)}  ${est.toFixed(1).padStart(7)}  ${(`${(r.cs.played / 60).toFixed(1)}m/${r.cs.skipped}`).padStart(17)}  ${String(r.docs).padStart(4)}  ${String(r.s.F).padStart(3)} ${String(r.s.A).padStart(3)}  ${String(r.s.chaseHits).padStart(9)}  ${fl}`);
+  }
+  {
+    // the signal: where the first real (aware) reading came, and the phantoms each chapter's play met
+    const first = timeline.find((r) => r.sigReal);
+    const ph = timeline.flatMap((r) => r.ph || []);
+    console.log(`  signal ${sigMode || '?'}: first real reading ${first ? `in chapter ${first.n} (${first.sigReal.room}, ${first.sigReal.t} s)` : 'never'} · phantoms ${ph.length} (${timeline.map((r) => `ch${r.n} ${(r.ph || []).length}`).join(', ')}; ${ph.filter((e) => e.tell).length} with a fake tell; peaks ${ph.map((e) => e.peak).join(' ') || '-'})`);
   }
   console.log(`  total: ${totG.toFixed(1)} game-min measured; a first playthrough ≈ ${totR.toFixed(0)}–${totE.toFixed(0)} min (running … walking the skipped distance; spec §14 target 60–120); ${((Date.now() - T0) / 60000).toFixed(1)} min real`);
 

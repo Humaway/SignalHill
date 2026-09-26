@@ -55,7 +55,12 @@
   const now = () => (typeof Time !== 'undefined' ? Time.now : 0);
   const store = () => flag('c7_store');
   // transient presentation state (never saved)
-  const C7 = { lastCross: null, sides: {}, pinning: false, pageUntil: -1, voiceT: -99, entered: null, reachFx: null, amb: null, fill: null };
+  const C7 = { lastCross: null, sides: {}, pinning: false, pageUntil: -1, pageS: null, voiceT: -99, entered: null, reachFx: null, amb: null, fill: null };
+  // the page (7-page) keeps the three away from the Ward 3 doors until Time.now passes C7.pageUntil — in the same game
+  // state only: a load (a CONTINUE, a new game, a chapter select) replaces S and restarts Time.now at 0, and ends the
+  // page (it isn't saved: the three are back in their doors, as the save has them)
+  const C7_paging = () => C7.pageS === S && C7.pageUntil > now();
+  const C7_page = (sec) => { C7.pageUntil = now() + sec; C7.pageS = S; };
   try { if (typeof window !== 'undefined' && window.SH) window.SH.c7 = C7; } catch (e) { /* tests only */ }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -355,7 +360,7 @@
       const P = Player.pos;
       if (!P) return;
       const d = flat(e.pos, P);
-      const paging = C7.pageUntil > now();
+      const paging = C7_paging();
       const toP = Math.atan2(P.x - e.pos.x, P.z - e.pos.z);
       const canPin = !C7.pinning && Player.mode === 'normal' && !Player.dead && Math.abs(P.y - e.pos.y) < 1.2;
       // the page: every one of them answers
@@ -1534,7 +1539,7 @@
       if (store()) {
         G.bars('noservice', { room: true });
         if (from === 'c7_reception') G.sfx('chime', { vol: 0.8 });
-        if (C7.pageUntil > now()) C7_assignPage('c7_corridor');
+        if (C7_paging()) C7_assignPage('c7_corridor');
         if (G.once('c7:storeTip') && flag('c7_s71')) { /* the first time back in after 7-1 */ }
         return;
       }
@@ -1679,7 +1684,7 @@
     K.examine(29, 1.2, -11, ['Tablets on plinths, still sealed.', 'She had one of these. [beat] She never opened it.'], { id: 'c7st:tablets', r: 1.8 });
     K.examine(24, 2.3, -8.3, '"What brings you in today?" [beat] I don\'t know anymore.', { id: 'c7st:what', r: 2.4 });
     // the empty corner (north-east) and the one who steps into it
-    K.trigger([21.7, -18.3, 26, -17.4], (G) => C7_cornerStep(G), { id: 'c7_corridor:ne', when: () => flag('c7_store') && !(C7.pageUntil > now()) });
+    K.trigger([21.7, -18.3, 26, -17.4], (G) => C7_cornerStep(G), { id: 'c7_corridor:ne', when: () => flag('c7_store') && !C7_paging() });
   }
   // cuts to an empty corner before a Smile steps into it (spec §7B)
   async function C7_cornerStep(G) {
@@ -1724,9 +1729,9 @@
       { id: 'c7_nurses:corner', vol: [0, -0.7, 4.6, 1.6], pri: 1, type: 'static', pos: [7.55, 2.62, 5.65], target: [2.0, 0.6, 0.4], fov: 'fit' },
     ],
     spawns: [
-      { id: 'c7_nurses:d1', type: 'c7_smile', seed: 81, pos: [1.6, 0.15], rot: 0, post: [1.6, 0.15, 0], colR: 0.44, when: () => flag('c7_store') && !(C7.pageUntil > now()) },
-      { id: 'c7_nurses:d2', type: 'c7_smile', seed: 82, pos: [4.0, 0.15], rot: 0, post: [4.0, 0.15, 0], colR: 0.52, when: () => flag('c7_store') && !(C7.pageUntil > now()) },
-      { id: 'c7_nurses:d3', type: 'c7_smile', seed: 83, pos: [6.4, 0.15], rot: 0, post: [6.4, 0.15, 0], colR: 0.44, when: () => flag('c7_store') && !(C7.pageUntil > now()) },
+      { id: 'c7_nurses:d1', type: 'c7_smile', seed: 81, pos: [1.6, 0.15], rot: 0, post: [1.6, 0.15, 0], colR: 0.44, when: () => flag('c7_store') && !C7_paging() },
+      { id: 'c7_nurses:d2', type: 'c7_smile', seed: 82, pos: [4.0, 0.15], rot: 0, post: [4.0, 0.15, 0], colR: 0.52, when: () => flag('c7_store') && !C7_paging() },
+      { id: 'c7_nurses:d3', type: 'c7_smile', seed: 83, pos: [6.4, 0.15], rot: 0, post: [6.4, 0.15, 0], colR: 0.44, when: () => flag('c7_store') && !C7_paging() },
     ],
     build(K) {
       const st = store(), H = NU.H;
@@ -1795,7 +1800,7 @@
       C7_enterDoors('c7_nurses', from);
       if (store()) {
         G.bars('noservice', { room: true });
-        if (C7.pageUntil > now()) C7.nuAway = true;
+        if (C7_paging()) C7.nuAway = true;
         if (G.once('c7:nurses1')) {
           await G.wait(1.2);
           await G.think('The doors to Ward 3. [beat] They\'re standing in them.');
@@ -1808,7 +1813,7 @@
   });
   // the page is over: the three come back through the corridor door to their doors
   function C7_nursesReturn() {
-    if (!C7.nuAway || C7.pageUntil > now() || !store() || busy()) return;
+    if (!C7.nuAway || C7_paging() || !store() || busy()) return;
     C7.nuAway = false;
     for (const id of ['c7_nurses:d1', 'c7_nurses:d2', 'c7_nurses:d3']) {
       if (Enemies.get(id)) continue;
@@ -2184,7 +2189,7 @@
   defineCutscene('7-page', async (G) => {
     const A = G.aidan, [mx, mz] = NU.mic;
     G.set('c7_paged', true);
-    C7.pageUntil = now() + 60;                               // (reset to 30 s once he has control again)
+    C7_page(60);                                             // (reset to 30 s once he has control again)
     C7.nuAway = true;
     if (A.raw) A.raw.idleLife = false;
     await A.walkTo(mx, mz - 0.64, { speed: 1.0 });
@@ -2216,7 +2221,7 @@
     for (const e of ds) e.data.scripted = false;
     G.camRelease();
     await G.think('They all answered.');
-    C7.pageUntil = now() + 30;                               // the doorways stay clear for thirty seconds
+    C7_page(30);                                             // the doorways stay clear for thirty seconds
     if (A.raw) A.raw.idleLife = true;
     note(G, 'The doors are clear. Not for long.', 'c7_goal');
   }, { letterbox: false, skippable: true });

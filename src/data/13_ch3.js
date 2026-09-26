@@ -2519,6 +2519,8 @@
     }
     await G.wait(1.2);
     await G.doc('wai_email', { id: 'c3:waiEmail', open: !G.skipping });
+    // (skipped: no reading view, but the email lands in the memos read — as the played scene leaves it; spec §14)
+    if (G.skipping) Script.readDoc('wai_email');
     G.cam({ pos: [5.25, 1.5, 7.95], target: [2.4, 1.35, 6.0], fov: 38, to: { pos: [5.15, 1.49, 7.88], fov: 36 }, dur: 30 });
     W.look(null); if (W.raw) { W.raw.eyes('down'); W.raw.expr('flat'); }
     await G.say('WAI', 'They\'ve got a chatbot doing the screen bookings now. \'Hi! I\'m here to help!\' [beat] I trained the kid who built the booking page.');

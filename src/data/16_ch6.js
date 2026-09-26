@@ -731,7 +731,12 @@
     const A = G.aidan;
     if (fv('c6_case')) return;
     if (A.raw) A.raw.idleLife = false;
-    await A.walkTo(ES.term[0] - 0.05, 1.05, { speed: 0.8 });
+    // to the terminal's side of the desk, beside the office chair (the chair stands on the spot in front of the screen:
+    // a walk there stopped short against it, while a skip snapped him into it); from the east end he goes round the
+    // chair by the window. Where he ends up is state: a plain placement after the walk (spec §14 skip)
+    const TX = 2.35, TZ = 1.05;
+    await A.walkTo(A.pos.x > ES.desk[0] ? [[Math.min(A.pos.x, 4.2), 0.45], [TX, 0.45], [TX, TZ]] : [[TX, TZ]], { speed: 0.8 });
+    A.place(TX, TZ);
     await A.turn(0, 0.4);
     A.look([ES.term[0], 1.0, ES.term[1]]);
     G.cam({ pos: [ES.term[0] - 0.9, 1.75, 0.35], target: [ES.term[0], 0.98, ES.term[1] + 0.05], fov: 36 });

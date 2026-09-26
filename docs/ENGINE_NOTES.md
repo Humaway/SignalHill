@@ -249,6 +249,16 @@ name); `switchboard/lamp_panel.setLamp`;
   `inheritSkip:false`: a scene started with `inheritSkip:false` is its own skip chain (skipping it never climbs to the
   scene that started it, and a skip of that scene never swallows it). A skipping script that keeps waiting in a loop
   (a `G.bg` cheer loop) yields a frame every 24 instant waits, so it can never freeze the page.
+  Two traps `tools/tests/skipall.mjs` caught (spec §14 — a skipped scene must leave S, the room and the screen as the
+  played one does): **a walk that can stop short** (the player's walks collide: 6-terminal's walk into the office
+  chair stopped 0.8 m short, while a skip snaps him to the target, into the chair) — walk to a free spot, and where
+  he ends up matters, end with a plain `A.place(x, z)`; **a reading view left out when skipping**
+  (`G.doc(id, {open: !G.skipping})`, 3-2's email) adds the document unread and applies none of its `track` — follow it
+  with `if (G.skipping) Script.readDoc(id)`. A music cue a scene starts is dropped by a skip (so is its tail after the
+  scene): fine for the finite motifs; a cue that must play on into gameplay needs `Snd.music` outside the skip rule.
+  And a third, about loads: a chapter file's own transient state (never saved) outlives a load, while a load replaces S
+  and restarts `Time.now` at 0 — 7-page's "the doors stay clear until Time.now passes C7.pageUntil" kept the three away
+  for as long as the game had run before a CONTINUE. Tie such state to the live state object (`C7.pageS === S`).
 * **Aidan's body in scenes:** while a letterboxed scene owns him (`Script.cutscene` and no control) the equipped weapon
   is put away — it comes back when the scene ends, hands control back (`G.control(true)`) or suspends for a `G.boss`;
   `A.hold('L', 'bar')` shows it on purpose. Each letterboxed scene snapshots his arm carry poses when it starts and
@@ -627,7 +637,40 @@ a chapter-start autosave a run wrote. The release matrix: connected (normal, `SH
 SH_ACTION=easy`, `SH_DEATH=1`), coverage, tomorrow (normal, `SH_ACTION=hard`), deal — each must end `PASS chain …` —
 plus `tools/tests/stickers.mjs` (each Ollie sticker placed once in `src/data` and taken in its room; the first
 playthrough is not Yes; after its ending, EXTRA → NEW GAME+ starts playthrough 2 with the stickers and the bar, and
-Chapter 8's hut door opens onto E-YES → credits over the hold music → results → title) and `tools/tests/endings.mjs`.
+Chapter 8's hut door opens onto E-YES → credits over the hold music → results → title), `tools/tests/endings.mjs`
+and `tools/tests/skipall.mjs` (spec §14 "every cutscene is skippable and still applies its state changes", below).
+
+**Every cutscene, played and skipped** — `tools/tests/skipall.mjs`:
+```
+node tools/build.mjs --out .build/skip.html
+node tools/run.mjs --file .build/skip.html --size 640x360 --quiet --script tools/tests/skipall.mjs
+```
+For every id in `CUTSCENES` (read in the page) the scene runs twice from the same state — PLAYED through
+(`SH.advance`, every choice option 0, an in-world screen's first button, E held for a `G.hold`, a reading view closed)
+and SKIPPED (`SH.skip()` the moment its Bus `'cutscene' start` fires; a scene it starts in a skip chain of its own —
+8-1 → 8-2 — is skipped as it comes) — and the two must agree: S when the scene ends (play time, walked/ran and
+`S.pos` left out; `cs:` markers listed only) and its story part again 10 s later, Aidan's position (0.35 m), the room's
+NPCs (place, shown; loop, face, hand props once settled), monsters and doors, the scenes it started, its autosaves, its
+choices, and 10 s after it the letterbox, HUD, fade, post chain and grade, music, ambient bed, cameras, control and
+locks, Aidan's body. The skip
+must work (`Script.skip()` → true) and end the scene at once (only choices, screen buttons and holds still wait); once
+nothing holds the player, neither run may leave the letterbox, a scripted camera, a skip, the HUD down or the screen
+black (the ending hand-overs — E-*, 8-2A — end on black by design). A scene that starts a boss fight (1-3, 4-2, 5-3) is
+compared as the fight starts. A music cue the scene started that still plays out after the played scene is listed, not
+failed (a skip drops the scene's cues). The start states are **snapshots of real playthroughs**: the first time a scene's
+function is called in a chain run, its S (minus its own `cs:` marker — the state right before the scene was asked for),
+Aidan's live position, the room and the caller's options are written to `.build/skipall/<path>/<id>.json`
+(`SH_SKIPALL=capture`); the replay loads a snapshot as a save is loaded (slot 3 → `Game.continueFrom(2)`), lets the room
+start the scene if it does so on entering (an onEnter, a trigger under his feet), else aborts what the room started that
+would hold the player (a fight resumed from its autosave) and plays it with `Script.playCutscene`; `Math.random` is seeded
+alike before the load and as the scene starts. Missing snapshots are taken first: the four chains side by side
+(connected, coverage, tomorrow, deal, ~12 min); E-YES (a second playthrough) and TR-1 (the test room) start from
+`SH.chapter(n)` (+ `SH.preset('yes')` / `SH.goto('test_room')`). A replay of all 51 scenes takes ~3 min.
+`SH_ONLY=3-2,6-terminal` a subset · `SH_CAPTURE=1` new snapshots (0: never) · `SH_ALLPATHS=1` every path's snapshot of
+each scene (163 runs) · `SH_CHOICE=1` the other option of every choice · `SH_RELOAD=cs|run` a fresh page per scene / run
+(by default a mismatch is retried once with a reload before each run: only one that survives counts) · `SH_VERBOSE=1`
+each run's timeline and the room it left. Prints a row per scene (game seconds played / skipped, the S changes the scene
+made, the differences) and `PASS skipall`.
 The Action level changes what is in the rooms: Easy adds the `extraOnEasy` heal pickups (one can be the nearest thing
 to an E press meant for an examine, a door or a sticker next to it: `press(h, 'interact')` in `tools/tests/lib.mjs` then
 takes the pickup first and presses again, as a player would), Hard leaves out a fixed ~30 % of the

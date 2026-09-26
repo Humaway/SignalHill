@@ -575,6 +575,9 @@ defineChapter({ n: 1, id: 'ch1', title: 'THE PLAZA', card: 'SIGNAL HILL PLAZA', 
   when LOADING ends, `Game.boot` shows one line on black — PRESS ANY KEY TO BEGIN (`SH.gate` is true meanwhile) — and
   starts the title after that key, so its 3 s of static and the ringing phone are heard; a page allowed to play sound
   (the test harness) never sees it. `tools/tests/audiogate.mjs` (needs `SH_CHROME_ARGS="--autoplay-policy=document-user-activation-required"`).
+* **No Three.js.** When the import map's CDN can't be reached the game module never runs at all. A classic script at
+  the end of `src/shell.html` checks `window.SH` after 15 s; if it is still missing, the LOADING text becomes "STILL
+  WAITING FOR THREE.JS" with a line asking the player to check the connection and reload.
 * **Title backdrop:** `ROOMS.t_title` is built on its own — no player, spawns, triggers or `onEnter`; its `animated`
   callbacks run; its first camera is used with a slow push (a `keys` camera plays as is). Without it a built-in fog
   vista shows. **Attract (60 s idle):** `defineScript('title:attract', async (G, {signal, show}) => { await show(
@@ -589,6 +592,8 @@ defineChapter({ n: 1, id: 'ch1', title: 'THE PLAZA', card: 'SIGNAL HILL PLAZA', 
 ---
 
 ## 8. Testing a room or a chapter
+
+`tools/tests/README.md` lists every script in the regression suite: how to run it, what it covers and how long it takes.
 
 ```
 node tools/build.mjs --out .build/me.html && node tools/lint.mjs .build/me.html

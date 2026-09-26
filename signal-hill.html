@@ -60102,5 +60102,15 @@ try {
 }
 
 </script>
+<script>
+  // The game module above needs Three.js from the import map's CDN. When that never arrives (offline, a blocked CDN)
+  // the module never runs and nothing else would tell the player why the screen stays on LOADING.
+  setTimeout(function () {
+    if (window.SH) return;
+    var b = document.getElementById('boot');
+    if (b) b.innerHTML = '<div style="text-align:center;line-height:2.2">STILL WAITING FOR THREE.JS<br>'
+      + '<span style="letter-spacing:.12em;font-size:12px">Signal Hill loads its 3D engine from the internet. Check the connection and reload.</span></div>';
+  }, 15000);
+</script>
 </body>
 </html>

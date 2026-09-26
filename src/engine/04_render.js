@@ -823,6 +823,17 @@ const Render = (() => {
     composer.render(dt);
     worldCalls = renderer.info.render.calls - before - 1;
     worldTris = renderer.info.render.triangles - beforeT - 1;
+    keepPrograms();
+  }
+  // Shader programs are compiled once and kept: three.js destroys a program when the last material using it is
+  // disposed (a room's halos, its batch materials …), so every room entered again used to compile the same programs
+  // anew — a hitch at each door. Every program the renderer has made gets one extra reference here and lives for the
+  // session (a few dozen; Render.stats().programs).
+  const keptPrograms = new Set();
+  function keepPrograms() {
+    const list = renderer.info.programs;
+    if (!list || list.length === keptPrograms.size) return;
+    for (const p of list) if (!keptPrograms.has(p)) { keptPrograms.add(p); p.usedTimes++; }
   }
   function freeze(v = true) {
     const was = frozen;

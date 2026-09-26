@@ -31,7 +31,8 @@
 //   (META.endingsSeen / results / completed → EXTRA and New Game+ unlock); Aidan's body is put back as a new game
 //   expects it (posture, the phone in his hand, nothing in the other), then the title.
 // Fog culling: Rig actors beyond the fog's cutoff (≈ 2.45 / density m) are skipped by the renderer (render layer 1),
-//   with the groups listed in actor.cullWith (an enemy's fx group); it runs on SH.advance's manual ticks too.
+//   with the groups listed in actor.cullWith (an enemy's fx group), and so are the room's merged static batches (kit:*)
+//   wholly beyond 3 / density; it runs on SH.advance's manual ticks too.
 // Debug jumps (Game.debugRoom = SH.goto) in play cancel a transition in flight and abort running blocking scripts.
 // CONTRACT+: Game.fps, Game.culled, Game.manual(on) (SH.advance), Game.autosave(), Game.goTitle(), Game.results(name) (the §2A results
 //   record + stars without showing it), Game.rank(stats), Game.stickerCount(S), Game.debugStart(n, o),
@@ -315,15 +316,48 @@ const Game = (() => {
   // the Tethered's tether and box — set by Enemies) are culled with it
   function setCulled(a, off) {
     if (off) culled.add(a); else culled.delete(a);
-    const set = (o) => { if (off) o.layers.set(CULL_LAYER); else o.layers.set(0); };
+    // (parts drawn by the figure's batch — Rig.batch — stay on no layer at all: userData.rigHidden)
+    const set = (o) => { if (o.userData.rigHidden) return; if (off) o.layers.set(CULL_LAYER); else o.layers.set(0); };
     a.root.traverse(set);
     if (Array.isArray(a.cullWith)) for (const g of a.cullWith) if (g && g.traverse) g.traverse(set);
+  }
+  // Static geometry too: the room's merged batches (kit:* — most of a room's triangles, in ≤ 40 m cells) whose nearest
+  // point lies beyond 3 / density (FogExp2 lets e^-9 ≈ 0.01 % through: nothing shows, even a bright emissive) go to
+  // layer 1 as well — a long street no longer draws the blocks the fog has swallowed. Only fogged materials; only the
+  // room's static batches (they never move). Game.staticCulled → how many this frame.
+  let sBuild = null, sList = [], sCulled = 0;
+  function staticList(rb) {
+    const out = [];
+    for (const m of rb.group.children) {
+      if (!m.isMesh || !/^kit:/.test(m.name) || !m.geometry) continue;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      if (mats.some((q) => !q || q.fog === false)) continue;
+      if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+      m.updateMatrixWorld(true);
+      out.push({ m, s: m.geometry.boundingSphere.clone().applyMatrix4(m.matrixWorld), off: false });
+    }
+    return out;
+  }
+  function staticCull(d) {
+    const rb = typeof World !== 'undefined' ? World.build : null;
+    if (rb !== sBuild) { sBuild = rb; sList = rb && rb.group ? staticList(rb) : []; sCulled = 0; }
+    if (!sList.length) return;
+    const far = d > 0.004 ? 3 / d : Infinity;
+    Render.camera.getWorldPosition(_cp);
+    let n = 0;
+    for (const it of sList) {
+      const off = far < Infinity && _cp.distanceTo(it.s.center) - it.s.radius > far;
+      if (off !== it.off) { it.off = off; it.m.layers.set(off ? CULL_LAYER : 0); }
+      if (off) n++;
+    }
+    sCulled = n;
   }
   function fogCull() {
     const live = Rig.actors;
     for (const a of [...culled]) if (!live.has(a)) culled.delete(a);
     const d = Render.fog ? Render.fog.density : 0;
     const me = Player.actor;
+    staticCull(d);
     if (!(d > 0.004)) { for (const a of [...culled]) setCulled(a, false); return; }
     const far = Math.sqrt(6) / d;
     Render.camera.getWorldPosition(_cp);
@@ -755,6 +789,7 @@ const Game = (() => {
     },
     get flow() { return flow; },
     get culled() { return culled.size; },
+    get staticCulled() { return sCulled; },
     get fps() { return fps; },
     ENDINGS, STICKERS,
   };

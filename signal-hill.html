@@ -5721,6 +5721,17 @@ const Render = (() => {
     composer.render(dt);
     worldCalls = renderer.info.render.calls - before - 1;
     worldTris = renderer.info.render.triangles - beforeT - 1;
+    keepPrograms();
+  }
+  // Shader programs are compiled once and kept: three.js destroys a program when the last material using it is
+  // disposed (a room's halos, its batch materials …), so every room entered again used to compile the same programs
+  // anew — a hitch at each door. Every program the renderer has made gets one extra reference here and lives for the
+  // session (a few dozen; Render.stats().programs).
+  const keptPrograms = new Set();
+  function keepPrograms() {
+    const list = renderer.info.programs;
+    if (!list || list.length === keptPrograms.size) return;
+    for (const p of list) if (!keptPrograms.has(p)) { keptPrograms.add(p); p.usedTimes++; }
   }
   function freeze(v = true) {
     const was = frozen;
@@ -5863,7 +5874,7 @@ const Render = (() => {
 //   (maintenance CONTRACT+: K.walkable / K.floor {visible:false}, K.prop pitch/tilt, K.light prio/pin/haloColor/haloFog,
 //   y bands on K.exit/K.trigger/interactables, interactable prio / crawl, K.plane double = two faces, K.door hinge
 //   'L'|'R' / swing 'front'|'back', both:false walls have no top cap, the light-cluster warning counts real lights.)
-//   Kit.inBox(box,x,z); Kit.matchWorld(w,outage); Kit.mergeGeometries(items); Kit.mat(spec); Kit.last; Kit.tex.*.
+//   Kit.inBox(box,x,z); Kit.matchWorld(w,outage); Kit.mergeGeometries(items, withColor); Kit.mat(spec); Kit.last; Kit.tex.*.
 //   RoomBuild: applyWorld(outage) (tagged visibility + light world state), heightAt(x,z,outage), ambient
 //     ({color,intensity}|null from K.ambient — apply with Render.setAmbient), stats, disposed.
 //   Door records: setOpen(0..1) (visual only; World toggles collider.enabled), amount, pivots[], passAt, hinge, swing.
@@ -6446,7 +6457,7 @@ const Kit = (() => {
       if (m.children.length || !m.visible || m.renderOrder || Array.isArray(m.material) || !m.material || !m.geometry) return;
       if (m.material.transparent && m.material.depthWrite !== false) return;
       if (m.onBeforeRender !== THREE.Object3D.prototype.onBeforeRender || m.userData.noBounds) return;
-      for (let p = m.parent; p && p !== g; p = p.parent) if (!p.visible || p.userData.kitWorld || p.userData.kitNoMerge || p.userData.kitMerge === false) return;
+      for (let p = m.parent; p && p !== g; p = p.parent) if (!p.visible || p.userData.kitWorld || (p.userData.kitNoMerge && !p.userData.subStatic) || p.userData.kitMerge === false) return;
       const geo = m.geometry;
       if (!geo.attributes.position || !geo.attributes.normal || (!geo.index && geo.attributes.position.count % 3)) return;
       const col = !!geo.attributes.color && !!m.material.vertexColors;
@@ -6522,11 +6533,13 @@ const Kit = (() => {
   // ---------------------------------------------------------------------------------------------------------------
   // Prop registry (PROPS lives in core). Kit.defineProp(kind, builder(K, opts) → Object3D, meta)
   //   meta: { collide: true|false|'auto'|number (pole radius)|[x0,z0,x1,z1] (local), h, static:true (never changes
-  //   after build → merged into the room's static batches) }. CONTRACT+ (third argument).
+  //   after build → merged into the room's static batches), textName:true (the kind's `name` opt is text it prints —
+  //   a shop's sign, a cubicle's name card — not an object name: such a prop stays static and merges with the room;
+  //   `objName` names it for G.obj) }. CONTRACT+ (third argument).
   // ---------------------------------------------------------------------------------------------------------------
   function defineProp(kind, builder, meta = {}) {
     if (PROPS[kind]) console.warn(`[Kit] prop "${kind}" redefined`);
-    PROPS[kind] = { kind, build: builder, collide: meta.collide, h: meta.h, static: !!meta.static };
+    PROPS[kind] = { kind, build: builder, collide: meta.collide, h: meta.h, static: !!meta.static, textName: !!meta.textName };
     return PROPS[kind];
   }
   // Default collide rules for kinds where the bounding-box heuristic is wrong. false = never; number = a pole of
@@ -7599,8 +7612,11 @@ const Kit = (() => {
       const def = PROPS[kind];
       const builder = def ? (typeof def === 'function' ? def : def.build) : null;
       const y = yDef(o.y, x, z), sc = o.scale ?? 1, w = W(o);
-      const g = new THREE.Group(); g.name = o.name || kind; g.userData.prop = kind;
-      const isStatic = (o.static ?? (def && def.static)) === true && !o.name && (!ctx.inProp || ctx.propStatic);
+      // (a textName kind prints its `name` — a shop sign — so only `objName` makes it a named, separate object)
+      const objName = def && def.textName ? o.objName || null : o.name || null;
+      const g = new THREE.Group(); g.name = objName || kind; g.userData.prop = kind;
+      const ownStatic = (o.static ?? (def && def.static)) === true && !objName;
+      const isStatic = ownStatic && (!ctx.inProp || ctx.propStatic);
       const saved = { parent: ctx.parent, xf: ctx.xf, xfYaw: ctx.xfYaw, xfScale: ctx.xfScale, world: ctx.world, tagWorld: ctx.tagWorld, inProp: ctx.inProp, propStatic: ctx.propStatic };
       // CONTRACT+ o.pitch / o.tilt (degrees about the prop's own X / Z after its yaw): props on slopes (guardrails along a
       // 10% road). Colliders stay yaw-only boxes.
@@ -7622,11 +7638,14 @@ const Kit = (() => {
         for (const k of Object.keys(obj.userData)) if (!(k in g.userData)) g.userData[k] = obj.userData[k];
       }
       if (!isStatic) g.userData.kitNoMerge = true; // a live prop: nothing inside may be baked into the room batches
+      // a static kind inside a named prop (a named pod's chair and phone): it moves with its parent, so its static parts
+      // may merge into the parent's own batches (propMerge), never into the room's
+      if (!isStatic && ownStatic) g.userData.subStatic = true;
       if (isStatic) g.traverse((c) => { if (c.isMesh && !c.isInstancedMesh && !c.isSkinnedMesh && c.material && !Array.isArray(c.material) && c.userData.kitMerge !== false) c.userData.kitMerge = true; });
-      else if (o.name && !saved.inProp && (o.static ?? (def && def.static)) === true && o.merge !== false) propMerge(g);   // named: merge inside
+      else if (objName && !saved.inProp && (o.static ?? (def && def.static)) === true && o.merge !== false) propMerge(g);   // named: merge inside
       const bb = meshBox(g);
       g.position.set(x, y, z); g.rotation.copy(eul); g.scale.setScalar(sc);
-      ctx.parent.add(g); tag(g, w); named(g, o.name);
+      ctx.parent.add(g); tag(g, w); named(g, objName);
       const c = Math.cos(rad(rotDeg)), s = Math.sin(rad(rotDeg));
       const toRoom = (lx, lz) => [x + (lx * c + lz * s) * sc, z + (-lx * s + lz * c) * sc];
       if (rb.colliders.length === nColl && !bb.isEmpty()) {
@@ -7634,11 +7653,11 @@ const Kit = (() => {
         const hh = (def && def.h) ?? bb.max.y;
         if (rule === true || (rule === 'auto' && autoCollide(bb))) {
           const [cx, cz] = toRoom((bb.min.x + bb.max.x) / 2, (bb.min.z + bb.max.z) / 2);
-          collRec(cx, cz, ((bb.max.x - bb.min.x) / 2) * sc, ((bb.max.z - bb.min.z) / 2) * sc, rotDeg, { h: (hh - Math.max(0, bb.min.y)) * sc, y: y + Math.max(0, bb.min.y) * sc, world: w, name: o.name });
-        } else if (typeof rule === 'number') collRec(x, z, rule * sc, rule * sc, rotDeg, { h: hh * sc, y, world: w, name: o.name });
+          collRec(cx, cz, ((bb.max.x - bb.min.x) / 2) * sc, ((bb.max.z - bb.min.z) / 2) * sc, rotDeg, { h: (hh - Math.max(0, bb.min.y)) * sc, y: y + Math.max(0, bb.min.y) * sc, world: w, name: objName });
+        } else if (typeof rule === 'number') collRec(x, z, rule * sc, rule * sc, rotDeg, { h: hh * sc, y, world: w, name: objName });
         else if (Array.isArray(rule)) {
           const r0 = normBox(rule), [cx, cz] = toRoom((r0[0] + r0[2]) / 2, (r0[1] + r0[3]) / 2);
-          collRec(cx, cz, ((r0[2] - r0[0]) / 2) * sc, ((r0[3] - r0[1]) / 2) * sc, rotDeg, { h: hh * sc, y, world: w, name: o.name });
+          collRec(cx, cz, ((r0[2] - r0[0]) / 2) * sc, ((r0[3] - r0[1]) / 2) * sc, rotDeg, { h: hh * sc, y, world: w, name: objName });
         }
       }
       if (o.examine || o.interact) {
@@ -8651,7 +8670,7 @@ const Kit = (() => {
     mat: (spec) => resolveMat(spec).mat,              // resolve a material spec (see header)
     itemModel: (item) => { const d = ITEMS[item]; try { if (d && typeof d.model === 'function') return d.model(); } catch (e) { console.error(e); } return genericItem(item); },
     clock: makeClock,                                 // Kit.clock([h, m]) → wall clock Object3D with userData.setTime/addMinutes
-    mergeGeometries: (items) => mergeGeometries(items.map((it) => (it.isBufferGeometry ? { geo: it, m: new THREE.Matrix4() } : it))),
+    mergeGeometries: (items, withColor = false) => mergeGeometries(items.map((it) => (it.isBufferGeometry ? { geo: it, m: new THREE.Matrix4() } : it)), withColor),
     COLLIDE_RULES,
     tex: { wiredGlass: wiredGlassTex, stripes: stripeTex, shutter: shutterTex, writing: writingTex, doc: docTex },
   };
@@ -10192,10 +10211,10 @@ const Kit = (() => {
   };
   // shopfront: facade segment, street side +Z, building behind (−Z): pilasters, parapet, stallboard, glazing with an
   // aluminium door, shallow dark interior + window display, sign on an awning fascia (or bulkhead when indoor).
-  // opts w (6), h (4.4), name, variant 'shop'|'repair'|'bank'|'newsagent'|'pharmacy'|'optus'|'stall'|'vacant',
+  // opts w (6), h (4.4), name (the sign's text — textName: objName names the prop), variant 'shop'|'repair'|'bank'|'newsagent'|'pharmacy'|'optus'|'stall'|'vacant',
   // shutter (true|0..1 closed), door ('left'|'center'|'right'|false), awning (bool), indoor (concourse shopfront),
   // poster (text) + posterKind, notice (text), newspaper ([headline, date]), lit (interior glow), number
-  def('shopfront', {}, (K, o, g) => {
+  def('shopfront', { textName: true }, (K, o, g) => {
     const v = o.variant || 'shop', P = SHOP[v] || SHOP.shop, r = rngOf(K, o, 'sf');
     const w = o.w ?? 6, indoor = o.indoor ?? !!P.indoor, H = o.h ?? (indoor ? 3.6 : 4.4);
     const name = o.name ?? P.name, pw = 0.36, ow = w - pw * 2;
@@ -12947,9 +12966,10 @@ const Kit = (() => {
 
   // --- offices --------------------------------------------------------------------------------------------------------
   // cubicle: call-centre cubicle opening to +Z — fabric partitions (1.3 m) on three sides, desk along the back, monitor,
-  // desk phone, headset on a hook, name card, sticky notes, family photo, task chair. opts w (1.8), d (1.6), name,
+  // desk phone, headset on a hook, name card, sticky notes, family photo, task chair. opts w (1.8), d (1.6), name (the
+  // name card's text — textName),
   // chair (true), lamp (desk lamp, lit — Chase's), ringing (phone LED), content (monitor), color (partitions)
-  def('cubicle', { collide: false }, (K, o, g) => {
+  def('cubicle', { collide: false, textName: true }, (K, o, g) => {
     const w = o.w ?? 1.8, d = o.d ?? 1.6, H = 1.3, r = rngOf(K, o, 'cub');
     const fab = TM(partitionTex(o.color || '#5e6a72'), { roughness: 0.95 }), cap = { tex: 'metal', color: '#9aa0a0', roughness: 0.45 };
     const zb = -d / 2;
@@ -14181,6 +14201,132 @@ const Rig = (() => {
   });
 
   // ---------------------------------------------------------------------------------------------------------------
+  // CONTRACT+ draw-call batching — Rig.batch(root, {filter}) → batch {meshes, parts, check(), dispose()}.
+  // A figure is ~50 meshes (one per segment, eye, lid, button …), so every figure on screen cost 40–66 draw calls. The
+  // batch draws all of a figure's parts that share a material with ONE SkinnedMesh per (material, casts, receives): its
+  // "bones" are the part meshes themselves (each part's geometry is baked in its own local transform; the bone matrix
+  // is the part's live matrixWorld times the inverse of that transform), so every animation — bones, eyes, lids,
+  // dangles, a part's own scale — carries on exactly as before, and a part hidden (its own or an ancestor's
+  // `visible`) or taken out of the figure collapses to a point. The originals stay in the hierarchy (everything that
+  // moves, hides, reads or re-parents them works as before) but draw nothing (layers mask 0; Game's fog culling leaves
+  // them alone: userData.rigHidden). check() (every Actor.update) keeps it honest: a part whose material, geometry,
+  // shadow flags, render order or vertices change, or that leaves the figure, drops out of the batch and draws itself
+  // again; it also refreshes the batch's bounds (frustum culling). Held props, transparent parts and parts that
+  // are alone with their material are left as they are. A figure costs ~16–25 calls instead of 40–66 (+ ~3 instead
+  // of ~12 in the torch's shadow pass). Rig.batching = false (before figures are built) turns it off.
+  // ---------------------------------------------------------------------------------------------------------------
+  const B_COLLAPSE = new THREE.Matrix4().makeScale(0, 0, 0);
+  const _bm = new THREE.Matrix4(), _bInv = new THREE.Matrix4(), _bS = new THREE.Sphere();
+  const OBR0 = THREE.Object3D.prototype.onBeforeRender;
+  const bInside = (p, root) => { for (let q = p.parent; q; q = q.parent) if (q === root) return true; return false; };
+  function bShown(p, root) { for (let q = p; q; q = q.parent) { if (!q.visible) return false; if (q === root) return true; } return false; }
+  function batchable(m, root, filter) {
+    if (!m.isMesh || m.isSkinnedMesh || m.isInstancedMesh || m.userData.rigBatch || m.userData.noBatch) return false;
+    const g = m.geometry, mat = m.material;
+    if (!g || !mat || Array.isArray(mat) || !g.attributes.position || !g.attributes.normal || g.morphAttributes.position) return false;
+    if (g.drawRange.start !== 0 || g.drawRange.count !== Infinity || (!g.index && g.attributes.position.count % 3)) return false;
+    if (mat.transparent || m.renderOrder || m.onBeforeRender !== OBR0 || m.customDepthMaterial || m.customDistanceMaterial) return false;
+    for (let q = m.parent; q && q !== root; q = q.parent) if (/^prop:/.test(q.name) || (q.userData && q.userData.noBatch)) return false;
+    return !filter || !!filter(m);
+  }
+  function batch(root, o = {}) {
+    root.updateMatrixWorld(true);
+    const groups = new Map();
+    root.traverse((m) => {
+      // (a part hidden when the batch is built — a lash, a spare prop — is left out: it draws itself when shown)
+      if (!batchable(m, root, o.filter) || !bShown(m, root)) return;
+      m.updateMatrix();
+      if (Math.abs(m.matrix.determinant()) < 1e-12) return;
+      const key = m.material.uuid + '|' + (m.castShadow ? 1 : 0) + (m.receiveShadow ? 1 : 0);
+      let gr = groups.get(key);
+      if (!gr) { gr = { mat: m.material, cast: m.castShadow, recv: m.receiveShadow, parts: [] }; groups.set(key, gr); }
+      gr.parts.push(m);
+    });
+    const recs = [], meshes = [], plan = [];
+    for (const gr of groups.values()) if (gr.parts.length >= 2) plan.push(gr);
+    if (!plan.length) return null;
+    for (const gr of plan) for (const p of gr.parts) {
+      const g = p.geometry;
+      if (!g.boundingSphere) g.computeBoundingSphere();
+      recs.push({ part: p, gr, mat: p.material, geo: g, ver: g.attributes.position.version, cast: p.castShadow, recv: p.receiveShadow, L0: p.matrix.clone(), off: false, mesh: null });
+    }
+    const bones = recs.map((r) => r.part), inverses = recs.map((r) => r.L0.clone().invert());
+    const skel = new THREE.Skeleton(bones, inverses);
+    const bound = new THREE.Sphere(new THREE.Vector3(), 2);
+    // (the renderer calls this once per frame per skeleton, just before drawing: every part's live world matrix, or a
+    // point for a hidden one)
+    skel.update = function () {
+      const arr = this.boneMatrices;
+      for (let i = 0; i < recs.length; i++) {
+        const r = recs[i];
+        if (r.off || !bShown(r.part, root)) B_COLLAPSE.toArray(arr, i * 16);
+        else _bm.multiplyMatrices(r.part.matrixWorld, this.boneInverses[i]).toArray(arr, i * 16);
+      }
+      if (this.boneTexture) this.boneTexture.needsUpdate = true;
+    };
+    let bi = 0;
+    for (const gr of plan) {
+      const items = [], idx = [];
+      for (const p of gr.parts) { const r = recs[bi]; items.push({ geo: r.geo, m: r.L0 }); idx.push(bi); bi++; }
+      const geo = Kit.mergeGeometries(items, !!gr.mat.vertexColors);
+      const n = geo.attributes.position.count, si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+      let v = 0;
+      items.forEach((it, k) => { const c = it.geo.attributes.position.count; for (let i = 0; i < c; i++, v++) { si[v * 4] = idx[k]; sw[v * 4] = 1; } });
+      geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
+      geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
+      const sm = new THREE.SkinnedMesh(geo, gr.mat);
+      sm.name = 'rigbatch:' + (gr.mat.name || gr.mat.type);
+      sm.castShadow = gr.cast; sm.receiveShadow = gr.recv;
+      sm.bindMode = 'attached';
+      sm.bind(skel, new THREE.Matrix4());
+      sm.boundingSphere = bound; sm.boundingBox = new THREE.Box3();
+      sm.layers.mask = root.layers.mask;
+      sm.userData.rigBatch = true; sm.userData.live = gr.parts.length;
+      root.add(sm);
+      meshes.push(sm);
+      for (const k of idx) recs[k].mesh = sm;
+    }
+    for (const r of recs) { r.part.layers.mask = 0; r.part.userData.rigHidden = true; }
+    const drop = (r) => {
+      if (r.off) return;
+      r.off = true;
+      r.part.layers.mask = root.layers.mask; delete r.part.userData.rigHidden;
+      r.mesh.userData.live--;
+      if (r.mesh.userData.live <= 0) r.mesh.visible = false;
+    };
+    const B = {
+      root, meshes, recs, skeleton: skel, bound,
+      get parts() { return recs.filter((r) => !r.off).length; },
+      // every frame, after the figure's matrices are updated: parts that changed drop out; the bounds follow the pose
+      check(updateMatrices = false) {
+        if (updateMatrices) root.updateMatrixWorld(true);        // (a group moved by code after its last matrix update)
+        for (const r of recs) {
+          if (r.off) continue;
+          const p = r.part;
+          if (p.material !== r.mat || p.geometry !== r.geo || p.castShadow !== r.cast || p.receiveShadow !== r.recv || p.renderOrder || r.geo.attributes.position.version !== r.ver || !bInside(p, root)) drop(r);
+        }
+        _bInv.copy(root.matrixWorld).invert();
+        let first = true;
+        for (const r of recs) {
+          if (r.off) continue;
+          _bS.copy(r.geo.boundingSphere).applyMatrix4(_bm.multiplyMatrices(_bInv, r.part.matrixWorld));
+          if (first) { bound.copy(_bS); first = false; } else bound.union(_bS);
+        }
+        bound.radius += 0.12;                                    // (a frame of motion: eyes / dangles move after this)
+        for (const sm of meshes) sm.boundingBox.makeEmpty().expandByPoint(bound.center).expandByScalar(bound.radius);
+      },
+      dispose() {
+        for (const r of recs) if (!r.off) { r.part.layers.mask = root.layers.mask; delete r.part.userData.rigHidden; r.off = true; }
+        for (const sm of meshes) { sm.removeFromParent(); sm.geometry.dispose(); }
+        skel.dispose();
+        meshes.length = 0;
+      },
+    };
+    B.check();
+    return B;
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
   // Actor
   // ---------------------------------------------------------------------------------------------------------------
   let ACTOR_N = 0;
@@ -14236,12 +14382,24 @@ const Rig = (() => {
       this.setAnim(P.anim || 'idle', { blend: 0 });
       if (P.expr) this.expr(P.expr);
       this.update(0);
+      this._batchOn = P.batch !== false && api.batching !== false;
+      this.rebatch();
+    }
+    // CONTRACT+: rebatch() — (re)build the figure's draw-call batch (Rig.batch) from the parts it has now; runs at the
+    // end of the build, after trimShadows() (Enemies calls it once a monster's parts are on) and when wear() adds a part
+    rebatch() {
+      if (this._batch) { this._batch.dispose(); this._batch = null; }
+      this._batchDirty = false;
+      if (!this._batchOn || this.disposed) return this;
+      try { this._batch = batch(this.root); } catch (e) { console.error('[Rig] batch', e); this._batch = null; }
+      return this;
     }
     // CONTRACT+: trimShadows() — shadows (the torch is the only caster): one caster per major segment — its largest
     // piece — is plenty for the soft 1024 map and keeps an actor's torch-shadow pass at ~12 draws instead of ~25.
     // Everything else (layers under the outer garment, hands, feet, face details, accessories, held props) receives
     // but doesn't cast. Run at build; Enemies runs it again after adding a monster's parts.
     trimShadows() {
+      if (this._batch) { this._batch.dispose(); this._batch = null; this._batchDirty = true; }
       const major = new Set(['hips', 'spine', 'chest', 'head', 'upperArmL', 'upperArmR', 'foreArmL', 'foreArmR', 'thighL', 'thighR', 'shinL', 'shinR'].map((n) => this.bones[n]).filter(Boolean));
       const all = new Set(Object.values(this.bones));
       const best = new Map();
@@ -14255,6 +14413,7 @@ const Rig = (() => {
         const cur = best.get(b);
         if (!cur || r > cur.r) { if (cur) cur.m.castShadow = false; best.set(b, { m, r }); } else m.castShadow = false;
       });
+      if (this._batchDirty && this._batchOn) this.rebatch();
     }
     _dims() {
       const P = this.P, B = BUILDS[P.build], T = torsoDims(B);
@@ -16092,6 +16251,12 @@ const Rig = (() => {
     },
     // CONTRACT+: wear(kind, on) — 'headset' (operator headset on the head), 'glasses', 'earbuds', 'cap'
     wear(kind, on = true) {
+      const had = [this.glassesObj, this.buds, this._headset];
+      this._wear(kind, on);
+      if (had[0] !== this.glassesObj || had[1] !== this.buds || had[2] !== this._headset) this._batchDirty = true;   // a new part: batch it too
+      return this;
+    },
+    _wear(kind, on) {
       if (kind === 'glasses') { if (!this.glassesObj && on) this._glasses({ style: 'reading' }); else if (this.glassesObj) this.glassesState(on ? 'on' : 'off'); }
       else if (kind === 'earbuds') { if (!this.buds && on) this._earbuds('in'); else this.setEarbuds(on); }
       else if (kind === 'headset') {
@@ -16156,6 +16321,8 @@ const Rig = (() => {
       this._look(o, dt);
       this._apply(o);
       this.root.updateMatrixWorld(true);
+      if (this._batchDirty) this.rebatch();
+      if (this._batch) this._batch.check();
       this._eyesUpdate(dt);
       this._dangleUpdate(dt);
       if (this.budLines) this._updateBudLines();
@@ -16458,6 +16625,7 @@ const Rig = (() => {
     },
     dispose() {
       LIVE.delete(this);
+      if (this._batch) { this._batch.dispose(); this._batch = null; }
       for (const slot of ['body', 'head', 'fx']) if (this.state.gest[slot]) { const g = this.state.gest[slot]; this.state.gest[slot] = null; g.resolve(); }
       if (this._plight) { this._plight.free(); this._plight = null; }
       if (this.root.parent) this.root.parent.remove(this.root);
@@ -16937,9 +17105,10 @@ const Rig = (() => {
     for (const a of LIVE) if ((!counted || a._frame !== Time.frame) && a.root.parent && a.root.visible) a.update(dt);
   }
 
-  return {
+  const api = {
     human, create, PRESETS, update, definePreset, prop: standaloneProp,
     defineGesture: defGesture, defineAnim: defAnim,
+    batch, batching: true,                          // CONTRACT+ (see Rig.batch above)
     get actors() { return LIVE; },
     get ANIMS() { return Object.keys(LOOPS); },
     get GESTURES() { return Object.keys(GEST); },
@@ -16948,6 +17117,7 @@ const Rig = (() => {
     // internals exposed for monster builders (read-only use): head-space helpers
     headZ, EYE,
   };
+  return api;
 })();
 // ======== src/engine/07_camera.js ========
 // ==== engine/07_camera.js — Cam: fixed-camera volumes, static/pan/rail/scripted cameras, shake, volume check ====
@@ -17439,6 +17609,7 @@ const Cam = (() => {
   // o.veils the transparent ones (plastic sheeting, curtains, glass, cut-out foliage) come back as a second list, each
   // with its effective opacity (material opacity × the texture's average alpha / cut-out coverage); additive glows never.
   const _ray = new THREE.Raycaster();
+  _ray.layers.enableAll();                          // (Game's fog culling moves far meshes to layer 1: still solid here)
   function occluders(rb, outage, o = {}) {
     const hidden = new Set();
     for (const t of rb.tagged || []) if (!matchWorld(t.world, outage)) hidden.add(t.obj);
@@ -27005,7 +27176,8 @@ const Enemies = (() => {
   function tetherMesh(kind = 'short') {
     const g = kind === 'long' ? helixGeo(46, 0.018, 0.0048, 'long') : kind === 'lash' ? helixGeo(34, 0.015, 0.0042, 'lash') : helixGeo(15, 0.017, 0.0045, 'short');
     const m = new THREE.Mesh(g, tetherMat());
-    m.castShadow = false; m.receiveShadow = false; m.frustumCulled = false;
+    // (a unit helix along +Y scaled to its length by setSeg: its bounding sphere scales with it, so it culls correctly)
+    m.castShadow = false; m.receiveShadow = false;
     return m;
   }
   function puckGeo() { return shared('puckGeo', () => { const g = new THREE.CylinderGeometry(0.028, 0.03, 0.022, 12); g.userData.shared = true; return g; }); }
@@ -27388,6 +27560,7 @@ const Enemies = (() => {
     if (e.obj && e.obj.parent) e.obj.parent.remove(e.obj);
     if (e.obj && e.obj !== (e.actor && e.actor.root)) disposeObj(e.obj);
     if (e.fx.parent) e.fx.parent.remove(e.fx);
+    if (e.fxBatch) { e.fxBatch.dispose(); e.fxBatch = null; }
     disposeObj(e.fx);
   }
   function removeEnemy(e) {
@@ -27856,6 +28029,8 @@ const Enemies = (() => {
       e.data.leds.push(led);
     }
     const lashTip = new THREE.Mesh(puckGeo(), puckMat()); lashTip.visible = false; e.fx.add(lashTip); e.data.lashTip = lashTip;
+    // the tethers and the pucks: one draw call per material (Rig.batch — each part keeps moving on its own)
+    if (Rig.batching !== false) e.fxBatch = Rig.batch(e.fx);
     e.data.shown = true;
     // restored / variants
     if (e.restored === 'freed') { tethFreedPose(e, true); }
@@ -29442,6 +29617,7 @@ const Enemies = (() => {
       if (e.removed) continue;
       if (e.actor && on) { e.actor.update(dt); }
       if (e.T.post && on) { try { e.T.post(e, dt); } catch (err) { console.error('[Enemies] post', err); } }
+      if (e.fxBatch && on) e.fxBatch.check(true);                    // (the fx batch's bounds follow the tethers)
       if (on) footsteps(e);
       syncCollider(e);
     }
@@ -30683,7 +30859,8 @@ const Debug = (() => {
 //   (META.endingsSeen / results / completed → EXTRA and New Game+ unlock); Aidan's body is put back as a new game
 //   expects it (posture, the phone in his hand, nothing in the other), then the title.
 // Fog culling: Rig actors beyond the fog's cutoff (≈ 2.45 / density m) are skipped by the renderer (render layer 1),
-//   with the groups listed in actor.cullWith (an enemy's fx group); it runs on SH.advance's manual ticks too.
+//   with the groups listed in actor.cullWith (an enemy's fx group), and so are the room's merged static batches (kit:*)
+//   wholly beyond 3 / density; it runs on SH.advance's manual ticks too.
 // Debug jumps (Game.debugRoom = SH.goto) in play cancel a transition in flight and abort running blocking scripts.
 // CONTRACT+: Game.fps, Game.culled, Game.manual(on) (SH.advance), Game.autosave(), Game.goTitle(), Game.results(name) (the §2A results
 //   record + stars without showing it), Game.rank(stats), Game.stickerCount(S), Game.debugStart(n, o),
@@ -30967,15 +31144,48 @@ const Game = (() => {
   // the Tethered's tether and box — set by Enemies) are culled with it
   function setCulled(a, off) {
     if (off) culled.add(a); else culled.delete(a);
-    const set = (o) => { if (off) o.layers.set(CULL_LAYER); else o.layers.set(0); };
+    // (parts drawn by the figure's batch — Rig.batch — stay on no layer at all: userData.rigHidden)
+    const set = (o) => { if (o.userData.rigHidden) return; if (off) o.layers.set(CULL_LAYER); else o.layers.set(0); };
     a.root.traverse(set);
     if (Array.isArray(a.cullWith)) for (const g of a.cullWith) if (g && g.traverse) g.traverse(set);
+  }
+  // Static geometry too: the room's merged batches (kit:* — most of a room's triangles, in ≤ 40 m cells) whose nearest
+  // point lies beyond 3 / density (FogExp2 lets e^-9 ≈ 0.01 % through: nothing shows, even a bright emissive) go to
+  // layer 1 as well — a long street no longer draws the blocks the fog has swallowed. Only fogged materials; only the
+  // room's static batches (they never move). Game.staticCulled → how many this frame.
+  let sBuild = null, sList = [], sCulled = 0;
+  function staticList(rb) {
+    const out = [];
+    for (const m of rb.group.children) {
+      if (!m.isMesh || !/^kit:/.test(m.name) || !m.geometry) continue;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      if (mats.some((q) => !q || q.fog === false)) continue;
+      if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+      m.updateMatrixWorld(true);
+      out.push({ m, s: m.geometry.boundingSphere.clone().applyMatrix4(m.matrixWorld), off: false });
+    }
+    return out;
+  }
+  function staticCull(d) {
+    const rb = typeof World !== 'undefined' ? World.build : null;
+    if (rb !== sBuild) { sBuild = rb; sList = rb && rb.group ? staticList(rb) : []; sCulled = 0; }
+    if (!sList.length) return;
+    const far = d > 0.004 ? 3 / d : Infinity;
+    Render.camera.getWorldPosition(_cp);
+    let n = 0;
+    for (const it of sList) {
+      const off = far < Infinity && _cp.distanceTo(it.s.center) - it.s.radius > far;
+      if (off !== it.off) { it.off = off; it.m.layers.set(off ? CULL_LAYER : 0); }
+      if (off) n++;
+    }
+    sCulled = n;
   }
   function fogCull() {
     const live = Rig.actors;
     for (const a of [...culled]) if (!live.has(a)) culled.delete(a);
     const d = Render.fog ? Render.fog.density : 0;
     const me = Player.actor;
+    staticCull(d);
     if (!(d > 0.004)) { for (const a of [...culled]) setCulled(a, false); return; }
     const far = Math.sqrt(6) / d;
     Render.camera.getWorldPosition(_cp);
@@ -31407,6 +31617,7 @@ const Game = (() => {
     },
     get flow() { return flow; },
     get culled() { return culled.size; },
+    get staticCulled() { return sCulled; },
     get fps() { return fps; },
     ENDINGS, STICKERS,
   };

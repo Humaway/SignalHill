@@ -43,7 +43,7 @@
 //   (maintenance CONTRACT+: K.walkable / K.floor {visible:false}, K.prop pitch/tilt, K.light prio/pin/haloColor/haloFog,
 //   y bands on K.exit/K.trigger/interactables, interactable prio / crawl, K.plane double = two faces, K.door hinge
 //   'L'|'R' / swing 'front'|'back', both:false walls have no top cap, the light-cluster warning counts real lights.)
-//   Kit.inBox(box,x,z); Kit.matchWorld(w,outage); Kit.mergeGeometries(items); Kit.mat(spec); Kit.last; Kit.tex.*.
+//   Kit.inBox(box,x,z); Kit.matchWorld(w,outage); Kit.mergeGeometries(items, withColor); Kit.mat(spec); Kit.last; Kit.tex.*.
 //   RoomBuild: applyWorld(outage) (tagged visibility + light world state), heightAt(x,z,outage), ambient
 //     ({color,intensity}|null from K.ambient — apply with Render.setAmbient), stats, disposed.
 //   Door records: setOpen(0..1) (visual only; World toggles collider.enabled), amount, pivots[], passAt, hinge, swing.
@@ -626,7 +626,7 @@ const Kit = (() => {
       if (m.children.length || !m.visible || m.renderOrder || Array.isArray(m.material) || !m.material || !m.geometry) return;
       if (m.material.transparent && m.material.depthWrite !== false) return;
       if (m.onBeforeRender !== THREE.Object3D.prototype.onBeforeRender || m.userData.noBounds) return;
-      for (let p = m.parent; p && p !== g; p = p.parent) if (!p.visible || p.userData.kitWorld || p.userData.kitNoMerge || p.userData.kitMerge === false) return;
+      for (let p = m.parent; p && p !== g; p = p.parent) if (!p.visible || p.userData.kitWorld || (p.userData.kitNoMerge && !p.userData.subStatic) || p.userData.kitMerge === false) return;
       const geo = m.geometry;
       if (!geo.attributes.position || !geo.attributes.normal || (!geo.index && geo.attributes.position.count % 3)) return;
       const col = !!geo.attributes.color && !!m.material.vertexColors;
@@ -702,11 +702,13 @@ const Kit = (() => {
   // ---------------------------------------------------------------------------------------------------------------
   // Prop registry (PROPS lives in core). Kit.defineProp(kind, builder(K, opts) → Object3D, meta)
   //   meta: { collide: true|false|'auto'|number (pole radius)|[x0,z0,x1,z1] (local), h, static:true (never changes
-  //   after build → merged into the room's static batches) }. CONTRACT+ (third argument).
+  //   after build → merged into the room's static batches), textName:true (the kind's `name` opt is text it prints —
+  //   a shop's sign, a cubicle's name card — not an object name: such a prop stays static and merges with the room;
+  //   `objName` names it for G.obj) }. CONTRACT+ (third argument).
   // ---------------------------------------------------------------------------------------------------------------
   function defineProp(kind, builder, meta = {}) {
     if (PROPS[kind]) console.warn(`[Kit] prop "${kind}" redefined`);
-    PROPS[kind] = { kind, build: builder, collide: meta.collide, h: meta.h, static: !!meta.static };
+    PROPS[kind] = { kind, build: builder, collide: meta.collide, h: meta.h, static: !!meta.static, textName: !!meta.textName };
     return PROPS[kind];
   }
   // Default collide rules for kinds where the bounding-box heuristic is wrong. false = never; number = a pole of
@@ -1779,8 +1781,11 @@ const Kit = (() => {
       const def = PROPS[kind];
       const builder = def ? (typeof def === 'function' ? def : def.build) : null;
       const y = yDef(o.y, x, z), sc = o.scale ?? 1, w = W(o);
-      const g = new THREE.Group(); g.name = o.name || kind; g.userData.prop = kind;
-      const isStatic = (o.static ?? (def && def.static)) === true && !o.name && (!ctx.inProp || ctx.propStatic);
+      // (a textName kind prints its `name` — a shop sign — so only `objName` makes it a named, separate object)
+      const objName = def && def.textName ? o.objName || null : o.name || null;
+      const g = new THREE.Group(); g.name = objName || kind; g.userData.prop = kind;
+      const ownStatic = (o.static ?? (def && def.static)) === true && !objName;
+      const isStatic = ownStatic && (!ctx.inProp || ctx.propStatic);
       const saved = { parent: ctx.parent, xf: ctx.xf, xfYaw: ctx.xfYaw, xfScale: ctx.xfScale, world: ctx.world, tagWorld: ctx.tagWorld, inProp: ctx.inProp, propStatic: ctx.propStatic };
       // CONTRACT+ o.pitch / o.tilt (degrees about the prop's own X / Z after its yaw): props on slopes (guardrails along a
       // 10% road). Colliders stay yaw-only boxes.
@@ -1802,11 +1807,14 @@ const Kit = (() => {
         for (const k of Object.keys(obj.userData)) if (!(k in g.userData)) g.userData[k] = obj.userData[k];
       }
       if (!isStatic) g.userData.kitNoMerge = true; // a live prop: nothing inside may be baked into the room batches
+      // a static kind inside a named prop (a named pod's chair and phone): it moves with its parent, so its static parts
+      // may merge into the parent's own batches (propMerge), never into the room's
+      if (!isStatic && ownStatic) g.userData.subStatic = true;
       if (isStatic) g.traverse((c) => { if (c.isMesh && !c.isInstancedMesh && !c.isSkinnedMesh && c.material && !Array.isArray(c.material) && c.userData.kitMerge !== false) c.userData.kitMerge = true; });
-      else if (o.name && !saved.inProp && (o.static ?? (def && def.static)) === true && o.merge !== false) propMerge(g);   // named: merge inside
+      else if (objName && !saved.inProp && (o.static ?? (def && def.static)) === true && o.merge !== false) propMerge(g);   // named: merge inside
       const bb = meshBox(g);
       g.position.set(x, y, z); g.rotation.copy(eul); g.scale.setScalar(sc);
-      ctx.parent.add(g); tag(g, w); named(g, o.name);
+      ctx.parent.add(g); tag(g, w); named(g, objName);
       const c = Math.cos(rad(rotDeg)), s = Math.sin(rad(rotDeg));
       const toRoom = (lx, lz) => [x + (lx * c + lz * s) * sc, z + (-lx * s + lz * c) * sc];
       if (rb.colliders.length === nColl && !bb.isEmpty()) {
@@ -1814,11 +1822,11 @@ const Kit = (() => {
         const hh = (def && def.h) ?? bb.max.y;
         if (rule === true || (rule === 'auto' && autoCollide(bb))) {
           const [cx, cz] = toRoom((bb.min.x + bb.max.x) / 2, (bb.min.z + bb.max.z) / 2);
-          collRec(cx, cz, ((bb.max.x - bb.min.x) / 2) * sc, ((bb.max.z - bb.min.z) / 2) * sc, rotDeg, { h: (hh - Math.max(0, bb.min.y)) * sc, y: y + Math.max(0, bb.min.y) * sc, world: w, name: o.name });
-        } else if (typeof rule === 'number') collRec(x, z, rule * sc, rule * sc, rotDeg, { h: hh * sc, y, world: w, name: o.name });
+          collRec(cx, cz, ((bb.max.x - bb.min.x) / 2) * sc, ((bb.max.z - bb.min.z) / 2) * sc, rotDeg, { h: (hh - Math.max(0, bb.min.y)) * sc, y: y + Math.max(0, bb.min.y) * sc, world: w, name: objName });
+        } else if (typeof rule === 'number') collRec(x, z, rule * sc, rule * sc, rotDeg, { h: hh * sc, y, world: w, name: objName });
         else if (Array.isArray(rule)) {
           const r0 = normBox(rule), [cx, cz] = toRoom((r0[0] + r0[2]) / 2, (r0[1] + r0[3]) / 2);
-          collRec(cx, cz, ((r0[2] - r0[0]) / 2) * sc, ((r0[3] - r0[1]) / 2) * sc, rotDeg, { h: hh * sc, y, world: w, name: o.name });
+          collRec(cx, cz, ((r0[2] - r0[0]) / 2) * sc, ((r0[3] - r0[1]) / 2) * sc, rotDeg, { h: hh * sc, y, world: w, name: objName });
         }
       }
       if (o.examine || o.interact) {
@@ -2831,7 +2839,7 @@ const Kit = (() => {
     mat: (spec) => resolveMat(spec).mat,              // resolve a material spec (see header)
     itemModel: (item) => { const d = ITEMS[item]; try { if (d && typeof d.model === 'function') return d.model(); } catch (e) { console.error(e); } return genericItem(item); },
     clock: makeClock,                                 // Kit.clock([h, m]) → wall clock Object3D with userData.setTime/addMinutes
-    mergeGeometries: (items) => mergeGeometries(items.map((it) => (it.isBufferGeometry ? { geo: it, m: new THREE.Matrix4() } : it))),
+    mergeGeometries: (items, withColor = false) => mergeGeometries(items.map((it) => (it.isBufferGeometry ? { geo: it, m: new THREE.Matrix4() } : it)), withColor),
     COLLIDE_RULES,
     tex: { wiredGlass: wiredGlassTex, stripes: stripeTex, shutter: shutterTex, writing: writingTex, doc: docTex },
   };

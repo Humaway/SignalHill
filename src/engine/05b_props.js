@@ -1533,10 +1533,10 @@
   };
   // shopfront: facade segment, street side +Z, building behind (−Z): pilasters, parapet, stallboard, glazing with an
   // aluminium door, shallow dark interior + window display, sign on an awning fascia (or bulkhead when indoor).
-  // opts w (6), h (4.4), name, variant 'shop'|'repair'|'bank'|'newsagent'|'pharmacy'|'optus'|'stall'|'vacant',
+  // opts w (6), h (4.4), name (the sign's text — textName: objName names the prop), variant 'shop'|'repair'|'bank'|'newsagent'|'pharmacy'|'optus'|'stall'|'vacant',
   // shutter (true|0..1 closed), door ('left'|'center'|'right'|false), awning (bool), indoor (concourse shopfront),
   // poster (text) + posterKind, notice (text), newspaper ([headline, date]), lit (interior glow), number
-  def('shopfront', {}, (K, o, g) => {
+  def('shopfront', { textName: true }, (K, o, g) => {
     const v = o.variant || 'shop', P = SHOP[v] || SHOP.shop, r = rngOf(K, o, 'sf');
     const w = o.w ?? 6, indoor = o.indoor ?? !!P.indoor, H = o.h ?? (indoor ? 3.6 : 4.4);
     const name = o.name ?? P.name, pw = 0.36, ow = w - pw * 2;
@@ -4288,9 +4288,10 @@
 
   // --- offices --------------------------------------------------------------------------------------------------------
   // cubicle: call-centre cubicle opening to +Z — fabric partitions (1.3 m) on three sides, desk along the back, monitor,
-  // desk phone, headset on a hook, name card, sticky notes, family photo, task chair. opts w (1.8), d (1.6), name,
+  // desk phone, headset on a hook, name card, sticky notes, family photo, task chair. opts w (1.8), d (1.6), name (the
+  // name card's text — textName),
   // chair (true), lamp (desk lamp, lit — Chase's), ringing (phone LED), content (monitor), color (partitions)
-  def('cubicle', { collide: false }, (K, o, g) => {
+  def('cubicle', { collide: false, textName: true }, (K, o, g) => {
     const w = o.w ?? 1.8, d = o.d ?? 1.6, H = 1.3, r = rngOf(K, o, 'cub');
     const fab = TM(partitionTex(o.color || '#5e6a72'), { roughness: 0.95 }), cap = { tex: 'metal', color: '#9aa0a0', roughness: 0.45 };
     const zb = -d / 2;

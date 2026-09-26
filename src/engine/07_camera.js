@@ -487,6 +487,7 @@ const Cam = (() => {
   // o.veils the transparent ones (plastic sheeting, curtains, glass, cut-out foliage) come back as a second list, each
   // with its effective opacity (material opacity × the texture's average alpha / cut-out coverage); additive glows never.
   const _ray = new THREE.Raycaster();
+  _ray.layers.enableAll();                          // (Game's fog culling moves far meshes to layer 1: still solid here)
   function occluders(rb, outage, o = {}) {
     const hidden = new Set();
     for (const t of rb.tagged || []) if (!matchWorld(t.world, outage)) hidden.add(t.obj);

@@ -1002,6 +1002,132 @@ const Rig = (() => {
   });
 
   // ---------------------------------------------------------------------------------------------------------------
+  // CONTRACT+ draw-call batching — Rig.batch(root, {filter}) → batch {meshes, parts, check(), dispose()}.
+  // A figure is ~50 meshes (one per segment, eye, lid, button …), so every figure on screen cost 40–66 draw calls. The
+  // batch draws all of a figure's parts that share a material with ONE SkinnedMesh per (material, casts, receives): its
+  // "bones" are the part meshes themselves (each part's geometry is baked in its own local transform; the bone matrix
+  // is the part's live matrixWorld times the inverse of that transform), so every animation — bones, eyes, lids,
+  // dangles, a part's own scale — carries on exactly as before, and a part hidden (its own or an ancestor's
+  // `visible`) or taken out of the figure collapses to a point. The originals stay in the hierarchy (everything that
+  // moves, hides, reads or re-parents them works as before) but draw nothing (layers mask 0; Game's fog culling leaves
+  // them alone: userData.rigHidden). check() (every Actor.update) keeps it honest: a part whose material, geometry,
+  // shadow flags, render order or vertices change, or that leaves the figure, drops out of the batch and draws itself
+  // again; it also refreshes the batch's bounds (frustum culling). Held props, transparent parts and parts that
+  // are alone with their material are left as they are. A figure costs ~16–25 calls instead of 40–66 (+ ~3 instead
+  // of ~12 in the torch's shadow pass). Rig.batching = false (before figures are built) turns it off.
+  // ---------------------------------------------------------------------------------------------------------------
+  const B_COLLAPSE = new THREE.Matrix4().makeScale(0, 0, 0);
+  const _bm = new THREE.Matrix4(), _bInv = new THREE.Matrix4(), _bS = new THREE.Sphere();
+  const OBR0 = THREE.Object3D.prototype.onBeforeRender;
+  const bInside = (p, root) => { for (let q = p.parent; q; q = q.parent) if (q === root) return true; return false; };
+  function bShown(p, root) { for (let q = p; q; q = q.parent) { if (!q.visible) return false; if (q === root) return true; } return false; }
+  function batchable(m, root, filter) {
+    if (!m.isMesh || m.isSkinnedMesh || m.isInstancedMesh || m.userData.rigBatch || m.userData.noBatch) return false;
+    const g = m.geometry, mat = m.material;
+    if (!g || !mat || Array.isArray(mat) || !g.attributes.position || !g.attributes.normal || g.morphAttributes.position) return false;
+    if (g.drawRange.start !== 0 || g.drawRange.count !== Infinity || (!g.index && g.attributes.position.count % 3)) return false;
+    if (mat.transparent || m.renderOrder || m.onBeforeRender !== OBR0 || m.customDepthMaterial || m.customDistanceMaterial) return false;
+    for (let q = m.parent; q && q !== root; q = q.parent) if (/^prop:/.test(q.name) || (q.userData && q.userData.noBatch)) return false;
+    return !filter || !!filter(m);
+  }
+  function batch(root, o = {}) {
+    root.updateMatrixWorld(true);
+    const groups = new Map();
+    root.traverse((m) => {
+      // (a part hidden when the batch is built — a lash, a spare prop — is left out: it draws itself when shown)
+      if (!batchable(m, root, o.filter) || !bShown(m, root)) return;
+      m.updateMatrix();
+      if (Math.abs(m.matrix.determinant()) < 1e-12) return;
+      const key = m.material.uuid + '|' + (m.castShadow ? 1 : 0) + (m.receiveShadow ? 1 : 0);
+      let gr = groups.get(key);
+      if (!gr) { gr = { mat: m.material, cast: m.castShadow, recv: m.receiveShadow, parts: [] }; groups.set(key, gr); }
+      gr.parts.push(m);
+    });
+    const recs = [], meshes = [], plan = [];
+    for (const gr of groups.values()) if (gr.parts.length >= 2) plan.push(gr);
+    if (!plan.length) return null;
+    for (const gr of plan) for (const p of gr.parts) {
+      const g = p.geometry;
+      if (!g.boundingSphere) g.computeBoundingSphere();
+      recs.push({ part: p, gr, mat: p.material, geo: g, ver: g.attributes.position.version, cast: p.castShadow, recv: p.receiveShadow, L0: p.matrix.clone(), off: false, mesh: null });
+    }
+    const bones = recs.map((r) => r.part), inverses = recs.map((r) => r.L0.clone().invert());
+    const skel = new THREE.Skeleton(bones, inverses);
+    const bound = new THREE.Sphere(new THREE.Vector3(), 2);
+    // (the renderer calls this once per frame per skeleton, just before drawing: every part's live world matrix, or a
+    // point for a hidden one)
+    skel.update = function () {
+      const arr = this.boneMatrices;
+      for (let i = 0; i < recs.length; i++) {
+        const r = recs[i];
+        if (r.off || !bShown(r.part, root)) B_COLLAPSE.toArray(arr, i * 16);
+        else _bm.multiplyMatrices(r.part.matrixWorld, this.boneInverses[i]).toArray(arr, i * 16);
+      }
+      if (this.boneTexture) this.boneTexture.needsUpdate = true;
+    };
+    let bi = 0;
+    for (const gr of plan) {
+      const items = [], idx = [];
+      for (const p of gr.parts) { const r = recs[bi]; items.push({ geo: r.geo, m: r.L0 }); idx.push(bi); bi++; }
+      const geo = Kit.mergeGeometries(items, !!gr.mat.vertexColors);
+      const n = geo.attributes.position.count, si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+      let v = 0;
+      items.forEach((it, k) => { const c = it.geo.attributes.position.count; for (let i = 0; i < c; i++, v++) { si[v * 4] = idx[k]; sw[v * 4] = 1; } });
+      geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
+      geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
+      const sm = new THREE.SkinnedMesh(geo, gr.mat);
+      sm.name = 'rigbatch:' + (gr.mat.name || gr.mat.type);
+      sm.castShadow = gr.cast; sm.receiveShadow = gr.recv;
+      sm.bindMode = 'attached';
+      sm.bind(skel, new THREE.Matrix4());
+      sm.boundingSphere = bound; sm.boundingBox = new THREE.Box3();
+      sm.layers.mask = root.layers.mask;
+      sm.userData.rigBatch = true; sm.userData.live = gr.parts.length;
+      root.add(sm);
+      meshes.push(sm);
+      for (const k of idx) recs[k].mesh = sm;
+    }
+    for (const r of recs) { r.part.layers.mask = 0; r.part.userData.rigHidden = true; }
+    const drop = (r) => {
+      if (r.off) return;
+      r.off = true;
+      r.part.layers.mask = root.layers.mask; delete r.part.userData.rigHidden;
+      r.mesh.userData.live--;
+      if (r.mesh.userData.live <= 0) r.mesh.visible = false;
+    };
+    const B = {
+      root, meshes, recs, skeleton: skel, bound,
+      get parts() { return recs.filter((r) => !r.off).length; },
+      // every frame, after the figure's matrices are updated: parts that changed drop out; the bounds follow the pose
+      check(updateMatrices = false) {
+        if (updateMatrices) root.updateMatrixWorld(true);        // (a group moved by code after its last matrix update)
+        for (const r of recs) {
+          if (r.off) continue;
+          const p = r.part;
+          if (p.material !== r.mat || p.geometry !== r.geo || p.castShadow !== r.cast || p.receiveShadow !== r.recv || p.renderOrder || r.geo.attributes.position.version !== r.ver || !bInside(p, root)) drop(r);
+        }
+        _bInv.copy(root.matrixWorld).invert();
+        let first = true;
+        for (const r of recs) {
+          if (r.off) continue;
+          _bS.copy(r.geo.boundingSphere).applyMatrix4(_bm.multiplyMatrices(_bInv, r.part.matrixWorld));
+          if (first) { bound.copy(_bS); first = false; } else bound.union(_bS);
+        }
+        bound.radius += 0.12;                                    // (a frame of motion: eyes / dangles move after this)
+        for (const sm of meshes) sm.boundingBox.makeEmpty().expandByPoint(bound.center).expandByScalar(bound.radius);
+      },
+      dispose() {
+        for (const r of recs) if (!r.off) { r.part.layers.mask = root.layers.mask; delete r.part.userData.rigHidden; r.off = true; }
+        for (const sm of meshes) { sm.removeFromParent(); sm.geometry.dispose(); }
+        skel.dispose();
+        meshes.length = 0;
+      },
+    };
+    B.check();
+    return B;
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
   // Actor
   // ---------------------------------------------------------------------------------------------------------------
   let ACTOR_N = 0;
@@ -1057,12 +1183,24 @@ const Rig = (() => {
       this.setAnim(P.anim || 'idle', { blend: 0 });
       if (P.expr) this.expr(P.expr);
       this.update(0);
+      this._batchOn = P.batch !== false && api.batching !== false;
+      this.rebatch();
+    }
+    // CONTRACT+: rebatch() — (re)build the figure's draw-call batch (Rig.batch) from the parts it has now; runs at the
+    // end of the build, after trimShadows() (Enemies calls it once a monster's parts are on) and when wear() adds a part
+    rebatch() {
+      if (this._batch) { this._batch.dispose(); this._batch = null; }
+      this._batchDirty = false;
+      if (!this._batchOn || this.disposed) return this;
+      try { this._batch = batch(this.root); } catch (e) { console.error('[Rig] batch', e); this._batch = null; }
+      return this;
     }
     // CONTRACT+: trimShadows() — shadows (the torch is the only caster): one caster per major segment — its largest
     // piece — is plenty for the soft 1024 map and keeps an actor's torch-shadow pass at ~12 draws instead of ~25.
     // Everything else (layers under the outer garment, hands, feet, face details, accessories, held props) receives
     // but doesn't cast. Run at build; Enemies runs it again after adding a monster's parts.
     trimShadows() {
+      if (this._batch) { this._batch.dispose(); this._batch = null; this._batchDirty = true; }
       const major = new Set(['hips', 'spine', 'chest', 'head', 'upperArmL', 'upperArmR', 'foreArmL', 'foreArmR', 'thighL', 'thighR', 'shinL', 'shinR'].map((n) => this.bones[n]).filter(Boolean));
       const all = new Set(Object.values(this.bones));
       const best = new Map();
@@ -1076,6 +1214,7 @@ const Rig = (() => {
         const cur = best.get(b);
         if (!cur || r > cur.r) { if (cur) cur.m.castShadow = false; best.set(b, { m, r }); } else m.castShadow = false;
       });
+      if (this._batchDirty && this._batchOn) this.rebatch();
     }
     _dims() {
       const P = this.P, B = BUILDS[P.build], T = torsoDims(B);
@@ -2913,6 +3052,12 @@ const Rig = (() => {
     },
     // CONTRACT+: wear(kind, on) — 'headset' (operator headset on the head), 'glasses', 'earbuds', 'cap'
     wear(kind, on = true) {
+      const had = [this.glassesObj, this.buds, this._headset];
+      this._wear(kind, on);
+      if (had[0] !== this.glassesObj || had[1] !== this.buds || had[2] !== this._headset) this._batchDirty = true;   // a new part: batch it too
+      return this;
+    },
+    _wear(kind, on) {
       if (kind === 'glasses') { if (!this.glassesObj && on) this._glasses({ style: 'reading' }); else if (this.glassesObj) this.glassesState(on ? 'on' : 'off'); }
       else if (kind === 'earbuds') { if (!this.buds && on) this._earbuds('in'); else this.setEarbuds(on); }
       else if (kind === 'headset') {
@@ -2977,6 +3122,8 @@ const Rig = (() => {
       this._look(o, dt);
       this._apply(o);
       this.root.updateMatrixWorld(true);
+      if (this._batchDirty) this.rebatch();
+      if (this._batch) this._batch.check();
       this._eyesUpdate(dt);
       this._dangleUpdate(dt);
       if (this.budLines) this._updateBudLines();
@@ -3279,6 +3426,7 @@ const Rig = (() => {
     },
     dispose() {
       LIVE.delete(this);
+      if (this._batch) { this._batch.dispose(); this._batch = null; }
       for (const slot of ['body', 'head', 'fx']) if (this.state.gest[slot]) { const g = this.state.gest[slot]; this.state.gest[slot] = null; g.resolve(); }
       if (this._plight) { this._plight.free(); this._plight = null; }
       if (this.root.parent) this.root.parent.remove(this.root);
@@ -3758,9 +3906,10 @@ const Rig = (() => {
     for (const a of LIVE) if ((!counted || a._frame !== Time.frame) && a.root.parent && a.root.visible) a.update(dt);
   }
 
-  return {
+  const api = {
     human, create, PRESETS, update, definePreset, prop: standaloneProp,
     defineGesture: defGesture, defineAnim: defAnim,
+    batch, batching: true,                          // CONTRACT+ (see Rig.batch above)
     get actors() { return LIVE; },
     get ANIMS() { return Object.keys(LOOPS); },
     get GESTURES() { return Object.keys(GEST); },
@@ -3769,4 +3918,5 @@ const Rig = (() => {
     // internals exposed for monster builders (read-only use): head-space helpers
     headZ, EYE,
   };
+  return api;
 })();

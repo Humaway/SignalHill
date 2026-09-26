@@ -256,7 +256,8 @@ const Enemies = (() => {
   function tetherMesh(kind = 'short') {
     const g = kind === 'long' ? helixGeo(46, 0.018, 0.0048, 'long') : kind === 'lash' ? helixGeo(34, 0.015, 0.0042, 'lash') : helixGeo(15, 0.017, 0.0045, 'short');
     const m = new THREE.Mesh(g, tetherMat());
-    m.castShadow = false; m.receiveShadow = false; m.frustumCulled = false;
+    // (a unit helix along +Y scaled to its length by setSeg: its bounding sphere scales with it, so it culls correctly)
+    m.castShadow = false; m.receiveShadow = false;
     return m;
   }
   function puckGeo() { return shared('puckGeo', () => { const g = new THREE.CylinderGeometry(0.028, 0.03, 0.022, 12); g.userData.shared = true; return g; }); }
@@ -639,6 +640,7 @@ const Enemies = (() => {
     if (e.obj && e.obj.parent) e.obj.parent.remove(e.obj);
     if (e.obj && e.obj !== (e.actor && e.actor.root)) disposeObj(e.obj);
     if (e.fx.parent) e.fx.parent.remove(e.fx);
+    if (e.fxBatch) { e.fxBatch.dispose(); e.fxBatch = null; }
     disposeObj(e.fx);
   }
   function removeEnemy(e) {
@@ -1107,6 +1109,8 @@ const Enemies = (() => {
       e.data.leds.push(led);
     }
     const lashTip = new THREE.Mesh(puckGeo(), puckMat()); lashTip.visible = false; e.fx.add(lashTip); e.data.lashTip = lashTip;
+    // the tethers and the pucks: one draw call per material (Rig.batch — each part keeps moving on its own)
+    if (Rig.batching !== false) e.fxBatch = Rig.batch(e.fx);
     e.data.shown = true;
     // restored / variants
     if (e.restored === 'freed') { tethFreedPose(e, true); }
@@ -2693,6 +2697,7 @@ const Enemies = (() => {
       if (e.removed) continue;
       if (e.actor && on) { e.actor.update(dt); }
       if (e.T.post && on) { try { e.T.post(e, dt); } catch (err) { console.error('[Enemies] post', err); } }
+      if (e.fxBatch && on) e.fxBatch.check(true);                    // (the fx batch's bounds follow the tethers)
       if (on) footsteps(e);
       syncCollider(e);
     }

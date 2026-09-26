@@ -418,7 +418,6 @@
       K.collider(43.7, -9.3, 44, -6.5, { h: 1.2 }); K.collider(60, -9.3, 60.3, -6.5, { h: 1.2 });
       K.collider(44, -9.35, 60, -9.25, { h: 1.2 });
       for (const [x0, x1] of [[14, 22], [32.4, 44], [60, 78]]) for (let x = x0; x < x1 - 0.5; x += 2.1) K.prop('shrub', x + 1.05, -7.3, 0, { w: 2.0, h: 1.2, dead: x % 3 < 1 });
-      K.box(27, -1.2, -12, 9, 1.2, 10, { tex: 'concrete', color: '#5c5a54' }, { shadow: false });
       K.prop('boom_gate', 23.2, -7.2, 90, { len: 7.5 });
       K.prop('hut', 32.9, -9.4, 0, { w: 1.6, d: 1.6, h: 2.4, text: 'PARKING' });
       K.sign('STAFF PARKING\nPERMIT HOLDERS ONLY', 27, 2.4, -7.0, 2.4, 0.7, { style: 'council', bg: '#e8e4d2' });
@@ -454,6 +453,70 @@
         K.collider(96.5, -6.6, 97, 6.6, { h: 2 });
         K.exit({ id: 'c5_ringroad:hospital', box: [95, -6.6, 97, 6.6], to: 'c7_ringroad', entry: 'office', when: () => !!ROOMS.c7_ringroad, blockedMsg: 'The road goes on. [beat] Not yet.' });
         K.trigger([76, -6.6, 80, 6.6], async (G) => { await G.think('That wasn\'t there before.'); }, { id: 'c5_ringroad:before' });
+      }
+
+      // ---- the land either side of the road (gap sweep) ------------------------------------------------------------
+      // Behind the east arm's hedges the ground used to stop at the footpath: the staff car park's ramp was a slab ending
+      // in the white and the tower stood on nothing. Now lawns and paving run back to the tower, the ramp goes down to a
+      // portal under the tower's grounds, a scrub lot lies behind the west arm's fence, and south of the road the verge
+      // runs out to the edge where the hill falls away. Before Chapter 6 the land breaks off with the road at x 78.
+      {
+        const XE = RR.east() ? 100 : 78;
+        const LAWN = { tex: 'grass', color: '#4a5244' }, VERGE = { tex: 'grass', color: '#474f42' }, SOIL = { tex: 'dirt', color: '#56503f' };
+        const PAVE = { tex: 'footpath', color: '#8a887f' }, RAMPC = { tex: 'concrete', color: '#6e6d67' }, WALLC = { tex: 'concrete', color: '#85847c' };
+        const gnd = (x0, z0, x1, z1, top, mat, h = 6) => K.box((x0 + x1) / 2, top - h, (z0 + z1) / 2, x1 - x0, h, z1 - z0, mat, { shadow: false });
+        // north of the east arm: the tower's lawns (the ramp cut out of them), paving round the tower's foot
+        gnd(14.3, -66, 22.2, -6.3, 0.07, LAWN);
+        gnd(31.8, -66, XE, -6.3, 0.07, LAWN);
+        gnd(22.2, -66, 31.8, -21.3, 0.07, LAWN, 0.37);
+        gnd(29.5, -61.5, 74.5, -25.8, 0.12, PAVE, 0.3);
+        if (!RR.east()) K.box(XE + 0.04, -6, -36.15, 0.1, 6.07, 59.7, SOIL, { shadow: false });   // (the broken edge)
+        // the staff car park: a flat apron under the boom, the ramp down between parapet walls to a portal, dark inside
+        gnd(22.2, -9.5, 31.8, -6.3, 0.05, RAMPC, 0.3);
+        { const run = 11.5, drop = 2.65, L = Math.hypot(run, drop), a = Math.atan2(drop, run) / D2R;
+          K.plane(27, 0.05 - drop / 2, -9.5 - run / 2, 9.6, L, { tex: 'concrete_wet', color: '#5e5d58' }, { rot: [-90 - a, 0, 0] }); }
+        K.box(27, -2.62, -24, 9.6, 0.02, 6, { color: '#191b1a', roughness: 1 }, { shadow: false });
+        for (const x of [22.05, 31.95]) K.box(x, -2.8, -13.8, 0.3, 3.75, 15, WALLC, { shadow: false });
+        K.box(27, -0.3, -21.2, 10.2, 1.25, 0.4, WALLC, { shadow: false });
+        for (const x of [22.55, 31.45]) K.box(x, -2.8, -21.9, 1.2, 2.5, 1.8, WALLC, { shadow: false });
+        K.box(27, -2.6, -26.2, 7.8, 2.3, 8.4, { color: '#0c0f0f', roughness: 1 }, { shadow: false });
+        K.box(27, -0.3, -21.95, 7.8, 0.02, 1.1, { color: '#3a3c3a', roughness: 1 }, { shadow: false });
+        K.sign('STAFF CAR PARK  ·  CLEARANCE 2.3 m', 27, 0.32, -20.98, 5.2, 0.42, { style: 'council', bg: '#e8e4d2', fg: '#1d1d1d' });
+        for (const x of [23.6, 30.4]) K.box(x, -0.55, -20.95, 1.1, 0.1, 0.06, { color: '#c9a716', roughness: 0.6 }, { shadow: false });
+        // the grounds: a fence along the west edge where the hill falls away, gums, a lamp by the path, a service bin
+        for (let z = -13.4; z > -44; z -= 6) K.prop('chainlink', 14.45, z - 3, 90, { len: 6, h: 2.0, collide: false });
+        for (const [x, z, s] of [[18.2, -17.5, 0.9], [17.6, -33, 1.0], [37.2, -14.5, 0.85], [39.5, -23.5, 1.05], [65.5, -14, 0.9], [68.2, -23, 1.0], [75.2, -13.5, 0.8]]) K.prop('gum_tree', x, z, x * 11, { y: 0.07, scale: s, collide: false });
+        K.prop('streetlight', 42.8, -18, 90, { lit: false, collide: false });
+        K.prop('streetlight', 61.2, -22, -90, { lit: false, collide: false });
+        K.prop('bin', 34.2, -12.2, 90, { variant: 'wheelie', color: '#2c4a2e', collide: false });
+        // south of the east arm: the verge shelf runs on to the land's end, then the hill falls away into the fog
+        gnd(70, 6.4, XE, 18, 0.05, VERGE, 2.45);
+        K.plane((10 + XE) / 2, 0.05 - 2.8, 18 + 5.3, XE - 10, 12, VERGE, { rot: [-62, 0, 0] });        // (28° down to the south)
+        if (!RR.east()) K.box(XE + 0.04, -2.4, 12.2, 0.1, 2.45, 11.6, SOIL, { shadow: false });
+        // the west arm: a scrub lot behind the north fence, the verge and the fall south of the guardrail
+        gnd(-39, -40, -14.3, -6.3, 0.03, SOIL);
+        K.box(-39.05, -6, -23.15, 0.1, 6.03, 33.7, SOIL, { shadow: false });
+        gnd(-39, 6.3, -14.25, 14, 0.04, VERGE, 2.4);
+        K.box(-39.05, -2.4, 10.15, 0.1, 2.44, 7.7, SOIL, { shadow: false });
+        K.plane(-30.3, 0.04 - 2.8, 14 + 5.3, 17.4, 12, VERGE, { rot: [-62, 0, 0] });
+        for (const [x, z] of [[-35.5, -10.5], [-31, -15], [-26.4, -9.8], [-22.5, -18.5], [-18.2, -11.4], [-29.5, -24]]) K.prop('shrub', x, z, x * 13, { w: 1.6, h: 0.9, dead: true, collide: false });
+        K.prop('leaf_pile', -24.5, -12.5, 0, { radius: 1.1 });
+        K.prop('pallet', -20.2, -8.4, 25, { collide: false });
+        // the south arm: the road runs on past the park gate into the fog (it used to stop at an edge), the retaining
+        // wall and the hill with it; west of the road the lots and the servo sit on ground that reaches back to a paling
+        // fence line, not on slabs over the white
+        const ZS = 118;
+        K.box(0, -0.3, (72.6 + ZS) / 2, 9, 0.3, ZS - 72.6, { tex: 'bitumen', color: '#3c3e3c' }, { shadow: false });
+        for (const s of [-1, 1]) K.box(s * 5.48, -0.3, (72.6 + ZS) / 2, 1.96, 0.45, ZS - 72.6, 'footpath', { shadow: false });
+        for (let z = 75; z < ZS; z += 6) K.box(0, 0.004, z, 0.12, 0.01, 3, { color: '#c8c6bc', roughness: 0.8 }, { shadow: false });
+        K.box(fp + 0.1, -0.2, (72.8 + ZS) / 2, 0.25, 2.8, ZS - 72.8, { tex: 'concrete', color: '#7e7d76' }, { shadow: false });
+        K.box(fp + 4, 2.4, (72 + ZS) / 2, 7.5, 0.3, ZS - 72, { tex: 'grass', color: '#4e5647' }, { shadow: false });
+        K.prop('gum_tree', fp + 3.4, 84, 300, { y: 2.6, scale: 0.95, collide: false });
+        K.prop('streetlight', fp - 0.3, 86, -90, { lit: false, collide: false });
+        gnd(-44, 14, -6.3, ZS, -0.01, SOIL, 0.3);
+        for (let z = 72.8; z < ZS - 1; z += 4) K.prop('chainlink', -fp - 0.15, z + 2, 90, { len: 4, h: 2.0, collide: false });
+        for (const [z0, z1] of [[14, 30], [52, 72.6]]) { const n = Math.ceil((z1 - z0) / 6), l = (z1 - z0) / n; for (let i = 0; i < n; i++) K.prop('fence', -21.7, z0 + l * (i + 0.5), 90, { len: l, h: 1.8 }); }
+        for (const [x, z] of [[-10.5, 18], [-17.5, 25.5], [-12.2, 66], [-19.4, 57], [-8.8, 70.5]]) K.prop('shrub', x, z, x * 7, { w: 1.4, h: 0.8, dead: true, collide: false });
       }
 
       // ---- exits ------------------------------------------------------------------------------------------------------
@@ -593,6 +656,32 @@
       K.sign('CARPARK — PERMIT HOLDERS', 31.83, 3.1, 7.2, 2.6, 0.3, { style: 'council', bg: '#e8e4d2', rotY: -90 });
       K.interact(31.3, 1.2, 7.2, async (G) => { G.sfx('door_locked', { pos: [31.8, 1.2, 7.2] }); await G.msg('It\'s locked.'); await G.think('Permit holders only. [beat] Even the cars had to earn it.'); }, { id: 'c5_forecourt:carpark', r: 1.6 });
       K.writing('IT\'LL BE FINE', 0.18, 1.5, 13.5, 2.0, { rotY: 90, world: 'fog' });
+      // (gap sweep) what the side walls belong to — the loading dock's service wing on the west, the car park podium on
+      // the east — and the ring road running on past the forecourt both ways, the hill falling away beyond its far
+      // footpath: over the walls and past the road's ends the cameras used to look into nothing
+      {
+        const BRK = { tex: 'brick', color: '#65554a' }, CAP = { tex: 'concrete', color: '#6c6a62' }, CON = { tex: 'concrete', color: '#7d7c75' };
+        K.box(-5.32, 0, 11.5, 10.36, 5.4, 21.4, BRK, { shadow: false });
+        K.box(-5.32, 5.4, 11.5, 10.66, 0.18, 21.7, CAP, { shadow: false });
+        K.box(-9.8, 5.58, 6.5, 2.4, 1.6, 3.2, { tex: 'metal', color: '#4d5250' }, { shadow: false });
+        K.box(-0.12, 3.4, 13.5, 0.06, 0.9, 6, { color: '#1a1e1e', roughness: 0.3 }, { shadow: false });
+        K.box(38.07, 0, 11.5, 11.86, 3.3, 21.4, CON, { shadow: false });
+        K.box(38.1, 3.3, 11.5, 11.2, 1.15, 20.8, { color: '#101313', roughness: 1 }, { shadow: false });
+        K.box(38.07, 4.45, 11.5, 11.86, 0.95, 21.4, CON, { shadow: false });
+        for (let z = 2.5; z < 22; z += 4.8) K.box(32.3, 3.3, z, 0.4, 1.15, 0.4, CON, { shadow: false });
+        K.sign('CAR PARK — LEVEL 1', 38.1, 4.95, 22.22, 4.2, 0.5, { style: 'council', bg: '#0b4f52', fg: '#ffffff' });
+        // the road: on past both ends of the forecourt, its far footpath, the guardrail, the verge falling to the fog
+        K.box(16, -0.3, 30, 112, 0.3, 8, { tex: 'bitumen', color: '#3a3c3b' }, { shadow: false });
+        K.box(-19, -0.45, 24, 38, 0.45, 4, 'footpath', { shadow: false });
+        K.box(51, -0.45, 24, 38, 0.45, 4, 'footpath', { shadow: false });
+        for (let x = -38; x < 70; x += 6) K.box(x, 0.004, 30, 3, 0.01, 0.12, { color: '#c8c6bc', roughness: 0.8 }, { shadow: false });
+        K.box(16, -0.3, 35, 112, 0.45, 2, 'footpath', { shadow: false });
+        for (let x = -37; x < 70; x += 6) K.prop('guardrail', x, 35.9, 0, { len: 6, y: 0.15, collide: false });
+        K.box(16, -2.4, 38.5, 112, 2.45, 5, { tex: 'grass', color: '#474f42' }, { shadow: false });
+        K.plane(16, 0.05 - 2.8, 41 + 5.3, 112, 12, { tex: 'grass', color: '#474f42' }, { rot: [-62, 0, 0] });
+        K.prop('streetlight', -14, 22.6, 180, { lit: false, collide: false });
+        K.prop('streetlight', 46, 22.6, 180, { lit: false, collide: false });
+      }
       K.dress('leaves', [0.5, 2, 31.5, 21.5], 70, { seed: 541 });
       K.dress('papers', [4, 6, 28, 20], 10, { seed: 542 });
       // (low on the monolith's east end face: the slab stands at 25°, so that face points 115°)

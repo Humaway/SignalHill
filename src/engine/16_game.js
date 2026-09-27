@@ -509,7 +509,8 @@ const Game = (() => {
     safe('Enemies', () => { Enemies.clear(); Enemies.standard.stop(); });
     safe('Cam', () => { Cam.release(); Cam.unload(); Cam.lock(null); });
     safe('Render', () => { Render.resetPost(); Render.freeze(false); Render.overlay = null; Render.party(false); Render.setAmbient(null); Tex.setOutage(0); });
-    safe('Snd', () => { Snd.stopMusic(0.6); Snd.stopLoops(0.3); Snd.staticLevel(0); });
+    // (a motif still playing is let go over 3 s — it rings out into the black instead of being chopped)
+    safe('Snd', () => { Snd.stopMusic(3); Snd.stopLoops(0.3); Snd.staticLevel(0); });
     safe('Phone', () => Phone.reset());
     safe('Player', () => { Player.reset(); Player.setTorch(false); Player.lock('death', false); Player.lock('chapter', false); Player.lock('ending', false); Player.noclip = false; });
     safe('heartbeat', () => Input.heartbeat(false));

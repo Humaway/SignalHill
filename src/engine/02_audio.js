@@ -3,9 +3,14 @@
 // One AudioContext. Bus graph:
 //   fx ──┐
 //   amb ─┴→ world (menu dim) → worldLP ─→ duckLP → duck ─→ master → mute → limiter → speakers
-//   music ─────────────────────────────→ duckLP
+//   bed → bedDuck ──→ amb      outage bed → outDuck ──→ amb      (CONTRACT+: the scene duck, below)
+//   music ─→ mduckLP → mduck ──────────────────────────→ master   (Snd.duck never takes music below −6 dB)
 //   ui ────────────────────────────────────────────────→ master
 //   verbIn → room convolver → fx        mverbIn → hall convolver → music
+// CONTRACT+ (scene duck): while a letterboxed scene plays (Script.cutscene) the Outage bed — its stepping-switch pulse,
+// EFTPOS beeps, far rings, printer and hold music — drains to 22 % over 0.7 s (and comes back over 2 s after), and
+// the ordinary bed to 70 %; while a dialogue line is on screen in play (UI.subtitleShown) the Outage bed sits at 50 %.
+// The random Fog-world chime waits until the scene is over. Nothing in content has to ask for it.
 // Every sound is built from Voice/Grp helpers: sources start/stop on the audio clock and every node is disconnected
 // when the sources that feed it end, so Snd.stats().nodes returns to its baseline. Sequenced and looping sounds
 // schedule ahead through per-voice tasks pumped from Snd.update() and a 200 ms timer (they keep time without a game
@@ -25,6 +30,7 @@ const Snd = (() => {
   const menuOpen = new Set();
   const vol = { master: 0.9, effects: 0.9, music: 0.8 };
   let nextChime = 0;
+  const sceneDuck = { out: 1, bed: 1, cs: -1e9, line: -1e9 };   // the scene duck's current targets (and last seen times)
   let stat = null, staticCur = 0, staticTarget = 0, staticNext = 0;
   let pumpTimer = null, subscribed = false;
   const lst = { x: 0, y: 0, z: 0 };
@@ -110,7 +116,11 @@ const Snd = (() => {
     G.world = g(1, G.worldLP);
     G.fx = g(curve(vol.effects), G.world);
     G.amb = g(curve(vol.effects), G.world);
-    G.music = g(curve(vol.music), G.duckLP);
+    G.bedDuck = g(offline ? 1 : sceneDuck.bed, G.amb);
+    G.outDuck = g(offline ? 1 : sceneDuck.out, G.amb);
+    G.mduck = g(1, G.master);
+    G.mduckLP = f('lowpass', 20000, 0.5, G.mduck);
+    G.music = g(curve(vol.music), G.mduckLP);
     G.ui = g(curve(vol.effects), G.master);
     G.verb = ctx.createConvolver(); G.verb.buffer = mkImpulse(ctx, 1.9, 2.6, 0.55);
     G.verbIn = g(1); G.verbIn.connect(G.verb); G.verb.connect(g(0.8, G.fx));
@@ -1294,6 +1304,144 @@ const Snd = (() => {
   };
 
   // =============================================================================================================
+  // CONTRACT+ Jump scares: Snd.play('scare', {kind, pos, vol, rate}) — the loudest one-shots in the game (peak ≈ 0.8
+  // after the limiter, never clipping). kind: 'stab' (default: a dissonant orchestral-style hit — a cluster of detuned
+  // saws over a sub thump, a noise bite, ~1.5 s with the room's reverb), 'screech' (a rising metallic, voice-like
+  // shriek, ~1.2 s), 'slam' (a huge door / metal slam, the frame rattling in the room), 'swell' (a ~1.2 s reversed
+  // swell that ends in a hit — for slow reveals). Also 'whisper' (close, breathy and wordless, ~1.5 s; pos-able,
+  // opts.dur), 'knock' (three hard knocks on a door; opts.n, opts.gap, pos-able) and 'gasp' (a sharp breath in — Aidan's
+  // flinch). G.scare(o) (Script) plays them with the shake, the flash and the flinch.
+  // =============================================================================================================
+  const STAB_CL = [65.41, 69.3, 98, 138.59, 146.83, 207.65, 277.18, 293.66, 415.3];   // C2 C#2 G2 C#3 D3 G#3 C#4 D4 G#4
+  function stabHit(g, t, amp, dest, R = 1) {
+    const lp = g.filt('lowpass', 6500, 1.2, dest);
+    const ws = g.shaper(CV.soft, lp);
+    const env = g.gain(0, ws);
+    for (const f of STAB_CL) for (const d of [0.993, 1.007]) g.osc('sawtooth', f * d * R, t, t + 1.8, g.gain(0.085, env));
+    const E = env.gain;
+    E.setValueAtTime(0, t); E.linearRampToValueAtTime(amp, t + 0.007);
+    E.setTargetAtTime(amp * 0.55, t + 0.012, 0.12); E.setTargetAtTime(0, t + 0.42, 0.32);
+    lp.frequency.setValueAtTime(6500, t); lp.frequency.exponentialRampToValueAtTime(900, t + 0.5); lp.frequency.exponentialRampToValueAtTime(420, t + 1.6);
+    // the bite: a noise crack, a scrape of high strings, the sub
+    burst(g, t, 0.07, 'bandpass', 2600, 0.8, amp * 0.4, dest);
+    const sc = g.gain(0, dest), sb = g.filt('bandpass', 3100, 6, sc);
+    for (const f of [2960, 3136, 3322]) { const o = g.osc('sawtooth', f * R, t, t + 1.1, sb); o.frequency.exponentialRampToValueAtTime(f * R * 0.94, t + 1.0); }
+    ad(sc.gain, t, 0.01, amp * 0.5, 0.9);
+    thump(g, t, 72, 26, 0.6, amp * 0.6, dest);
+    burst(g, t, 0.25, 'lowpass', 220, 0.7, amp * 0.4, dest, 'brown');
+    return 1.9;
+  }
+  function screechTone(g, t, amp, dest, R = 1) {
+    const D = 1.2;
+    const env = g.gain(0, dest), hp = g.filt('highpass', 420, 0.7, env), ws = g.shaper(CV.dist, hp), sum = g.gain(0.5, ws);
+    const pre = g.gain(1);
+    for (const [f, q, m] of [[1100, 5, 1], [2350, 8, 0.75], [3500, 9, 0.45]]) {
+      const bp = g.filt('bandpass', f * 0.8, q); pre.connect(bp); bp.connect(g.gain(m * 2.2, sum));
+      bp.frequency.setValueAtTime(f * 0.8, t); bp.frequency.linearRampToValueAtTime(f * 1.15, t + D);
+    }
+    // a voice pushed past what a voice can do: detuned saws rising 520 → 1250 Hz, the vibrato widening
+    for (const det of [1, 1.013, 0.986]) {
+      const o = g.osc('sawtooth', 520 * det * R, t, t + D + 0.3, pre);
+      o.frequency.setValueAtTime(520 * det * R, t); o.frequency.exponentialRampToValueAtTime(1250 * det * R, t + D * 0.8); o.frequency.linearRampToValueAtTime(1190 * det * R, t + D);
+      const w = lfo(g, 6.7 + det, 0, o.frequency, t, t + D + 0.3); w.d.gain.setValueAtTime(4, t); w.d.gain.linearRampToValueAtTime(70, t + D);
+    }
+    // metal rubbing on metal underneath (inharmonic partials rising with it)
+    for (const [r, a] of [[1.41, 0.07], [2.13, 0.05], [3.37, 0.035]]) { const o = g.osc('sine', 520 * r * R, t, t + D + 0.3, g.gain(a, sum)); o.frequency.exponentialRampToValueAtTime(1250 * r * R, t + D * 0.8); }
+    const nz = g.noise('white', t, t + D + 0.3), nb = g.filt('bandpass', 3000, 1.2); nz.connect(nb); nb.connect(g.gain(0.35, sum));
+    const A = env.gain;
+    A.setValueAtTime(0, t); A.linearRampToValueAtTime(amp * 0.55, t + 0.035); A.linearRampToValueAtTime(amp, t + D * 0.75);
+    A.setTargetAtTime(0, t + D * 0.82, 0.08);
+    return D + 0.5;
+  }
+  function slamHit(g, t, amp, dest) {
+    thump(g, t, 58, 24, 0.75, amp, dest);
+    thump(g, t, 115, 55, 0.2, amp * 0.6, dest);
+    burst(g, t, 0.18, 'lowpass', 650, 0.7, amp * 0.85, dest, 'brown');
+    burst(g, t, 0.05, 'bandpass', 1700, 0.9, amp * 0.5, dest);
+    partials(g, t, 128, METAL.map(([r, a, d]) => [r, a, d * 3]), amp * 0.22, dest);
+    partials(g, t + 0.004, 405, STEEL, amp * 0.06, dest);
+    latch(g, t + 0.012, amp * 0.55, dest, 0.7);
+    // the frame rattling after it, and the room taking the blow
+    const s = g.noise('white', t + 0.03, t + 1.0), bp = g.filt('bandpass', 1250, 2.5); s.connect(bp);
+    const a = g.gain(0, dest); bp.connect(a); crackle(a.gain, t + 0.03, 0.9, (x) => 95 * (1 - x) + 5, [amp * 0.05, amp * 0.28], [0.004, 0.02]);
+    const r = g.noise('brown', t, t + 1.9), rl = g.filt('lowpass', 95, 0.7); r.connect(rl);
+    const ra = g.gain(0, dest); rl.connect(ra); ad(ra.gain, t, 0.04, amp * 0.7, 1.7);
+    return 2.0;
+  }
+  function swellHit(g, t, amp, dest, R = 1) {
+    const D = 1.2;
+    // a reversed cymbal: bright noise that grows toward the hit, the filter opening with it
+    const s = g.noise('white', t, t + D + 0.02), hp = g.filt('highpass', 900, 0.7), lp = g.filt('lowpass', 1400, 0.7);
+    s.connect(hp); hp.connect(lp);
+    const a = g.gain(0, dest); lp.connect(a);
+    a.gain.setValueAtTime(1e-4, t); a.gain.exponentialRampToValueAtTime(amp * 0.4, t + D - 0.012); a.gain.linearRampToValueAtTime(0, t + D);
+    lp.frequency.setValueAtTime(1400, t); lp.frequency.exponentialRampToValueAtTime(10000, t + D);
+    // the cluster breathing in backwards
+    const env = g.gain(0, dest), fl = g.filt('lowpass', 500, 0.9); fl.connect(env);
+    for (const f of [138.59, 146.83, 207.65, 293.66]) g.osc('sawtooth', f * R, t, t + D + 0.02, g.gain(0.08, fl));
+    fl.frequency.setValueAtTime(500, t); fl.frequency.exponentialRampToValueAtTime(3500, t + D);
+    env.gain.setValueAtTime(1e-4, t); env.gain.exponentialRampToValueAtTime(amp * 0.7, t + D - 0.012); env.gain.linearRampToValueAtTime(0, t + D);
+    return D + stabHit(g, t + D, amp, dest, R);
+  }
+  // (each kind's output gain: calibrated with Snd.render so every kind peaks ≈ 0.8 after the limiter)
+  const SCARE_AMP = { stab: 1.6, screech: 0.78, slam: 2.1, swell: 1.0 };
+  SFX.scare = (v, o, t) => {
+    const g = v.grp(), R = rt(o), k = SCARE_AMP[o.kind] ? o.kind : 'stab', out = g.gain(SCARE_AMP[k], v.in);
+    if (k === 'screech') return screechTone(g, t, 1, out, R);
+    if (k === 'slam') return slamHit(g, t, 1, out);
+    if (k === 'swell') return swellHit(g, t, 1, out, R);
+    return stabHit(g, t, 1, out, R);
+  };
+  DEF.scare = { verb: 0.35 };
+  // Close, breathy, wordless: noise through moving vowel formants, sibilants between (opts.dur ≈ 1.5 s)
+  SFX.whisper = (v, o, t) => {
+    const g = v.grp(), D = Math.max(0.5, o.dur || rnd(1.3, 1.7)), keys = ['a', 'e', 'i', 'o', 'u', '@', 'ai', 'ei'];
+    const s = g.noise('white', t, t + D + 0.3), pre = g.gain(1); s.connect(pre);
+    const amp = g.gain(0, v.in);
+    const F = [0, 1, 2].map((i) => { const bp = g.filt('bandpass', VOW['@'][i], [7, 11, 13][i]); pre.connect(bp); bp.connect(g.gain([1, 0.75, 0.5][i], amp)); return bp; });
+    const A = amp.gain;
+    A.setValueAtTime(0, t);
+    let tt = t + 0.04;
+    while (tt < t + D - 0.12) {
+      const d = rnd(0.11, 0.24), [v1, v2] = vowel(keys[irnd(0, keys.length - 1)]), pk = rnd(0.55, 1);
+      if (Math.random() < 0.45) burst(g, tt, rnd(0.05, 0.11), 'highpass', rnd(4200, 6200), 0.8, pk * 0.22, v.in);   // s / sh
+      const ts = tt + 0.02;
+      F.forEach((bp, i) => { bp.frequency.setTargetAtTime(v1[i], ts, 0.02); if (v1 !== v2) bp.frequency.setTargetAtTime(v2[i], ts + d * 0.4, d * 0.2); });
+      A.setTargetAtTime(pk, ts, 0.025); A.setTargetAtTime(pk * 0.12, tt + d - 0.04, 0.02);
+      tt += d + (Math.random() < 0.3 ? rnd(0.06, 0.16) : 0.01);
+    }
+    A.setTargetAtTime(0, tt, 0.05);
+    return D + 0.35;
+  };
+  DEF.whisper = { verb: 0.04 };
+  // Three hard knocks on a door (opts.n, opts.gap ≈ 0.36 s, opts.soft)
+  SFX.knock = (v, o, t) => {
+    let tt = t;
+    const n = Math.max(1, o.n || 3), gap = o.gap > 0 ? o.gap : 0.36;
+    for (let i = 0; i < n; i++) {
+      const g = v.grp(), a = (o.soft ? 0.5 : 1) * rnd(0.88, 1);
+      thump(g, tt, 125, 60, 0.11, a * 0.8, v.in);
+      burst(g, tt, 0.06, 'bandpass', 360 * rnd(0.95, 1.05), 3, a * 0.9, v.in);        // the panel
+      burst(g, tt, 0.1, 'bandpass', 165, 5, a * 0.55, v.in);                          // hollow behind it
+      burst(g, tt, 0.012, 'bandpass', 2300, 1.2, a * 0.45, v.in);                      // the knuckle
+      tt += gap * rnd(0.96, 1.04);
+    }
+    return tt - t + 0.4;
+  };
+  DEF.knock = { verb: 0.3 };
+  // A sharp breath in (the flinch)
+  SFX.gasp = (v, o, t) => {
+    const g = v.grp(), D = o.dur || 0.45, j = rnd(0.95, 1.05);
+    const s = g.noise('white', t, t + D + 0.05), pre = g.gain(1); s.connect(pre);
+    const a = g.gain(0, v.in);
+    for (const [f, q, m] of [[1250, 2.5, 1], [2450, 3, 0.6], [4100, 2, 0.3]]) { const bp = g.filt('bandpass', f * j, q); pre.connect(bp); bp.connect(g.gain(m, a)); bp.frequency.setValueAtTime(f * j, t); bp.frequency.linearRampToValueAtTime(f * j * 1.15, t + D); }
+    a.gain.setValueAtTime(0, t); a.gain.linearRampToValueAtTime(0.55, t + 0.045); a.gain.setTargetAtTime(0.18, t + 0.07, 0.08); a.gain.linearRampToValueAtTime(0, t + D);
+    const va = g.gain(0, v.in), vl = g.filt('bandpass', 900 * j, 4, va), vo = g.osc('sawtooth', 215 * j, t + 0.01, t + 0.16, vl);
+    vo.frequency.linearRampToValueAtTime(265 * j, t + 0.13); ad(va.gain, t + 0.01, 0.015, 0.14, 0.1);
+    return D + 0.1;
+  };
+
+  // =============================================================================================================
   // Footsteps: Snd.footstep(surface, running, {pos, vol, heavy})
   // =============================================================================================================
   // th: heel thump [f0, f1, decay, amp]; n: noise [filter, freq, Q, amp, decay]; grit: grains; wet: slap;
@@ -1317,6 +1465,7 @@ const Snd = (() => {
     o = o || {};
     const sp = SURF[surface] || SURF.concrete, run = !!running, heavy = !!o.heavy;
     const v = new Voice(o.dest || B.fx, { pos: o.pos, vol: (o.vol != null ? o.vol : 1) * (run ? 1.3 : 1) * (heavy ? 1.5 : 1) * 1.3, verb: o.verb != null ? o.verb : 0.06 });
+    v.name = 'footstep';
     try {
       const g = v.grp(), t = v.t0 + rnd(0, 0.01), j = rnd(0.92, 1.08) * (heavy ? 0.7 : 1), k = run ? 0.75 : 1, br = run ? 1.18 : 1;
       footAlt ^= 1;
@@ -1592,7 +1741,8 @@ const Snd = (() => {
     const g = v.grp();
     hvac(g, t, v.in, 0.07); fluoro(g, t, v.in, 0.025);
     v.every(t + rnd(6, 14), () => rnd(10, 30), (tt) => { playOn(v.in, Math.random() < 0.5 ? 'creak' : 'thud', { far: true, vol: rnd(0.1, 0.25), pan: rnd(-1, 1), delay: at(tt) }, v); });
-    v.every(t + rnd(30, 60), () => rnd(45, 90), (tt) => { playOn(v.in, 'ring', { n: 1, far: true, lp: 900, vol: 0.08, pan: rnd(-1, 1), delay: at(tt) }, v); });
+    // a phone one room away, now and then (rarer and softer since the rings came down: 90–180 s)
+    v.every(t + rnd(60, 120), () => rnd(90, 180), (tt) => { playOn(v.in, 'ring', { n: 1, far: true, lp: 900, vol: 0.06, pan: rnd(-1, 1), delay: at(tt) }, v); });
   };
   BEDS.hospital = (v, t) => {
     const g = v.grp();
@@ -1641,13 +1791,14 @@ const Snd = (() => {
       if (i % 4 === 3) for (let s = 0; s < 8; s++) stepHit(gg, tt + 0.5 + s * 0.07, 0.05, pulse);
     });
     v.children.push(playOn(v.in, 'hold', { speed: 0.5, lp: 900, verb: 0.9, vol: 0.14, pan: rnd(-0.4, 0.4), delay: 0.5 }));
-    v.every(t + rnd(3, 8), () => rnd(10, 24), (tt) => { playOn(v.in, 'ring', { n: irnd(1, 3), lp: 1000, verb: 0.8, vol: rnd(0.12, 0.2), pan: rnd(-0.9, 0.9), delay: at(tt) }, v); });
-    v.every(t + rnd(2, 5), () => rnd(5, 13), (tt) => { playOn(v.in, 'eftpos', { lp: 3000, verb: 0.7, vol: rnd(0.08, 0.15), pan: rnd(-1, 1), delay: at(tt) }, v); });
+    // phones ringing a room away (every 22–48 s, one or two cycles) and EFTPOS approvals somewhere (every 9–20 s, soft)
+    v.every(t + rnd(6, 14), () => rnd(22, 48), (tt) => { playOn(v.in, 'ring', { n: irnd(1, 2), lp: 1000, verb: 0.8, vol: rnd(0.1, 0.16), pan: rnd(-0.9, 0.9), delay: at(tt) }, v); });
+    v.every(t + rnd(3, 7), () => rnd(9, 20), (tt) => { playOn(v.in, 'eftpos', { lp: 2600, verb: 0.75, vol: rnd(0.05, 0.1), pan: rnd(-1, 1), delay: at(tt) }, v); });
     v.every(t + rnd(10, 20), () => rnd(14, 30), (tt) => { playOn(v.in, 'printer', { lines: irnd(6, 16), tear: Math.random() < 0.4, lp: 1800, verb: 0.7, vol: 0.18, pan: rnd(-1, 1), delay: at(tt) }, v); });
   };
   function startBed(name, fade, dest) {
-    const v = new Voice(dest || B.amb, { baseVol: BED_LEVEL[name] || 1, vol: BED_LEVEL[name] || 1 });
-    v.bedName = name;
+    const v = new Voice(dest || (name === 'outage' ? B.outDuck : B.bedDuck) || B.amb, { baseVol: BED_LEVEL[name] || 1, vol: BED_LEVEL[name] || 1 });
+    v.bedName = name; v.name = 'bed:' + name;
     const now = ctx.currentTime;
     v.in.gain.setValueAtTime(0, now); v.in.gain.linearRampToValueAtTime(1, now + Math.max(0.05, fade));
     BEDS[name](v, v.t0);
@@ -1658,21 +1809,22 @@ const Snd = (() => {
   // =============================================================================================================
   // Music: a synthesised felt piano (sine + decaying harmonics, soft attack, lowpass, hall reverb)
   // =============================================================================================================
-  function pianoNote(g, t, midi, dur, vel, dest) {
+  // rel: the felt damper's time constant when the key is let go (0.14 s; a longer one lets the note ring away)
+  function pianoNote(g, t, midi, dur, vel, dest, rel = 0.14) {
     const f = mtof(midi), hi = clamp((midi - 40) / 50);
     const out = g.gain(0, dest);
     const bright = Math.min(15000, f * (5 + vel * 6));
     const lp = g.filt('lowpass', bright, 0.4, out);
-    const end = t + dur + 1.0;
+    const end = t + dur + Math.max(1.0, rel * 7);
     g.osc(PW.piano, f * 0.9994, t, end, lp); g.osc(PW.piano, f * 1.0008, t, end, lp);
     const body = g.gain(0, out); g.osc('sine', f, t, end, body);
     const atk = 0.008 + (1 - vel) * 0.014, tail = 5 - hi * 3.2, peak = vel * 0.22;
     const A = out.gain;
     A.setValueAtTime(0, t); A.linearRampToValueAtTime(peak, t + atk);
     A.setTargetAtTime(peak * 0.45, t + atk, 0.18); A.setTargetAtTime(1e-4, t + atk + 0.5, tail / 3);
-    A.setTargetAtTime(0, t + dur, 0.14); // felt damper
+    A.setTargetAtTime(0, t + dur, rel); // felt damper
     const Bd = body.gain;
-    Bd.setValueAtTime(0, t); Bd.linearRampToValueAtTime(vel * 0.1, t + atk * 2); Bd.setTargetAtTime(1e-4, t + atk * 2, tail / 2.5); Bd.setTargetAtTime(0, t + dur, 0.16);
+    Bd.setValueAtTime(0, t); Bd.linearRampToValueAtTime(vel * 0.1, t + atk * 2); Bd.setTargetAtTime(1e-4, t + atk * 2, tail / 2.5); Bd.setTargetAtTime(0, t + dur, rel * 1.15);
     lp.frequency.setValueAtTime(bright, t); lp.frequency.setTargetAtTime(Math.min(8000, f * 1.8 + 200), t + atk, 0.4);
     const n = g.noise('pink', t, t + 0.06); const nl = g.filt('lowpass', 300 + f * 0.5, 0.7); n.connect(nl);
     const na = g.gain(0, dest); nl.connect(na); ad(na.gain, t, 0.002, vel * 0.05, 0.03);
@@ -1714,19 +1866,23 @@ const Snd = (() => {
     [16.5, 43, 9, 0.32], [16.54, 50, 9, 0.26], [16.58, 59, 9, 0.22], [16.62, 67, 9, 0.24], [16.6, 74, 9, 0.3], [16.65, 71, 9, 0.32],
     [20.5, 79, 6, 0.18],
   ];
+  // [t, midi, dur, vel, rel?]
   function playNotes(v, t, list, dest, off = 0, human = true) {
     const g = v.grp();
-    for (const [nt, m, d, vel] of list) pianoNote(g, t + off + nt + (human ? rnd(-0.015, 0.02) : 0), m, d, clamp(vel + (human ? rnd(-0.03, 0.03) : 0), 0.05, 1), dest);
+    for (const [nt, m, d, vel, rel] of list) pianoNote(g, t + off + nt + (human ? rnd(-0.015, 0.02) : 0), m, d, clamp(vel + (human ? rnd(-0.03, 0.03) : 0), 0.05, 1), dest, rel);
   }
+  // Tomorrow, clipped: the chord and the first two notes, and then nothing — the third never comes. Nothing is chopped:
+  // the second note is held and let go softly, the chord rings under it and the hall carries both away (≈ 6 s).
+  const TOM_CLIP = [
+    [0, 45, 3.4, 0.34, 0.5], [0.02, 52, 3.3, 0.28, 0.5], [0.05, 60, 3.2, 0.22, 0.5],
+    [0.1, 76, 1.3, 0.52], [1.3, 74, 2.3, 0.48, 0.55],
+  ];
   const MUSIC = {
-    // Aidan: four descending notes that never resolve (clipped: cut off after the second; full: the flashback)
+    // Aidan: four descending notes that never resolve (clipped: it stops after the second — unresolved, never chopped;
+    // full: the flashback)
     tomorrow(v, o, t) {
       const cut = v.mixer(1);
-      if (o.clipped) {
-        playNotes(v, t, TOM_A.filter((n) => n[0] < 2.6).map(([a, m, d, vel]) => [a, m, Math.min(d, 2.62 - a), vel]), cut);
-        cut.gain.setValueAtTime(1, t + 2.62); cut.gain.linearRampToValueAtTime(0, t + 2.7);
-        return 2.8;
-      }
+      if (o.clipped) { playNotes(v, t, TOM_CLIP, cut); return 6; }
       playNotes(v, t, TOM_A, cut);
       if (o.full) { playNotes(v, t, TOM_B, cut, 6.0); return 20; }
       if (o.loop) { v.every(t + 9, 9, (tt) => playNotes(v, tt, TOM_A, cut)); return Infinity; }
@@ -1760,8 +1916,13 @@ const Snd = (() => {
     clock_tick: 4, penclick: 1.3, handle: 2, door_locked: 1.8, clunk: 2.2, plug: 2.5, hazard: 1.6, drip: 2, roller: 2.5,
     sting: 2, skitter: 1.8, battery: 1.5, pins: 1.8, keys: 1.3, msgchime: 1.8, sigh: 2.5, wind_gust: 3, modem_boot: 1.8,
     turnstile: 1.5, stamp: 2, hurt: 2.2, swing: 1.5, hit: 2, thud: 1.8, release: 1.5, cut: 1.5, unfold: 0.7, creak: 0.7,
-    door_close: 0.8, eftpos: 0.8, ring: 1.4, breath: 0.7, beep: 0.8, pa_ding: 0.7, dialup: 1.3, printer: 1.5, slam: 1.3,
+    door_close: 0.8, eftpos: 0.8, breath: 0.7, beep: 0.8, dialup: 1.3, printer: 1.5, slam: 1.3,
     standard_keys: 1.5,
+    // the phone ring and the shop-door chime were the most-heard sounds in the game and too loud for it: the ring is
+    // −10 dB from its first calibration (1.4), ringback −4 dB, the chime −9.6 dB, the PA ding −4.4 dB
+    ring: 0.45, ringback: 0.63, chime: 0.33, pa_ding: 0.42,
+    // jump scares (CONTRACT+): clearly the loudest one-shots, under the limiter
+    scare: 1.0, whisper: 1.8, knock: 0.75, gasp: 1.2,
   };
   for (const k in LEVEL) { DEF[k] = DEF[k] || {}; DEF[k].vol = (DEF[k].vol != null ? DEF[k].vol : 1) * LEVEL[k]; }
   const BED_LEVEL = { office: 2, hospital: 2, garage: 2, hum: 1.4, store: 1.8 };
@@ -1783,6 +1944,7 @@ const Snd = (() => {
     const oo = { ...d, ...o, vol: (d.vol != null ? d.vol : 1) * (o.vol != null ? o.vol : 1), baseVol: d.vol != null ? d.vol : 1 };
     if (o.pos) oo.pan = 0;
     const v = new Voice(o.dest || busFor(name, o, d), oo);
+    v.name = name;
     try {
       let dur;
       if (oo.loop && !fn.loops) {
@@ -1837,7 +1999,7 @@ const Snd = (() => {
     if (bed.name !== wantBed || (bed.v && bed.v.ended)) {
       if (bed.v) bed.v.stop(Math.max(0.05, fade));
       bed = { name: wantBed, v: wantBed === 'none' ? null : startBed(wantBed, fade) };
-      if (bed.v && nextChime < ctx.currentTime + 15) nextChime = ctx.currentTime + rnd(20, 50);
+      if (bed.v && nextChime < ctx.currentTime + 30) nextChime = ctx.currentTime + rnd(45, 110);
     }
     const lvl = world === 'outage' ? (wantBed === 'wind_heavy' ? 0.75 : wantBed === 'wind' ? 0.35 : 0.25) : 1;
     if (bed.v && bed.v.level !== lvl) { bed.v.level = lvl; bed.v.setVol(lvl, 1.2); }
@@ -1854,23 +2016,39 @@ const Snd = (() => {
   }
 
   // ---- music ------------------------------------------------------------------------------------------------------
-  // Snd.music('tomorrow'|'nan'|'line', {full, clipped, loop, vol}) → {stop(fade=2)}
+  // Snd.music('tomorrow'|'nan'|'line', {full, clipped, loop, vol, xfade}) → {stop(fade=2)}
+  // A motif started while another plays takes over with a 2.5 s crossfade (opts.xfade). Durations (the last note's
+  // release; the hall rings ~3.5 s past it): tomorrow 8.5 s, clipped 6 s (≈ 3.7 s of notes, then the ring-out), full
+  // 20 s; nan 18.5 s, full 45 s; line 16.6 s (8 × 1.7 s + 3), full 23.4 s; loop: until stopped.
   function music(name, o) {
     o = o || {};
     if (!ok() || !MUSIC[name]) { if (ctx && !MUSIC[name]) console.warn('[Snd] unknown music: ' + name); return DUMMY; }
-    if (curMusic && !curMusic.ended) curMusic.stop(o.xfade != null ? o.xfade : 1.5);
-    const v = new Voice(B.music, { vol: (o.vol != null ? o.vol : 1) * 1.1, verb: o.verb != null ? o.verb : o.clipped ? 0.1 : 0.55, defFade: 2 });
+    if (curMusic && !curMusic.ended) curMusic.stop(o.xfade != null ? o.xfade : 2.5);
+    const v = new Voice(B.music, { vol: (o.vol != null ? o.vol : 1) * 1.1, verb: o.verb != null ? o.verb : o.clipped ? 0.5 : 0.55, defFade: 2.5 });
+    v.name = 'music:' + name;
     try {
       const d = MUSIC[name](v, o, v.t0 + 0.05);
       v.handle.dur = d;
       if (isFinite(d)) v.hardEnd = v.t0 + d + 6;
       if (v.tasks.length) v.pumpTasks(ctx.currentTime + LOOK);
     } catch (e) { console.error('[Snd] music ' + name, e); v.end(); return DUMMY; }
+    v.handle.stop = (fade, so) => v.stop(musicFade(fade != null ? fade : 2.5, so));
     v.built = true; v.check();
     curMusic = v;
     return v.handle;
   }
-  function stopMusic(fade = 2) { if (curMusic && !curMusic.ended) curMusic.stop(fade); curMusic = null; }
+  // Snd.stopMusic(fade = 2, {hard}) — a motif is never chopped: a fade under 1.5 s is stretched to 2.5 s so the phrase
+  // lets go (CONTRACT+); pass {hard:true} for a deliberate cut (the fade is then used as given, 0 = at once).
+  // (the motif's own handle.stop(fade, {hard}) follows the same rule)
+  function musicFade(fade, o) {
+    let f = +fade;
+    if (!(f >= 0)) f = 2;
+    return o === true || (o && o.hard) || f >= 1.5 ? f : 2.5;
+  }
+  function stopMusic(fade = 2, o) {
+    if (curMusic && !curMusic.ended) curMusic.stop(musicFade(fade, o));
+    curMusic = null;
+  }
 
   // ---- phone static that follows the nearest threat ----------------------------------------------------------------
   function buildStatic() {
@@ -1923,16 +2101,45 @@ const Snd = (() => {
   function stopLoops(fade = 0.5) { for (const L of loops.values()) if (L.h) L.h.stop(fade); loops.clear(); }
 
   // ---- ducking, muting, volumes, listener ---------------------------------------------------------------------------
-  // Snd.duck(amount 0..1, dur): all sound drains away (the Standard's "Got a sec?"), holds, then returns.
+  // Snd.duck(amount 0..1, dur): all sound drains away (the Standard's "Got a sec?"), holds, then returns. Music follows
+  // it only down to −6 dB (and a 2.4 kHz lowpass): a motif under a line of dialogue is never swallowed.
   function duck(amount = 1, dur = 3) {
     if (!ctx || offline) return Promise.resolve();
     const a = clamp(amount), now = ctx.currentTime, drain = 0.7, back = 1.4;
-    const g = B.duck.gain, f = B.duckLP.frequency;
-    holdParam(g, now); holdParam(f, now);
-    g.linearRampToValueAtTime(1 - a * 0.985, now + drain); f.exponentialRampToValueAtTime(Math.max(60, 20000 * Math.pow(0.013, a)), now + drain);
-    g.setValueAtTime(1 - a * 0.985, now + drain + dur); f.setValueAtTime(Math.max(60, 20000 * Math.pow(0.013, a)), now + drain + dur);
-    g.linearRampToValueAtTime(1, now + drain + dur + back); f.exponentialRampToValueAtTime(20000, now + drain + dur + back);
+    const ramp = (g, f, gv, fv) => {
+      holdParam(g, now); holdParam(f, now);
+      g.linearRampToValueAtTime(gv, now + drain); f.exponentialRampToValueAtTime(fv, now + drain);
+      g.setValueAtTime(gv, now + drain + dur); f.setValueAtTime(fv, now + drain + dur);
+      g.linearRampToValueAtTime(1, now + drain + dur + back); f.exponentialRampToValueAtTime(20000, now + drain + dur + back);
+    };
+    const fq = Math.max(60, 20000 * Math.pow(0.013, a));
+    ramp(B.duck.gain, B.duckLP.frequency, 1 - a * 0.985, fq);
+    ramp(B.mduck.gain, B.mduckLP.frequency, Math.max(0.5, 1 - a * 0.985), Math.max(2400, fq));
     return new Promise((r) => setTimeout(r, (drain + dur) * 1000));
+  }
+  // The scene duck (see the header): targets from Script.cutscene / UI.subtitleShown, held a moment past the scene or
+  // the line so the bed doesn't pump between lines and chained scenes.
+  const SCENE = { out: [1, 0.5, 0.22], bed: [1, 1, 0.7], hold: [0, 1.4, 1.0] };
+  function sceneMode(now) {
+    let cs = false, line = false;
+    try { cs = typeof Script !== 'undefined' && !!Script && !!Script.cutscene && !Script.skipping; } catch (e) { /* no script */ }
+    try { line = !cs && typeof UI !== 'undefined' && !!UI && !!UI.subtitleShown; } catch (e) { /* no UI */ }
+    if (cs) sceneDuck.cs = now;
+    if (line) sceneDuck.line = now;
+    return now - sceneDuck.cs <= SCENE.hold[2] ? 2 : now - sceneDuck.line <= SCENE.hold[1] ? 1 : 0;
+  }
+  function applySceneDuck() {
+    if (!B || !B.outDuck) return;
+    // (the hold runs on the game's clock — Time.real, stepped by every tick — so it follows SH.advance too)
+    const now = ctx.currentTime, m = sceneMode(typeof Time !== 'undefined' && Time && isFinite(Time.real) ? Time.real : now);
+    const set = (key, node, v) => {
+      if (v === sceneDuck[key]) return;
+      const down = v < sceneDuck[key];
+      sceneDuck[key] = v;
+      holdParam(node.gain, now); node.gain.linearRampToValueAtTime(v, now + (down ? 0.7 : 2.0));
+    };
+    set('out', B.outDuck, SCENE.out[m]);
+    set('bed', B.bedDuck, SCENE.bed[m]);
   }
   function applyMute() {
     if (!B) return;
@@ -2018,10 +2225,15 @@ const Snd = (() => {
       if (v.tasks.length && !v.stopping) { try { v.pumpTasks(until); } catch (e) { console.error('[Snd] task', e); v.stop(0.05); } }
       if (now > v.hardEnd) v.end();
     }
-    // the two-tone chime from nowhere (Fog world, any bed)
+    applySceneDuck();
+    // the two-tone chime from nowhere (Fog world, any bed): every 90–180 s, soft and far — never over a scene (it
+    // waits until the scene is over)
     if (world === 'fog' && bed.v && now >= nextChime) {
-      if (nextChime > 0) play('chime', { bus: 'amb', pan: rnd(-0.85, 0.85), vol: rnd(0.16, 0.26), lp: 2400, verb: 0.9 });
-      nextChime = now + rnd(40, 90);
+      if (sceneDuck.bed < 1) nextChime = now + rnd(8, 20);
+      else {
+        if (nextChime > 0) play('chime', { bus: 'amb', pan: rnd(-0.85, 0.85), vol: rnd(0.12, 0.2), lp: 2200, verb: 0.9 });
+        nextChime = now + rnd(90, 180);
+      }
     }
     if (stat) {
       applyStatic();
@@ -2039,10 +2251,14 @@ const Snd = (() => {
   }
 
   // ---- diagnostics ----------------------------------------------------------------------------------------------------
-  // CONTRACT+: Snd.stats() → { state, voices, nodes, loops, bed, world, music, static } (nodes = live per-sound nodes)
+  // CONTRACT+: Snd.stats() → { state, voices, nodes, loops, bed, world, music, static, sceneDuck:{out, bed}, playing } (nodes =
+  // live per-sound nodes; sceneDuck = the scene duck's targets for the Outage bed and the ordinary bed; playing = the
+  // names of up to 16 live voices)
   function stats() {
     return { state: ctx ? ctx.state : 'none', voices: voices.size, nodes: liveNodes, loops: loops.size, bed: bed.name,
       outageBed: !!outBed, world, music: !!(curMusic && !curMusic.ended), static: staticTarget, dimmed: worldDimmed(),
+      sceneDuck: { out: sceneDuck.out, bed: sceneDuck.bed },
+      playing: [...voices].filter((v) => !v.offline).slice(0, 16).map((v) => v.name || '?'),       // (tests: what is sounding)
       // (the Options volumes as set, and the bus gains they drive now — tests)
       volumes: { ...vol }, buses: B && B.master ? { master: B.master.gain.value, effects: B.fx.gain.value, music: B.music.gain.value } : null };
   }

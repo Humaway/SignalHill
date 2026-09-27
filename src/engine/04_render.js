@@ -10,6 +10,10 @@
 //   redBadge 0..1 (Unread stings), menu (bool: grain at 60%, also automatic while frozen or an overlay is shown),
 //   exposure (multiplier, default 1)                                                           // CONTRACT+: menu, exposure
 // Grain is multiplied by META.options.grain and disabled when META.options.noise === false.
+// CONTRACT+ Render.flash(amount 0..1 = 0.5, dur = 0.3) — a jump-scare pulse on top of Render.post (it never writes it):
+//   a bright frame (a lift toward white, exposure and a chromatic split) that dies over `dur`, and a vignette that clamps
+//   in and lets go over 4 × dur. A stronger flash replaces a weaker one; game time (it holds under a pause menu).
+//   Render.flashLevel → the pulse now (0..1, tests).
 const Render = (() => {
   const POINTS = 8, SPOTS = 2, SHEETS = 20, SPECKS = 360, TAU = Math.PI * 2;
   const FOG_HEX = '#8e9996';
@@ -685,6 +689,16 @@ const Render = (() => {
 
   const post = { grain: null, ca: null, vignette: null, desat: 0, noise: 0, fade: 0, white: 0, dim: 1, blur: 0, brightness: null, redBadge: 0, menu: false, exposure: 1 };
   const POST_DEFAULTS = { ...post };
+  const flashSt = { a: 0, t: 0, dur: 0.3 };
+  function flash(a = 0.5, dur = 0.3) {
+    a = U.clamp(+a || 0);
+    if (!(a > 0)) return false;
+    if (flashSt.a > 0 && a < flashLevel()) return false;
+    flashSt.a = a; flashSt.t = 0; flashSt.dur = Math.max(0.05, +dur || 0.3);
+    return true;
+  }
+  function flashLevel() { return flashSt.a > 0 ? flashSt.a * Math.max(0, 1 - flashSt.t / (flashSt.dur * 4)) : 0; }
+  function stepFlash(dt) { if (flashSt.a > 0) { flashSt.t += dt; if (flashSt.t >= flashSt.dur * 4) flashSt.a = 0; } }
   const slip = { next: 8 + Math.random() * 7, t: -1, dur: 0.3, forced: 0 };
   function stepPost(rdt, now) {
     stepGrade(rdt);
@@ -695,17 +709,20 @@ const Render = (() => {
     const u = postU;
     u.uTime.value = now % 3600;
     u.uGrain.value = grain;
-    u.uCA.value = p.ca ?? g.ca;
-    u.uVig.value = p.vignette ?? g.vig;
+    // (the jump-scare pulse: a hit that dies over dur, a vignette that lets go over 4 × dur)
+    const fk = flashSt.a > 0 ? Math.max(0, 1 - flashSt.t / flashSt.dur) : 0, fv = flashLevel();
+    const fHit = flashSt.a * fk * fk;
+    u.uCA.value = (p.ca ?? g.ca) + fHit * 3;
+    u.uVig.value = (p.vignette ?? g.vig) + fv * 0.5;
     u.uDesat.value = U.clamp(p.desat || 0);
     u.uNoise.value = U.clamp(p.noise || 0);
     u.uFade.value = U.clamp(p.fade || 0);
-    u.uWhite.value = U.clamp(p.white || 0);
+    u.uWhite.value = U.clamp((p.white || 0) + fHit * 0.45);
     u.uDim.value = p.dim ?? 1;
     u.uBlur.value = U.clamp(p.blur || 0);
     u.uBright.value = p.brightness ?? opt.brightness ?? 1;
     u.uRed.value = U.clamp(p.redBadge || 0);
-    u.gExp.value = g.exp * (p.exposure ?? 1); u.gSat.value = g.sat; u.gAccent.value = g.accent; u.gContrast.value = g.contrast; u.gPivot.value = g.pivot; u.gDirt.value = g.dirt; u.gGlow.value = g.glow;
+    u.gExp.value = g.exp * (p.exposure ?? 1) * (1 + fHit * 0.8); u.gSat.value = g.sat; u.gAccent.value = g.accent; u.gContrast.value = g.contrast; u.gPivot.value = g.pivot; u.gDirt.value = g.dirt; u.gGlow.value = g.glow;
     u.gLift.value.fromArray(g.lift); u.gGamma.value.fromArray(g.gamma); u.gGain.value.fromArray(g.gain); u.gShadow.value.fromArray(g.shadow); u.gHigh.value.fromArray(g.high);
     // Outage flicker + sync-slip every 8–15 s
     u.uScan.value = g.scan;
@@ -782,6 +799,7 @@ const Render = (() => {
     if (!focusSet && prevFocus.lengthSq() === 0) prevFocus.copy(lastFocus);
     const time = (performance.now() / 1000) % 3600;
     stepEnv(dt);
+    stepFlash(dt);
     updateTorch(dt);
     updateParty(dt);
     assignLights(dt);
@@ -913,7 +931,8 @@ const Render = (() => {
   const api = {
     init, resize, update, render, scene, camera, post, overlay: null, torch,
     setGrade, setEnvironment, setAmbient, allocLight, freeAllLights, halo, freeze, renderTarget, renderTo, mirror, stats, lightAt,
-    project, capture,
+    project, capture, flash,
+    get flashLevel() { return flashLevel(); },
     // CONTRACT+: Render.glitch(dur = 0.35, strength = 1) — trigger a horizontal sync-slip now (any world/grade).
     glitch(dur = 0.35, strength = 1) { slip.t = 0; slip.dur = dur; slip.forced = strength; postU.uSlipY.value = 0.15 + Math.random() * 0.7; postU.uSlipSeed.value = Math.random() * 100; },
     // CONTRACT+ extras

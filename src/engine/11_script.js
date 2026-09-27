@@ -41,6 +41,9 @@
 //   what it left); Player puts the equipped weapon away while a letterboxed scene owns him; G.boss and G.ending end the
 //   skip of the calling scene (Script.skipping is false during the fight / the ending); a scene started with
 //   inheritSkip:false (the endings' scenes, G.boss) is its own skip chain.
+// CONTRACT+ (jump scares): G.scare(o) → Promise<bool> (the stinger, shake, flash, pad, Aidan's flinch, a racing heart;
+//   once per id, a 20 s cooldown, never while skipping), G.glimpse(o) → {remove()} (a figure there for a moment, then gone
+//   by itself), G.scareReady; G.stopMusic(fade, {hard}) — see "Jump scares and glimpses" below and ENGINE_NOTES §2.
 // CONTRACT+ (maintenance): G.finally(fn(how)), G.addLight(kind, o) (freed at the end), G.actor(enemy | enemy id),
 //   G.doc(id, {page, highlight}), G.cam({far}); a G.boss ends the skip of the scene that awaited it; skipping scripts
 //   that only wait yield a frame every SPIN_MAX instant waits; actor promises never report Script.ABORT; o.dur of
@@ -262,7 +265,7 @@ const Script = (() => {
     for (const h of ctx.lights) { try { h.free(); } catch (e) { /* gone */ } }
     ctx.lights.clear();
     for (const fn of ctx.finals.splice(0).reverse()) { try { fn(ctx.aborted ? 'aborted' : ctx.skipping ? 'skipped' : 'done'); } catch (e) { console.error(`[Script] "${ctx.name}" finally`, e); } }
-    if (ctx.music && ctx.skipping) snd('stopMusic', 1);
+    if (ctx.music && ctx.skipping) snd('stopMusic', 1, { hard: true });
     if (ctx.postSaved && !ctx.opts.keepPost) restorePost(ctx);
     if (ctx.poseSnap && !ctx.opts.keepPose) { try { Player.poseRestore(ctx.poseSnap); } catch (e) { console.error('[Script] poseRestore', e); } ctx.poseSnap = null; }
     if (camOwner === ctx) { camOwner = null; try { if (hasCam() && Cam.isScripted) Cam.release(); } catch (e) { console.error('[Script] Cam.release', e); } }
@@ -306,6 +309,7 @@ const Script = (() => {
     for (const c of [...live]) abort(c, reason);
     queue.length = 0; blockStack.length = 0; waits = [];
     lbCount = 0; camOwner = null; choiceSt = null;
+    if (reason !== 'death' && reason !== 'ending') lastScare = -1e9;          // a load / new game starts the scare cooldown afresh
     ui('letterbox', false, 0.3); ui('clearSubtitle', 0.2); ui('holdPrompt', null); ui('skippable', false);
     if (hadChoice) ui('choice', []);
     if (reason === 'load') ui('clear', { letterbox: true });
@@ -386,6 +390,8 @@ const Script = (() => {
     clock += dt;
     frameNo++;
     if (!menusOpen()) handleInput();
+    stepLater(dt);
+    stepGlimpses(dt);
     if (anySkipping()) {
       ui('skip');
       if (camOwner && camOwner.skipping) { try { Cam.finish(); } catch (e) { /* no camera */ } }
@@ -832,6 +838,170 @@ const Script = (() => {
   }
 
   // ---------------------------------------------------------------------------------------------------------------
+  // CONTRACT+ Jump scares and glimpses — G.scare(o) / G.glimpse(o) (Script.scare / Script.glimpse for engine code)
+  // ---------------------------------------------------------------------------------------------------------------
+  // Game-time callbacks that outlive the script that set them (a scare's heartbeat, the control freeze): stepped in
+  // update(), never cleared by abortAll, so nothing a scare starts is ever left on.
+  const later = [];
+  function after(sec, fn) { later.push({ t: Math.max(0, +sec || 0), fn }); }
+  function stepLater(dt) {
+    if (!later.length) return;
+    for (const l of later.slice()) {
+      l.t -= dt;
+      if (l.t > 0) continue;
+      later.splice(later.indexOf(l), 1);
+      try { l.fn(); } catch (e) { console.error('[Script] later', e); }
+    }
+  }
+  const SCARE = { cooldown: 20, resolve: 0.6, lockMax: 0.6, kinds: ['stab', 'screech', 'slam', 'swell'] };
+  let lastScare = -1e9;
+  const playerDead = () => { try { return hasPlayer() && !!Player.dead; } catch (e) { return false; } };
+  const scareReady = (ctx) => !(ctx && (ctx.aborted || ctx.skipping)) && !anySkipping() && !playerDead() && clock - lastScare >= SCARE.cooldown;
+  function flinchAidan() {
+    if (!hasPlayer() || !Player.actor) return;
+    const a = Player.actor;
+    try {
+      if (Player.mode !== 'ladder') quiet(a.gesture('flinch'));
+      const prev = a.faceState ? a.faceState.expr : null;
+      a.expr('scared');
+      if (prev && prev !== 'scared') after(2.6, () => { try { if (a.faceState && a.faceState.expr === 'scared') a.expr(prev); } catch (e) { /* rig */ } });
+      const p = Player.pos;
+      snd('play', 'gasp', p ? { pos: [p.x, p.y + 1.6, p.z], vol: 0.9 } : { vol: 0.9 });
+    } catch (e) { console.error('[Script] scare flinch', e); }
+  }
+  // G.scare(o) → Promise<true | false>: a jump scare — the stinger, a camera jolt, a pulse of light, the pad, Aidan's
+  // flinch and a racing heart. o = { id (once per save: S.done['scare:'+id]), kind 'stab'|'screech'|'slam'|'swell',
+  // pos [x,y,z]|[x,z] (a 3D sound; quieter with distance), vol, shake (0.45), flash (0..1, 0.3), rumble (true),
+  // flinch (true), heart (seconds of heartbeat after, 4), lock (seconds of control freeze, 0, max 0.6) }.
+  // Resolves true ~0.6 s later; false at once — and nothing happens — when the id is spent, while this script or any
+  // cutscene is being skipped, once Aidan is dead, or within 20 s (game time) of the last scare. The id is spent by the
+  // call however it ends (played, skipped or swallowed by the cooldown), so a skipped scene leaves S as a played one
+  // does. Never damages Aidan, never throws; without audio it still shakes, flashes and flinches.
+  function scare(ctx, o) {
+    try {
+      o = o || {};
+      if (ctx && ctx.aborted) return Promise.resolve(false);
+      const key = o.id ? 'scare:' + o.id : null;
+      if (key && S.done && S.done[key]) return Promise.resolve(false);
+      if (key && S.done) S.done[key] = true;
+      if (!scareReady(ctx)) return Promise.resolve(false);
+      lastScare = clock;
+      const kind = SCARE.kinds.includes(o.kind) ? o.kind : 'stab';
+      snd('play', 'scare', { kind, pos: o.pos || undefined, vol: o.vol != null ? o.vol : 1 });
+      const sh = o.shake != null ? +o.shake : 0.45;
+      if (sh > 0 && hasCam()) { try { Cam.shake(sh, 0.55); } catch (e) { /* no camera */ } }
+      const fl = o.flash != null ? +o.flash : 0.3;
+      if (fl > 0 && typeof Render !== 'undefined' && Render.flash) { try { Render.flash(fl, 0.3); } catch (e) { /* no renderer */ } }
+      if (o.rumble !== false) inp('rumble', 0.95, 0.75, 380);
+      if (o.flinch !== false) flinchAidan();
+      const hb = o.heart != null ? +o.heart : 4;
+      if (hb > 0) { const h = snd('play', 'heartbeat', { loop: true, bpm: 116, vol: 0.8 }); if (h && h.stop) after(hb, () => h.stop(1.2)); }
+      const lk = Math.min(SCARE.lockMax, Math.max(0, +o.lock || 0));
+      if (lk > 0 && hasPlayer()) { try { Player.lock('scare', true); } catch (e) { /* player */ } after(lk, () => { try { Player.lock('scare', false); } catch (e) { /* player */ } }); }
+      const rec = { id: o.id || null, kind, t: +clock.toFixed(2) };
+      try { const SH = window.SH; if (SH) { SH.scares = SH.scares || []; SH.scares.push(rec); if (SH.scares.length > 50) SH.scares.shift(); } } catch (e) { /* no SH */ }
+      Bus.emit('scare', rec.id, kind);
+      return new Promise((res) => after(SCARE.resolve, () => res(true)));
+    } catch (e) { console.error('[Script] scare', e); return Promise.resolve(false); }
+  }
+
+  // G.glimpse(o) → handle { remove(), shown, done, actor }: a figure that is there for a moment, then gone. It never
+  // collides, never attacks, never reads on the phone, can't be hit, and is removed by itself (or on a room change).
+  // o = { kind (a Rig preset — aidan wai chase chloe luka luke nan … — or a monster: tethered reach standard borrowed
+  // smile closer), pos [x,z]|[x,y,z], yaw (deg; default: facing Aidan when lookAt is 'player'), dur (s, 0.7), anim /
+  // pose, expr, fadeOut (s; 0 = pops out), lookAt 'player'|null, onlyIfOnScreen (the timer starts only once the figure
+  // is inside the camera's view and not lost in the fog; it gives up after o.wait s, 6), rig (Rig.create opts),
+  // def (extra Enemies.spawn fields: disguise …) }. A dummy handle (nothing shown) while skipping or once Aidan is dead.
+  const GLIMPSE_TYPES = { tethered: 'tethered', reach: 'reach', standard: 'standard', borrowed: 'borrowed', smile: 'c7_smile', c7_smile: 'c7_smile', closer: 'closer' };
+  const glimpses = new Set();
+  let glimpseN = 0;
+  const _fr = new THREE.Frustum(), _pm = new THREE.Matrix4(), _im = new THREE.Matrix4(), _sp = new THREE.Sphere();
+  function glimpseOnScreen(g) {
+    const cam = Render.camera, root = g.raw ? g.raw.root : g.enemy && g.enemy.obj;
+    if (!root) return false;
+    cam.updateMatrixWorld();
+    _pm.multiplyMatrices(cam.projectionMatrix, _im.copy(cam.matrixWorld).invert());
+    _fr.setFromProjectionMatrix(_pm);
+    const h = (g.enemy && g.enemy.height) || (g.raw && g.raw.height) || 1.75;
+    _sp.center.set(root.position.x, root.position.y + h * 0.55, root.position.z); _sp.radius = h * 0.3;
+    if (!_fr.intersectsSphere(_sp)) return false;
+    const d = Render.fog ? Render.fog.density : 0;
+    return !(d > 0.004 && cam.position.distanceTo(_sp.center) > 2.2 / d);
+  }
+  function glimpseShow(g, on) {
+    if (g.enemy) { if (hasEnemies() && Enemies.visible) Enemies.visible(g.enemy, on); }
+    else if (g.raw) g.raw.visible(on);
+  }
+  function glimpseEnd(g) {
+    if (g.dead) return;
+    g.dead = true;
+    glimpses.delete(g);
+    try {
+      if (g.enemy) g.enemy.remove();
+      else if (g.raw) { g.raw.root.removeFromParent(); g.raw.dispose(); }
+    } catch (e) { console.error('[Script] glimpse remove', e); }
+  }
+  function glimpse(ctx, o) {
+    o = o || {};
+    const g = { id: '', kind: String(o.kind || 'customer'), o, raw: null, enemy: null, t: 0, wait: 0, state: 'show', dead: false };
+    const handle = { remove: () => glimpseEnd(g), get shown() { return g.state === 'show' && !g.dead; }, get done() { return g.dead; }, get actor() { return g.raw; } };
+    try {
+      if ((ctx && (ctx.aborted || ctx.skipping)) || anySkipping() || playerDead()) { g.dead = true; return handle; }
+      const p = toPos(o.pos);
+      if (!p) { console.warn('[Script] G.glimpse: no pos'); g.dead = true; return handle; }
+      const pp = hasPlayer() && Player.pos ? Player.pos : null;
+      const yawDeg = o.yaw != null ? +o.yaw : o.lookAt === 'player' && pp ? Math.atan2(pp.x - p.x, pp.z - p.z) / D2R : 0;
+      g.id = '__glimpse#' + (++glimpseN);
+      const type = GLIMPSE_TYPES[g.kind];
+      if (type && hasEnemies() && Enemies.types && Enemies.types[type]) {
+        const e = Enemies.spawn({ id: g.id, type, pos: [p.x, p.z], y: p.y, rot: yawDeg, world: 'both', persist: false, threat: false, aware: false,
+          voice: false, auto: false, watching: type === 'tethered', ...(o.def || {}) });
+        if (!e) { g.dead = true; return handle; }
+        e.ai = false; e.hostile = false; e.threat = false; e.untouchable = true; e.lockable = false; e.noBody = true; e.glimpse = true; e.scripted = true;
+        if (e.data) { e.data.talking = true; e.data.scripted = true; }        // (a Borrowed's Talk stays off; the Smile stands)
+        g.enemy = e; g.raw = e.actor || null;
+      } else if (typeof Rig !== 'undefined' && Rig && Rig.PRESETS && Rig.PRESETS[g.kind]) {
+        const raw = Rig.create(g.kind, o.rig || {});
+        raw.root.name = 'glimpse:' + g.id;
+        raw.root.position.copy(p); raw.root.rotation.y = yawDeg * D2R;
+        Render.scene.add(raw.root);
+        if (raw.state) raw.state.hasPrev = false;
+        g.raw = raw;
+      } else { console.warn(`[Script] G.glimpse: unknown kind "${g.kind}"`); g.dead = true; return handle; }
+      const a = g.raw;
+      if (a) {
+        if (o.anim || o.pose) a.setAnim(o.anim || o.pose, { blend: 0 });
+        if (o.expr) a.expr(o.expr);
+        if (o.lookAt === 'player' && hasPlayer() && Player.actor) a.lookAt(Player.actor);
+      }
+      glimpses.add(g);
+      if (o.onlyIfOnScreen) { g.state = 'wait'; glimpseShow(g, false); }
+      return handle;
+    } catch (e) { console.error('[Script] glimpse', e); glimpseEnd(g); return handle; }
+  }
+  function stepGlimpses(dt) {
+    if (!glimpses.size) return;
+    for (const g of [...glimpses]) {
+      try {
+        if (g.enemy && g.enemy.removed) { glimpseEnd(g); continue; }
+        if (g.state === 'wait') {
+          g.wait += dt;
+          if (glimpseOnScreen(g)) { g.state = 'show'; glimpseShow(g, true); } else if (g.wait >= (g.o.wait ?? 6)) glimpseEnd(g);
+          continue;
+        }
+        g.t += dt;
+        const dur = g.o.dur ?? 0.7, fo = g.o.fadeOut ?? 0;
+        if (g.t < dur) continue;
+        if (fo > 0 && g.raw && g.raw.setOpacity) {
+          const k = Math.min(1, (g.t - dur) / fo);
+          g.raw.setOpacity(1 - k);
+          if (k >= 1) glimpseEnd(g);
+        } else glimpseEnd(g);
+      } catch (e) { console.error('[Script] glimpse', e); glimpseEnd(g); }
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
   // The G factory
   // ---------------------------------------------------------------------------------------------------------------
   function makeG(ctx) {
@@ -935,7 +1105,13 @@ const Script = (() => {
         return h;
       },
       music(motif, o) { chk(ctx); if (ctx.skipping) return null; ctx.music = true; return snd('music', motif, o) || null; },
-      stopMusic(fade = 2) { chk(ctx); snd('stopMusic', fade); },
+      // CONTRACT+ o.hard: a fade under 1.5 s is stretched to 2.5 s (a motif is never chopped) unless {hard:true}
+      stopMusic(fade = 2, o) { chk(ctx); snd('stopMusic', fade, o); },
+      // CONTRACT+ jump scares (see above): G.scare(o) → Promise<bool>, G.glimpse(o) → {remove(), shown, done, actor},
+      // G.scareReady (no skip, Aidan alive, the 20 s cooldown passed)
+      scare: (o) => scare(ctx, o),
+      glimpse: (o) => glimpse(ctx, o),
+      get scareReady() { return scareReady(ctx); },
       ambient(name, fade) { chk(ctx); snd('ambient', name, fade); },
       duck(a = 1, dur = 3) { chk(ctx); if (ctx.skipping) return Promise.resolve(); return guard(ctx, Promise.resolve(snd('duck', a, dur))); },
 
@@ -1367,6 +1543,7 @@ const Script = (() => {
   // a script survives the room change while it — or anything it is waiting on (a cutscene it played) — is inside G.goto
   const gotoBusy = (c) => c.inGoto > 0 || [...c.children].some(gotoBusy);
   Bus.on('room:leave', () => {
+    for (const g of [...glimpses]) glimpseEnd(g);
     for (const c of [...live]) if (c.roomBound && !c.aborted && !gotoBusy(c)) abort(c, 'room');
     for (const [id, raw] of actorReg) { try { raw.root.removeFromParent(); raw.dispose(); } catch (e) { /* gone */ } actorReg.delete(id); }
   });
@@ -1395,6 +1572,11 @@ const Script = (() => {
 
   const api = {
     ABORT, run, update, skip, abort, abortAll, playCutscene, choose, advance, builtins, readDoc, owns,
+    // CONTRACT+ jump scares for engine code / tests (no script context): Script.scare(o), Script.glimpse(o),
+    // Script.scareReady, Script.glimpses (live glimpse figures), Script.SCARE (tuning: cooldown, resolve, lockMax)
+    scare: (o) => scare(null, o), glimpse: (o) => glimpse(null, o), SCARE,
+    get scareReady() { return scareReady(null); },
+    get glimpses() { return glimpses.size; },
     seen: (id) => !!(S.done && S.done['cs:' + id]),
     wait: (s) => waitTime(null, s),
     until: (pred, o) => waitUntil(null, pred, o),

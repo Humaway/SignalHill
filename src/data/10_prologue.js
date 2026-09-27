@@ -794,6 +794,10 @@
       for (let x = 4; x < 118; x += 12) { const [lx, lz] = hrPt(x, HR.bank - 0.7); K.dress('leaves', [lx - 2.5, lz - 0.6, lx + 2.5, lz + 0.6], 10, { seed: 31 + x, y: hrY(lx) + 0.03 }); }
       // the crossing trigger (halfway down)
       K.trigger([40.5, -4, 44.5, 14], (G) => P0_crossing(G), { id: 'p3_hillroad:crossing' });
+      // after the crossing, walking on down past the bent rail: steps on the road behind him — and on the cut to the
+      // letterbox camera the cardigan figure is standing in the road back up the hill (the Prologue's one scare)
+      K.trigger([77.5, -16, 80.5, 8], (G) => P0_behind(G), { id: 'p3_hillroad:behind', once: false,
+        when: (s) => s.chapter === 0 && !!(s.done && s.done['p3:crossed']) && !(s.done && s.done['p3:behind']) });
     },
     onUpdate(dt) {
       const f = Render.fog;
@@ -856,6 +860,31 @@
     }, { control: false, letterbox: false, skippable: true, name: 'P-3' });
     S.done['p3:crossed'] = true;
     P0.fogLow = false;
+  }
+
+  // The Prologue's one jump scare, a quiet one (the player is still learning): walking on down Hill Road after the
+  // crossing, three slow steps on the bitumen a few metres behind him, then nothing. When he walks on into the letterbox
+  // camera (it looks back up the road he came down) the cardigan figure stands in the road behind him, facing him; a
+  // low stab, and she dissolves into the fog. Once per save (S.done 'p3:behind'; the scare id 'p0:behind').
+  async function P0_behind(G) {
+    if (S.done['p3:behind'] || S.chapter !== 0 || !G.scareReady) return;
+    if (!Player.pos || Math.sin(Player.yaw) < 0.2) return;                     // only walking on down the hill (east)
+    S.done['p3:behind'] = true;
+    // his lateral offset from the road's centre line (so the steps and the figure keep to his line)
+    const lat = () => clamp(Player.pos.z - hrZ(Player.pos.x), -2.6, 2.6);
+    for (let i = 0; i < 3; i++) {
+      const x = Player.pos.x - 5.4, [sx, sz] = hrPt(x, lat());
+      try { Snd.footstep('bitumen', false, { pos: [sx, hrY(sx) + 0.05, sz], vol: 0.85 }); } catch (e) { /* audio */ }
+      await G.wait(0.66);
+    }
+    // on down to the letterbox camera (he may stop, or turn back: then nothing more)
+    const onCam = () => !!(Player.pos && Player.pos.x > 84.3 && Cam.current && Cam.current.id === 'p3_hillroad:letterbox');
+    if (!(await G.until(() => onCam() || !Player.pos || Player.pos.x < 70, { timeout: 40 })) || !onCam()) return;
+    if (!G.scareReady) return;
+    const fx = Player.pos.x - 4.6, [gx, gz] = hrPt(fx, lat());
+    const g = G.glimpse({ kind: 'p0_cardigan', pos: [gx, hrY(gx), gz], lookAt: 'player', dur: 1.9, fadeOut: 1.1, onlyIfOnScreen: true, wait: 2 });
+    await G.until(() => g.shown || g.done, { timeout: 2.5 });
+    if (g.shown) await G.scare({ id: 'p0:behind', kind: 'stab', vol: 0.5, shake: 0.18, flash: 0.1, heart: 3 });
   }
 
   // =================================================================================================================
@@ -1126,7 +1155,7 @@
     if (ph) ph.display({ title: '', lines: [], bars: 1 });
     G.sfx('beep', { vol: 0.25 });
     await G.wait(1.2);
-    const ring = G.sfx('ring', { loop: true, vol: 0.6 });
+    const ring = G.sfx('ring', { loop: true, vol: 0.5 });
     if (ph) ph.display({ title: 'INCOMING CALL', blink: true, caller: 'ACCT 4471-0932', lines: [], button: 'ANSWER', buttonColor: '#2fbf5a', bars: 1 });
     await G.wait(3.4);
     // cut back to Aidan: he stares, then answers
@@ -1146,8 +1175,8 @@
     await G.wait(1.2);
     G.music('nan', { vol: 0.28 });
     await G.say('NAN (phone)', '...hello? Is that the young man? [static] ...it never connected, love. I kept pressing it. [long beat] I kept pressing it.');
-    // the line drops to a flat disconnected tone
-    G.stopMusic(0.6);
+    // the line drops to a flat disconnected tone (her motif plays on, faint, under it and his promise: it lets go over
+    // the cut to shot 6 — stopping it here chopped it at half its length)
     G.bars('noservice');
     G.sfx('disconnected', { dur: 3.2, vol: 0.7 });
     if (ph) ph.display({ title: 'CALL ENDED', lines: [], bars: 'noservice' });
@@ -1167,6 +1196,8 @@
     setLight(G, 'p2:head', true);
     G.cam({ pos: SHOT1.pos, target: SHOT1.target, fov: SHOT1.fov });
     hz = G.sfx('hazard', { loop: true, pos: [CARP.x, 0.8, CARP.z], vol: 0.9 });
+    // the Nan motif (18.5 s) is in its last bars here: it fades with the hazards, leaving the fog's silence
+    G.stopMusic(3.5);
     await G.fade(0, 0.2);
     await G.wait(1.6);
     // the hazards die

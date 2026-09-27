@@ -133,8 +133,9 @@
     C1.ringKey = want;
     if (!want || typeof Snd === 'undefined') return;
     try {
-      if (want === 'near') C1.ring = Snd.play('ring', { loop: true, pos: C1.ringPos || [3.1, 1.4, 0.3], vol: 1.0 });
-      else C1.ring = Snd.play('ring', { loop: true, far: true, lp: want === 'mid' ? 1800 : 900, vol: want === 'mid' ? 0.45 : 0.22 });
+      // (playtest: the ring was the most-heard, most annoying sound — it only has to lead him to the phone)
+      if (want === 'near') C1.ring = Snd.play('ring', { loop: true, pos: C1.ringPos || [3.1, 1.4, 0.3], vol: 0.7 });
+      else C1.ring = Snd.play('ring', { loop: true, far: true, lp: want === 'mid' ? 1800 : 900, vol: want === 'mid' ? 0.32 : 0.16 });
     } catch (e) { C1.ring = null; }
   }
   // the Plaza's interiors: a faint grey-teal ambient in the Fog world, a sick teal one in the Outage (blended through
@@ -532,7 +533,19 @@
       // ---- three abandoned cars, a pay station, a trolley bay, two light poles, planter islands -------------------------
       K.prop('car', 8.6, 2.9, 90, { color: '#7a3a2a' });
       K.prop('car', 21.3, 18.6, -90, { color: '#8a8478', variant: 'wagon' });
-      K.prop('hatchback', 33.4, 27.4, -90, { color: '#5b6b70', plate: 'ADN·226' });
+      K.prop('hatchback', 33.4, 27.4, -90, { color: '#5b6b70', plate: 'ADN·226', name: 'c1c_car3', hazards: false });
+      // a jump scare on the way to the dock lane: the car that isn't his ticks as if it has just been driven, then its
+      // locks clunk and its hazards come on (the Fog world; the car park's Tethered not on him)
+      K.trigger([29.5, 21.7, 38.6, 26.3], (G) => C1_carScare(G), { id: 'c1_carpark:car3', once: false, world: 'fog',
+        when: (s) => s.chapter === 1 && !(s.done && s.done['c1:carScare']) });
+      // (its hazards, readable through the fog from the lane camera: an amber pulse on the bitumen round it and a glow
+      // at each end, blinking with the indicators while C1.carHaz is on)
+      K.light('point', 33.4, 1.25, 26.3, { color: '#ffa030', intensity: 6, distance: 9, name: 'c1c:haz', on: false });
+      for (const [i, x] of [[0, 31.45], [1, 35.35]]) K.light('led', x, 0.72, 27.4, { color: '#ffa22a', intensity: 3, size: 0.03, halo: 1.5, name: 'c1c:hazled' + i, on: false });
+      K.animate((dt, t) => {
+        const on = !!C1.carHaz && (t % 0.8) < 0.4;
+        for (const n of ['c1c:haz', 'c1c:hazled0', 'c1c:hazled1']) { const l = World.light(n); if (l && l.isOn !== on) l.on(on); }
+      });
       K.dress('papers', [20, 16.5, 23, 21], 5, { seed: 23 });
       // the pay station
       K.box(4.6, 0, 11.4, 0.5, 1.45, 0.35, { tex: 'metal', color: '#2f4346' }, { collide: true });
@@ -576,6 +589,7 @@
       K.examine(37.9, 1.5, 22.9, ['Loading dock. Deliveries only.', 'There\'s always a door open round the back of a centre. Always.'], { id: 'c1c:docksign', r: 1.5 });
       K.pickup('coffee', 4.6, 1.53, 11.4, { id: 'c1_carpark:coffee', extraOnEasy: true, rot: 30 });
     },
+    onLeave() { C1.carHaz = false; },
   });
 
   // =================================================================================================================
@@ -730,8 +744,12 @@
       const tubes = [[2.5, 'on'], [7.5, 'glow'], [12.5, 'on'], [17.5, 'dead'], [22.5, 'flick'], [27.5, 'glow'], [32.5, 'on'], [37.5, 'dead']];
       tubes.forEach(([x, st], i) => {
         if (st === 'dead') K.light('fluoro', x, H - 0.02, 1.5, { len: 1.2, rot: 90, on: false });
-        else K.light('fluoro', x, H - 0.02, 1.5, { len: 1.2, rot: 90, bank: 1 + (i >> 1), real: st !== 'glow', flicker: st === 'flick', intensity: 6, distance: 8 });
+        else K.light('fluoro', x, H - 0.02, 1.5, { len: 1.2, rot: 90, bank: 1 + (i >> 1), real: st !== 'glow', flicker: st === 'flick', intensity: 6, distance: 8, name: 'c1co:tube' + i });
       });
+      // a jump scare (the Fog world, with the staff room key, walking west under the flickering tube): the corridor's
+      // lights die; when they come back something is standing in front of him; they stutter, and it is gone
+      K.trigger([18.4, 0, 21.8, 3], (G) => C1_corridorScare(G), { id: 'c1_corridor:blackout', once: false, world: 'fog',
+        when: (s) => s.chapter === 1 && !!(s.taken && s.taken['c1_security:key']) && !(s.done && s.done['c1:corrScare']) });
       K.light('led', 39.9, 2.35, 0.5, { color: '#2aff5a', intensity: 2 });
       K.prop('exit_sign', 0.08, 1.5, 90, { mount: 2.35 });
       // along the north wall: the mop bucket and wet-floor sign, a cleaner's trolley, boxes, a fire hose reel
@@ -1552,8 +1570,15 @@
       for (let k = 0; k < 3; k++) K.box(1.3 + k * 0.7, 0.95, 5.4, 0.5, 0.08, 0.5, { color: '#2a2412', roughness: 0.15 });
       K.box(2.0, 2.1, 5.3, 2.4, 0.7, 1.1, { tex: 'metal', color: '#b9bcb6', metalness: 0.5 });
       K.prop('shelf', 8.9, 0.45, 0, { len: 1.8, load: 'stock' });
-      K.box(9.2, 0, 5.62, 1.2, 2.2, 0.08, { tex: 'metal', color: '#c9ccca', metalness: 0.4 });
+      K.box(9.2, 0, 5.62, 1.2, 2.2, 0.08, { tex: 'metal', color: '#c9ccca', metalness: 0.2, roughness: 0.5, outage: false }, { name: 'c1k_cool' });   // (steel: it stays itself in the Outage — the lit door he walks past)
       K.sign('COOLROOM', 9.2, 1.9, 5.56, 0.5, 0.14, { rotY: 180, style: 'shop', bg: '#1f4b73', fg: '#f4efe4' });
+      // a caged lamp over the coolroom door (it keeps the door readable from the west end's cameras)
+      K.light('point', 9.2, 2.45, 4.95, { color: '#bfe0d4', intensity: 3.2, distance: 4.2, name: 'c1k:coollamp' });
+      // a jump scare (the Outage, on the way through to the back office): soft knocks from inside the coolroom a few
+      // steps in; then, passing its door, something slams against it from inside
+      K.trigger([1.8, 0.4, 4.6, 5.6], (G) => C1_coolKnock(G), { id: 'c1_kitchen:knock', world: 'outage', when: (s) => s.chapter === 1 && !flag('c1_bossDone') });
+      K.trigger([6.4, 0.4, 9.95, 5.6], (G) => C1_coolSlam(G), { id: 'c1_kitchen:slam', once: false, world: 'outage',
+        when: (s) => s.chapter === 1 && !flag('c1_bossDone') && !(s.done && s.done['c1:coolSlam']) });
       K.prop('mop_bucket', 8.6, 4.4, 30, {});
       K.box(5, 1.5, 0.12, 2.6, 0.04, 0.12, { tex: 'metal', color: '#9aa09e' });
       for (let k = 0; k < 7; k++) K.plane(4.0 + k * 0.33, 1.38, 0.19, 0.09, 0.22, 'receipt', { rotY: 0 });
@@ -1754,13 +1779,14 @@
     async onEnter(G, from) {
       if (S.outage || S.chapter !== 1) return;
       if (!done('cs:1-1')) { await G.cutscene('1-1'); return; }
-      if (from === 'c1_concourse') G.sfx('chime', { vol: 0.9 });
+      if (from === 'c1_concourse') G.sfx('chime', { vol: 0.5 });           // (every visit: kept soft)
     },
     onUpdate() {
       C1_ringTick('c1_store');
       C1_ambient(['#8a9896', 0.55], ['#2a8a84', 0.5]);
       // every display phone ringing (the Outage)
-      if (S.outage && !C1.storeRings && typeof Snd !== 'undefined') { try { C1.storeRings = [[5, 20], [15, 27], [10, 36], [4, 41]].map(([x, z]) => Snd.play('ring', { loop: true, pos: [x, 1.0, z], vol: 0.55, gap: 0.6 + (x % 3) * 0.2 })); } catch (e) { C1.storeRings = []; } }
+      // (decor: they join the Outage bed's scene duck, so they drain under a scene or a line)
+      if (S.outage && !C1.storeRings && typeof Snd !== 'undefined') { try { C1.storeRings = [[5, 20], [15, 27], [10, 36], [4, 41]].map(([x, z]) => Snd.play('ring', { loop: true, pos: [x, 1.0, z], vol: 0.4, gap: 0.6 + (x % 3) * 0.2, duck: 'outage' })); } catch (e) { C1.storeRings = []; } }
       if (!S.outage && C1.storeRings) C1_storeRingsOff();
     },
     onLeave() { C1_ringStop(); C1_ambientOff(); C1_storeRingsOff(); if (C1.pinLight) { try { C1.pinLight.free(); } catch (e) { /* pool */ } C1.pinLight = null; } },
@@ -2096,7 +2122,7 @@
     A.place(10, 16.75, 180); A.pose('idle');
     G.cam({ pos: [9.42, 1.13, 2.5], target: [10.0, 1.22, 16.0], fov: 40, to: { pos: [9.42, 1.12, 2.62], fov: 38 }, dur: 7 });
     await G.wait(1.0);
-    G.sfx('chime', { vol: 0.9 });
+    G.sfx('chime', { vol: 0.65 });
     const walkIn = q(A.walkTo(10, 12.4, { speed: 0.95 }));
     await G.wait(1.8);
     C.eyes('ahead'); C.look(G.aidan);
@@ -3049,6 +3075,106 @@
     note(G, 'Unit 9, Hilltop Village. Hilltop Road — off the top of Relay Street.', 'c1_addr');
     G.camRelease();
   }, { letterbox: true, skippable: true });
+
+  // =================================================================================================================
+  // Jump scares (ENGINE_NOTES "Jump scares"): three, spaced through the chapter, each once per save — the car park (his
+  // car's double), the service corridor (the blackout), the kitchen in the Outage (the coolroom). Background trigger
+  // scripts: they never take control (at most the scare's short flinch), never damage, never touch a scene, and each
+  // one bails out (and stays armed) while a call rings, an aware threat is near, or the 20 s scare cooldown runs.
+  // =================================================================================================================
+  function C1_calm() {
+    try { if (Script.busy || Script.cutscene) return false; } catch (e) { /* script */ }
+    try { if (Phone.ringing || Phone.inCall) return false; } catch (e) { /* phone */ }
+    try { const t = Player.pos && Enemies.nearestThreat(Player.pos, { aware: true }); if (t && t.dist < 12) return false; } catch (e) { /* enemies */ }
+    return !!Player.pos && !Player.dead;
+  }
+  // the car park: the hatchback that isn't his (ADN·226) ticks as it cools; a moment later the locks clunk and the
+  // hazards blink on, ticking; after a few seconds they die, the way his did at the Lookout
+  async function C1_carScare(G) {
+    if (done('c1:carScare') || S.outage || !G.scareReady || !C1_calm()) return;
+    S.done['c1:carScare'] = true;
+    const at = [33.4, 0.8, 27.4];
+    let tick = null;
+    const hazards = (v) => { C1.carHaz = !!v; try { const car = World.obj('c1c_car3'); if (car && car.userData.setHazards) car.userData.setHazards(v); } catch (e) { /* room */ } };
+    G.finally(() => { hazards(false); if (tick && tick.stop) { try { tick.stop(0.05); } catch (e) { /* audio */ } } });
+    G.sfx('engine_tick', { dur: 6, pos: [31.5, 0.6, 27.4], vol: 1 });
+    await G.wait(1.8);
+    await G.until(() => !Player.pos || Math.hypot(Player.pos.x - at[0], Player.pos.z - at[2]) < 4.8, { timeout: 3.2 });
+    G.sfx('clunk', { pos: at, vol: 0.9 });
+    hazards(true);
+    tick = G.sfx('hazard', { loop: true, pos: at, vol: 0.85 });
+    await G.scare({ id: 'c1:car', kind: 'stab', pos: [at[0], 1.2, at[2]], shake: 0.35, flash: 0.22 });
+    await G.wait(4.6);
+    hazards(false);
+    if (tick && tick.stop) tick.stop(0.05);
+    tick = null;
+  }
+  // the service corridor: the flickering tube over him stutters and the whole corridor goes dark; plastic crackles in
+  // the dark in front of him; the lights come back on a Tethered standing right there, facing him; a second stutter —
+  // and it's gone. Walking west (toward the staff room / the fire door) with the staff room key.
+  async function C1_corridorScare(G) {
+    if (done('c1:corrScare') || S.outage || !G.scareReady || !C1_calm()) return;
+    if (Math.sin(Player.yaw) > -0.2) return;                                   // (walking west)
+    S.done['c1:corrScare'] = true;
+    const tubes = [];
+    for (let i = 0; i < 8; i++) { const l = G.light('c1co:tube' + i); if (l && l.isOn) tubes.push(l); }
+    const set = (v) => { for (const l of tubes) { try { l.on(v); } catch (e) { /* room */ } } };
+    let gl = null, key = null;
+    G.finally(() => { set(true); if (gl) gl.remove(); });
+    const ahead = () => { const p = Player.pos, hd = Math.sin(Player.yaw) <= 0 ? -1 : 1; return [clamp(p.x + hd * 2.4, 1.2, 38.8), 1.65]; };
+    G.sfx('tube_flicker', { pos: [22.5, 2.6, 1.5], vol: 0.6, dur: 0.7 });
+    await G.wait(0.6);
+    G.sfx('clunk', { pos: [26.4, 1.5, 0.2], vol: 0.6 });
+    set(false);
+    await G.wait(0.55);
+    { const [x, z] = ahead(); G.sfx('plastic', { pos: [x, 1.3, z], dur: 0.9, dens: 0.6, vol: 0.75 }); }
+    await G.wait(0.95);
+    if (!C1_calm()) return;                                                      // (the finally puts the lights back)
+    const [fx, fz] = ahead();
+    gl = G.glimpse({ kind: 'tethered', pos: [fx, fz], lookAt: 'player', dur: 1.3 });
+    set(true);
+    // (the cold spill of the tube over it: the figure is never lost between a dead tube and a flickering one)
+    key = G.addLight('point', { pos: [fx - 0.2, 2.45, fz + 0.3], color: '#d2e8e2', intensity: 2.6, distance: 4.2, pin: true });
+    G.sfx('tube_flicker', { pos: [22.5, 2.6, 1.5], vol: 0.45, dur: 0.25 });
+    await G.scare({ id: 'c1:corridor', kind: 'stab', pos: [fx, 1.4, fz], shake: 0.4, flash: 0.28, lock: 0.45 });
+    await G.wait(0.55);
+    G.sfx('tube_flicker', { pos: [22.5, 2.6, 1.5], vol: 0.55, dur: 0.4 });
+    set(false);
+    if (key) { key.on(false); key = null; }
+    gl.remove(); gl = null;
+    await G.wait(0.35);
+    set(true);
+  }
+  // the kitchen (the Outage): a few steps in, two soft knocks from inside the coolroom — then, passing its door,
+  // something slams against it from inside, three times; the door jumps in its frame and the lamp over it stutters
+  async function C1_coolKnock(G) {
+    if (!S.outage || done('c1:coolSlam')) return;
+    S.done['c1:coolKnock'] = true;
+    await G.wait(1.1);
+    G.sfx('knock', { n: 2, gap: 0.6, soft: true, pos: [9.2, 1.3, 5.75], vol: 0.8 });
+  }
+  async function C1_coolSlam(G) {
+    if (done('c1:coolSlam') || !S.outage || !G.scareReady || !C1_calm()) return;
+    S.done['c1:coolSlam'] = true;
+    const door = G.obj('c1k_cool'), z0 = door ? door.position.z : 0, lamp = G.light('c1k:coollamp');
+    G.finally(() => { if (door) door.position.z = z0; if (lamp) { try { lamp.flicker(false); lamp.on(true); } catch (e) { /* room */ } } });
+    G.sfx('pound', { n: 3, pos: [9.2, 1.3, 5.75], vol: 1 });
+    const hits = [0, 0.44, 0.88];
+    let t = 0, stutter = false;
+    const jolt = q(G.loop((dt) => {
+      t += dt;
+      let off = 0;
+      for (const h of hits) if (t >= h) off += Math.exp(-(t - h) * 10) * Math.abs(Math.cos((t - h) * 38));
+      if (door) door.position.z = z0 - 0.075 * Math.min(1, off);
+      if (lamp && t >= 0.45 && !stutter) { stutter = true; lamp.flicker(true); }          // (lit for the first blow)
+      return t >= 1.6;
+    }));
+    await G.scare({ id: 'c1:coolroom', kind: 'slam', pos: [9.2, 1.4, 5.6], shake: 0.5, flash: 0.26 });
+    await jolt;
+    if (door) door.position.z = z0;
+    await G.wait(0.8);
+    if (lamp) { lamp.flicker(false); lamp.on(true); }
+  }
 
   // =================================================================================================================
   // Chapter 1

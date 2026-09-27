@@ -2014,7 +2014,7 @@
     G.sfx('lift_groan', { pos: [lx, 2.6, -0.6], vol: 0.55, dur: 2.8 });
     await G.wait(1.5);
     await G.until(() => !Player.pos || Math.abs(Player.pos.x - lx) < 1.7 || Player.pos.x > lx + 2.6 || Player.pos.z > 4.8, { timeout: 3.5 });
-    if (!(await G.until(() => C5_calm(), { timeout: 6 }))) return;
+    if (!(await G.until(() => C5_calm(), { timeout: 8 }))) return;
     // the doors jolt apart — a blade of cold light from the car — and grind shut
     let t = 0;
     spill = G.addLight('point', { pos: [lx, 1.3, 0.45], color: '#dff4ee', intensity: 3.2, distance: 3.6 });

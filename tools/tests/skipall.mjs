@@ -44,7 +44,9 @@
 // side, ~12 min) with the capture installed (SH_SKIPALL=capture, below): between them they reach every scene but E-YES
 // (it needs a second playthrough with the twelve stickers) and TR-1 (the test room); those two — and any scene no
 // snapshot exists for — start from a synthetic state: SH.chapter(n) (+ SH.preset('yes') for E-YES, SH.goto('test_room')
-// for TR-1).
+// for TR-1). A scene to run (other than those two) that no path has a snapshot of while some paths' snapshots come from
+// another build is a scene added since they were taken (8-2B): those paths are captured again first (unless
+// SH_CAPTURE=0) — the synthetic start is the chapter's first room, not where such a scene plays.
 //
 // env: SH_ONLY    a comma list of scene ids (default: every id in CUTSCENES)
 //      SH_CAPTURE 1 — take new snapshots first, even when some exist; 0 — never (a scene without one starts synthetic)
@@ -70,6 +72,8 @@ import { ev, report } from './lib.mjs';
 const SNAPS = process.env.SH_SNAPS || '.build/skipall';
 const PATHS = (process.env.SH_PATHS || 'connected,coverage,tomorrow,deal').split(',').filter(Boolean);
 const CHOICE = Number(process.env.SH_CHOICE || 0) | 0;
+// the scenes no playthrough reaches (a second playthrough with the stickers; the test room): always a synthetic start
+const SYNTH_ONLY = ['E-YES', 'TR-1'];
 
 // the built file this run loads (tools/run.mjs --file) and a short hash of it (snapshots remember the build they came from)
 function buildFile() { const i = process.argv.indexOf('--file'); return i >= 0 ? process.argv[i + 1] : 'signal-hill.html'; }
@@ -457,26 +461,38 @@ async function replayMode(page, h) {
   const reload = process.env.SH_RELOAD || 'none';
   const verbose = process.env.SH_VERBOSE === '1';
   const T0 = Date.now();
-  // 1. snapshots (capture the missing paths first)
-  const have = (p) => { try { return fs.readdirSync(path.join(SNAPS, p)).some((f) => f.endsWith('.json')); } catch (e) { return false; } };
-  const need = process.env.SH_CAPTURE === '1' ? PATHS : process.env.SH_CAPTURE === '0' ? [] : PATHS.filter((p) => !have(p));
-  if (need.length) await runCaptures(need);
-  await installRunner(h);
-  const bh = buildHash();
-  for (const p of PATHS) {
-    let was = null; try { was = fs.readFileSync(path.join(SNAPS, p, '_build.txt'), 'utf8').trim(); } catch (e) { /* none */ }
-    if (was && was !== bh) console.log(`(the ${p} snapshots come from another build, ${was} — this one is ${bh}; SH_CAPTURE=1 takes new ones)`);
-  }
   const ids = await ev(h, 'return Object.keys(SH.mod.CUTSCENES)');
   const only = (process.env.SH_ONLY || '').split(',').filter(Boolean);
   const list = only.length ? ids.filter((id) => only.includes(id)) : ids;
   for (const id of only) if (!ids.includes(id)) console.log(`(SH_ONLY: no cutscene "${id}")`);
+  // 1. snapshots (capture the missing paths first)
+  const bh = buildHash();
+  const snapFile = (p, id) => path.join(SNAPS, p, id.replace(/[^\w.-]/g, '_') + '.json');
+  const buildOf = (p) => { try { return fs.readFileSync(path.join(SNAPS, p, '_build.txt'), 'utf8').trim(); } catch (e) { return null; } };
+  const have = (p) => { try { return fs.readdirSync(path.join(SNAPS, p)).some((f) => f.endsWith('.json')); } catch (e) { return false; } };
+  let need = process.env.SH_CAPTURE === '1' ? PATHS : process.env.SH_CAPTURE === '0' ? [] : PATHS.filter((p) => !have(p));
+  // a scene to run that no path has a snapshot of while some paths' snapshots come from another build (or an older
+  // capture that recorded none): a scene added since they were taken (8-2B). Its synthetic start — SH.chapter(n), the
+  // chapter's first room — is not where it plays (8-2B belongs to the Closer fight in c8_transmitter), so those paths
+  // are captured again. E-YES and TR-1 are always synthetic (no playthrough reaches them) and never ask for this.
+  const lost = list.filter((id) => !SYNTH_ONLY.includes(id) && !PATHS.some((p) => fs.existsSync(snapFile(p, id))));
+  if (!need.length && lost.length && process.env.SH_CAPTURE !== '0') {
+    const stale = PATHS.filter((p) => buildOf(p) !== bh);
+    if (stale.length) { console.log(`(no snapshot of ${lost.join(' ')} — new since the ${stale.join(', ')} snapshots were taken, from another build: taking new ones)`); need = stale; }
+  }
+  if (need.length) await runCaptures(need);
+  await installRunner(h);
+  for (const p of PATHS) {
+    const was = buildOf(p);
+    if (was && was !== bh) console.log(`(the ${p} snapshots come from another build, ${was} — this one is ${bh}; SH_CAPTURE=1 takes new ones)`);
+  }
+  for (const id of list) if (!SYNTH_ONLY.includes(id) && !PATHS.some((p) => fs.existsSync(snapFile(p, id)))) console.log(`(no path reached ${id}: it starts from a synthetic state — the start of its chapter, not where it plays)`);
   console.log(`skipall: ${list.length} of ${ids.length} scenes · snapshots from ${SNAPS} (${PATHS.join(', ')}) · reload ${reload}${CHOICE ? ' · choices: option ' + CHOICE : ''}`);
   const jobs = [];
   for (const id of list) {
     const found = [];
     for (const p of PATHS) {
-      const f = path.join(SNAPS, p, id.replace(/[^\w.-]/g, '_') + '.json');
+      const f = snapFile(p, id);
       if (fs.existsSync(f)) { found.push({ from: p, json: fs.readFileSync(f, 'utf8') }); if (process.env.SH_ALLPATHS !== '1') break; }
     }
     if (!found.length) found.push({ from: 'synthetic', json: null });

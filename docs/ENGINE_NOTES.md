@@ -390,12 +390,15 @@ name); `switchboard/lamp_panel.setLamp`;
     `Script.glimpses` counts the live ones.
   * Examples:
     ```js
-    // a trigger: the lights stutter, and for a moment someone stands at the end of the aisle
+    // a trigger: the lights stutter, and for a moment someone stands at the end of the aisle.
+    // once:false + a when() on the scare's own id: the trigger fires on every entry until the scare has been spent,
+    // so an early return (scare not ready) keeps it for a later pass. (A once:true trigger is spent the moment it
+    // fires — returning early from one loses the scare for good.)
     K.trigger([4, 10, 8, 14], async (G) => {
-      if (!G.scareReady) return;                                        // (keep it for a later pass instead of losing it)
+      if (!G.scareReady) return;                                        // not now: the next time he walks in
       G.glimpse({ kind: 'tethered', pos: [6, 22], lookAt: 'player', dur: 0.6, onlyIfOnScreen: true, wait: 3 });
       await G.scare({ id: 'c3:aisle', kind: 'stab', pos: [6, 1.4, 22], flash: 0.2 });
-    }, { id: 'c3_hall:aisle', once: true });
+    }, { id: 'c3_hall:aisle', once: false, when: () => !S.done['scare:c3:aisle'] });
     // a slow reveal inside a cutscene: the swell starts, the camera turns, the hit lands on the face
     G.scare({ id: 'c5:reveal', kind: 'swell', shake: 0.3, heart: 5 });
     await G.wait(1.1);

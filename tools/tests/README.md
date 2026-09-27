@@ -125,7 +125,9 @@ They don't fail a run.
   `CUTSCENES` runs twice from the same real-playthrough snapshot, once PLAYED and once SKIPPED, and the two must end
   in the same S, positions, NPCs, monsters, doors, autosaves, camera, HUD, music, control and so on.
   * The snapshots live in `.build/skipall/<path>/`. On a fresh checkout the script takes them first by running the four
-    chains side by side, which adds ~12 min. `SH_CAPTURE=1` retakes them after a change to a scene's lead-up.
+    chains side by side, which adds ~12 min. `SH_CAPTURE=1` retakes them after a change to a scene's lead-up. A new
+    scene (one no path has a snapshot of, while the snapshots come from another build) makes the script retake the
+    stale paths by itself; only E-YES and TR-1 always start from a synthetic state (`SH_CAPTURE=0` never retakes).
   * `SH_ONLY=3-2,6-terminal` runs a subset, `SH_CHOICE=1` takes the other option of every choice, `SH_ALLPATHS=1` uses
     every path's snapshot of each scene, `SH_RELOAD=cs|run` gives each scene a fresh page, and `SH_VERBOSE=1` prints
     timelines.

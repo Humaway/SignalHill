@@ -406,7 +406,8 @@
   // against, and a sky light that shows the road — dark, never invisible)
   const C8_OUTFOG = '#23504a', C8_OUTAMB = 1.0;
   function C8_ambient(fogK, outK) {
-    const k = clamp(Tex.outage || 0, 0, 1), want = Math.round(lerp(fogK, outK, k) * 100) / 100;
+    // (C8.dim 0..1: a jump scare's blackout takes the sky light down with the lamps)
+    const k = clamp(Tex.outage || 0, 0, 1), want = Math.round(lerp(fogK, outK, k) * (1 - clamp(C8.dim || 0, 0, 1)) * 100) / 100;
     if (want === C8.amb) return;
     C8.amb = want;
     try { if (want > 0) Render.setAmbient(k > 0.5 ? '#1f6f6a' : '#8e9996', want); else Render.setAmbient(null); } catch (e) { /* render */ }
@@ -418,6 +419,43 @@
     try { if (World.outageBusy) return; } catch (e) { /* world */ }
     f.density += (C8.fogTo - f.density) * Math.min(1, dt * 1.4);
   }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Jump scares (revised after playtesting: "a bit scarier"). Three, once per save (G.scare ids c8:legC, c8:hut,
+  // c8:ladder), each a short beat on a path the player walks: Summit Road's third leg (the lights die; one he never cut
+  // free stands in the road), HUT 2 (the door slams shut on him, knocks, then it swings open on nothing), the first
+  // ladder (the Standard on the rungs below him). Never in a scene, a fight, a call or with something awake close by;
+  // never a ring or a chime; harmless (glimpses, no damage, a control freeze of at most 0.35 s).
+  // ---------------------------------------------------------------------------------------------------------------
+  function C8_calm(r = 10) {
+    try { if (Script.busy || Script.cutscene || World.transitioning || World.outageBusy) return false; } catch (e) { /* script */ }
+    try { if (Phone.ringing || Phone.inCall) return false; } catch (e) { /* phone */ }
+    if (!Player.pos || Player.dead || !Player.canControl || C8.inCall) return false;
+    try { const t = Enemies.nearestThreat(Player.pos, { aware: true }); if (t && t.dist < r) return false; } catch (e) { /* enemies */ }
+    return true;
+  }
+  // an unresolved monster within r m, noticed him or not (a scare never plays beside a real one)
+  const C8_hostileNear = (r) => { try { const t = Enemies.nearestThreat(Player.pos); return !!(t && t.dist < r); } catch (e) { return false; } };
+  const C8_camIs = (id) => { try { const c = Cam.current; return !!c && c.id === id; } catch (e) { return false; } };
+  // the room's lamps and tubes burning within r m of (x, z) (never the LEDs: the beacons and racks stay lit)
+  function C8_lightsNear(x, z, r) {
+    const out = [];
+    try { for (const l of World.build.lights) { const h = l.handle; if (!h || !h.isOn || h.kind === 'led') continue; if (Math.hypot(h.pos.x - x, h.pos.z - z) <= r) out.push(h); } } catch (e) { /* room */ }
+    return out;
+  }
+  // a blackout over those lights (and the sky light): set(false) kills them, set(true) brings them back; the script's
+  // finally puts every one back as it was, the work tubes flickering again
+  function C8_blackout(G, lights, dim = 0.86) {
+    const set = (v) => { for (const h of lights) { try { h.flicker(false); h.on(v); } catch (e) { /* room */ } } C8.dim = v ? 0 : dim; };
+    G.finally(() => { C8.dim = 0; for (const h of lights) { try { h.on(true); if (h.kind === 'fluoro') h.flicker(true); } catch (e) { /* room */ } } });
+    return set;
+  }
+  // one scare at a time, and the flag cleared however the script ends
+  const C8_solo = (fn) => async (G) => {
+    if (C8.scaring || !G.scareReady) return;
+    C8.scaring = true;
+    try { await fn(G); } finally { C8.scaring = false; }
+  };
   // actor-relative framing helpers for close shots
   const headAt = (X) => {
     const r = X && (X.raw || X), a = r && (r.faceMount || (r.bones && r.bones.head));
@@ -490,14 +528,16 @@
   const C8_band = (x, z) => (z > -8 ? 0 : z > -22 ? 1 : z > -36 ? 2 : x < 30 ? 3 : 4);
   function C8_rowLook(dt) {
     if (!C8.row || !Player.pos) return;
+    // (a scare's focus: every head near him turns to one spot up the road — at once)
+    if (C8.rowFocus !== C8.rowFocusWas) { C8.rowFocusWas = C8.rowFocus; C8.lookT = 0; }
     C8.lookT = (C8.lookT || 0) - dt;
     if (C8.lookT > 0) return;
     C8.lookT = 0.4;
-    const band = C8_band(Player.pos.x, Player.pos.z);
+    const band = C8_band(Player.pos.x, Player.pos.z), F = C8.rowFocus;
     for (const e of C8.row) {
       if (!e || e.removed || !e.actor) continue;
       const d = Math.hypot(e.pos.x - Player.pos.x, e.pos.z - Player.pos.z), d3 = Math.hypot(d, e.pos.y - Player.pos.y);
-      try { e.actor.lookAt(d < 9 ? Player.actor : null); } catch (err) { /* rig */ }
+      try { e.actor.lookAt(F && d < 16 ? F : d < 9 ? Player.actor : null); } catch (err) { /* rig */ }
       // no occlusion culling: only the ones on his own stretch of road are drawn (the fog hides the rest anyway)
       const show = d3 < 8 || (C8_band(e.pos.x, e.pos.z) === band && d3 < C8_ROW_R);
       if (!!e.hidden === show) try { Enemies.visible(e, show); } catch (err) { /* enemies */ }
@@ -543,6 +583,65 @@
     K.cyl(x - 0.7, y, z, 0.035, 1.6, { tex: 'metal', color: '#9aa09a' }, { rot });
     K.cyl(x + 0.7, y, z, 0.035, 1.6, { tex: 'metal', color: '#9aa09a' }, { rot });
     K.plane(x, y + 1.25, z, 1.8, 0.9, chevronTex(dir), { rotY: rot });
+  }
+
+  // JUMP SCARE c8:legC — Summit Road's third leg, walking west past "IT'LL BE FINE" toward the third hairpin (after its
+  // hostile Tethered, before the Reach at the turn can see him): the work tube on the wall stutters, and every head on the
+  // verge turns — not to him: up the road, past him. The lights die (the tubes, the red lamps, the sky light; only the
+  // beacons on the poles and the phones in the gravel keep glowing). A few metres up the road, lit from below by a phone
+  // face-up at its feet, something is standing in it. They snap back on: it's right in front of him — hunched, sealed in
+  // its plastic, the box in its hands. One he never cut free. Dark again; and when the tubes come back the road's empty.
+  // (Glimpses: nothing to touch, nothing that hurts. Leaving the leg before it starts keeps it for the next walk.)
+  const C8_LEGC = { x0: 13.2, x1: 20.8, tube: [27, SR.yC(27) + 3.0, -31.84] };
+  async function C8_legCScare(G) {
+    if (done('scare:c8:legC') || World.room !== 'c8_summit' || !S.outage) return;
+    const P = () => Player.pos;
+    const onLeg = () => !!P() && World.room === 'c8_summit' && P().x > 8.6 && P().x < 30 && P().z > -32 && P().z < -23.8;
+    const ready = () => G.scareReady && C8_calm(12) && !C8_hostileNear(6.5) && onLeg() && P().x > C8_LEGC.x0 && P().x < C8_LEGC.x1
+      && Math.sin(Player.yaw) < -0.35 && C8_camIs('c8_summit:c');
+    if (!(await G.until(() => ready() || !onLeg() || P().x < C8_LEGC.x0, { timeout: 10 })) || !ready()) return;
+    // a spot `ahead` m up the road in front of him, on the carriageway (never past the hairpin's edge)
+    const spot = (ahead) => { const p = P(), x = clamp(p.x - ahead, 8.8, 29.5), z = clamp(p.z + Math.cos(Player.yaw) * ahead * 0.35, -30.3, -24.6); return [x, SR.yC(x), z]; };
+    const set = C8_blackout(G, C8_lightsNear(P().x, P().z, 18));
+    const look = (s) => { C8.rowFocus = s ? [s[0], s[1] + 1.0, s[2]] : null; };
+    let far = null, near = null, glow = null;
+    G.finally(() => { C8.rowFocus = null; if (far) far.remove(); if (near) near.remove(); if (glow) glow.free(); });
+    // 1. the tube stutters; every seated head near him turns up the road, past him
+    look(spot(5.4));
+    G.sfx('tube_flicker', { pos: C8_LEGC.tube, vol: 0.55, dur: 0.5 });
+    for (const v of [false, true, false, true]) { set(v); await G.wait(0.06 + Math.random() * 0.07); }
+    await G.wait(1.1);
+    if (!onLeg() || !C8_calm(12) || !G.scareReady) return;
+    // 2. the lights die. Up the road: something standing in it, lit from below by a phone at its feet
+    G.sfx('tube_flicker', { pos: C8_LEGC.tube, vol: 0.7, dur: 0.3 });
+    set(false);
+    await G.wait(0.3);
+    // (far enough up the road that he doesn't reach it in the dark, even running)
+    const a = spot(clamp(4.2 + Math.abs(Player.speed || 0) * 1.2, 4.2, 8.5));
+    far = G.glimpse({ kind: 'tethered', pos: a, lookAt: 'player', dur: 3, def: { cardigan: '#4a4f58' } });
+    glow = G.addLight('point', { pos: [a[0] + 0.3, a[1] + 0.1, a[2] + 0.1], color: '#6fe0d6', intensity: 2.6, distance: 2.3 });
+    look(a);
+    G.sfx('plastic', { pos: [a[0], a[1] + 1.1, a[2]], dur: 0.7, dens: 1.1 });
+    await G.wait(1.05);
+    // 3. the lights snap back: it's right in front of him (the phone's light up under its face)
+    far.remove(); far = null;
+    if (glow) { glow.free(); glow = null; }
+    const b = spot(1.5);
+    near = G.glimpse({ kind: 'tethered', pos: b, lookAt: 'player', dur: 3, def: { cardigan: '#4a4f58' } });
+    glow = G.addLight('point', { pos: [b[0] + 0.3, b[1] + 0.1, b[2] + 0.1], color: '#8ff0e6', intensity: 3.4, distance: 2.4 });
+    look(b);
+    set(true);
+    const hit = G.scare({ id: 'c8:legC', kind: 'stab', shake: 0.4, flash: 0.3, lock: 0.35, heart: 5 });
+    await G.wait(0.75);
+    // 4. dark — and when the tubes come back, the road is empty
+    G.sfx('tube_flicker', { pos: C8_LEGC.tube, vol: 0.5, dur: 0.3 });
+    set(false);
+    near.remove(); near = null;
+    if (glow) { glow.free(); glow = null; }
+    look(null);
+    await hit;
+    await G.wait(0.3);
+    set(true);
   }
 
   defineRoom({
@@ -816,6 +915,8 @@
         await G.think('Nobody. [beat] There\'s nobody up here.');
       }, { id: 'c8_summit:empty', when: () => !!S.outage && !(C8.row && C8.row.length) });
       K.trigger([30, -60, 44, -46], async (G) => { await G.think('The fog\'s thinner up here. [beat] I can see it now.'); }, { id: 'c8_summit:see' });
+      // JUMP SCARE c8:legC (C8_legCScare): walking west along the third leg, past the verge's seats
+      K.trigger([C8_LEGC.x0, -32, 23.5, -23.8], C8_solo(C8_legCScare), { id: 'c8_summit:scare', once: false, when: () => !!S.outage && !done('scare:c8:legC') && !C8.scaring });
       // examine lines for the occupied seats
       const lines = [
         ['Sitting in the gravel, watching me go past.', 'It doesn\'t want anything from me. Not any more.'],
@@ -832,18 +933,19 @@
       C8_fogStep(dt);
       C8_rowLook(dt);
     },
-    onLeave() { C8_ambientOff(); C8.fogTo = null; C8.row = null; },
+    onLeave() { C8_ambientOff(); C8.fogTo = null; C8.row = null; C8.dim = 0; C8.rowFocus = null; },
     async onEnter(G) {
       C8_freedRow();
       G.bars(null);
       // phones ringing one room away, somewhere down the hill in the fog
       const tok = (C8.ringTok = (C8.ringTok || 0) + 1);
+      // (revised after playtesting: rarer and quieter, never over a scare, and ducked with the Outage bed under a scene)
       for (;;) {
-        await G.wait(14 + Math.random() * 16);
+        await G.wait(22 + Math.random() * 18);
         if (tok !== C8.ringTok || !G.inRoom('c8_summit')) return;
-        if (!S.outage || busy()) continue;
+        if (!S.outage || busy() || C8.scaring) continue;
         const p = Player.pos, a = Math.random() * Math.PI * 2;
-        sfx('ring', { n: 2, pos: [p.x + Math.sin(a) * 22, p.y - 6, p.z + Math.cos(a) * 22], vol: 0.35 });
+        sfx('ring', { n: 2, pos: [p.x + Math.sin(a) * 22, p.y - 6, p.z + Math.cos(a) * 22], vol: 0.26, duck: 'outage' });
       }
     },
   });
@@ -968,6 +1070,82 @@
     note(G, riddle() === 'easy' ? 'Gate code: 1961.' : riddle() === 'hard' ? 'Gate code: the day and month the exchange opened.' : 'Gate code: the year the exchange opened.', 'c8_code');
   }
 
+  // JUMP SCARE c8:hut — HUT 2, once he's taken something off the bench (or stood a while), his back to the door: the wind
+  // leans on the hut, the tin creaks, the door trembles on its hinges and the tube stutters. Then the door SLAMS shut
+  // behind him and the tube dies with it — only the racks' LEDs in the dark. Three knocks on the other side of the door.
+  // The tube stutters back. A breath; and the door creaks open by itself, slowly, onto the fog. Nobody there. (The
+  // doorway is shut for a few seconds only — E on the door opens it as ever; a scare never shuts it on him standing in it.)
+  async function C8_hutScare(G) {
+    if (done('scare:c8:hut') || World.room !== 'c8_compound' || !S.outage) return;
+    const P = () => Player.pos, [dx, dz] = CP.door;
+    const inHut = () => !!P() && World.room === 'c8_compound' && P().x > 22.2 && P().x < 26.9 && P().z > 5.1 && P().z < 9.4;
+    const took = () => !!(S.taken && (S.taken['c8_compound:firstaid'] || S.taken['c8_compound:energy']));
+    const t0 = G.time;
+    const ready = () => G.scareReady && C8_calm(10) && inHut() && P().x > 23.8 && (took() || G.time - t0 > 4) && C8_camIs('c8_compound:hut');
+    if (!(await G.until(() => ready() || !inHut(), { timeout: 30 })) || !ready()) return;
+    const d = G.door('c8_compound:hut2'), rec = d && d.rec;
+    const amt0 = rec && rec.amount != null ? rec.amount : 0.8;
+    const leaf = (a) => { try { if (rec && rec.setOpen) rec.setOpen(clamp(a, 0, 1)); } catch (e) { /* door */ } };
+    let shut = false;
+    // (he opened it himself — E on the door while it was shut: the scene leaves the door to him)
+    const opened = () => !!(rec && shut && rec.open);
+    const reopen = () => { if (!rec || !shut) return; shut = false; if (!rec.open) { leaf(amt0); rec.open = amt0 >= (rec.passAt ?? 0.5); if (rec.collider) rec.collider.enabled = !rec.open; } };
+    const set = C8_blackout(G, C8_lightsNear(24.3, dz, 3.4));
+    G.finally(() => reopen());
+    const DOOR = [dx, 1.2, dz];
+    // 1. the wind leans on the hut; the tin creaks; the door trembles; the tube stutters
+    G.sfx('wind_gust', { vol: 1.0 });
+    G.sfx('creak', { pos: [24.5, 2.6, dz], vol: 0.55, dur: 1.5 });
+    {
+      let t = 0;
+      await G.loop((dt) => { t += dt; leaf(amt0 - 0.05 * Math.sin(t * 17) * Math.sin(Math.min(1, t / 1.2) * Math.PI)); return t >= 1.2; });
+      leaf(amt0);
+    }
+    G.sfx('tube_flicker', { pos: [24.5, 2.7, dz], vol: 0.5, dur: 0.45 });
+    for (const v of [false, true, false, true]) { set(v); await G.wait(0.05 + Math.random() * 0.07); }
+    await G.wait(0.5);
+    if (!(await G.until(() => (C8_calm(10) && inHut()) || !inHut(), { timeout: 5 })) || !inHut() || !G.scareReady) return;
+    // 2. SLAM — the door, shut behind him; the tube dies with it
+    const hit = G.scare({ id: 'c8:hut', kind: 'slam', pos: DOOR, shake: 0.5, flash: 0.22, lock: 0.3, heart: 5 });
+    shut = true;
+    leaf(0);
+    if (rec) { rec.open = false; if (rec.collider && Math.hypot(P().x - rec.x, P().z - rec.z) > 1.0) rec.collider.enabled = true; }
+    {
+      // (the leaf bounces in its frame; the jolt knocks the tube out a beat later)
+      let t = 0, out = false;
+      await G.loop((dt) => {
+        t += dt;
+        if (!opened()) leaf(0.035 * Math.exp(-t * 9) * Math.abs(Math.sin(t * 30)));
+        if (!out && t > 0.3) { out = true; G.sfx('tube_flicker', { pos: [24.5, 2.7, dz], vol: 0.5, dur: 0.3 }); }
+        if (out) set(t > 0.62 || (t * 20 | 0) % 2 === 0 ? false : true);
+        return t >= 0.7;
+      });
+    }
+    set(false);
+    await hit;
+    // 3. in the dark: three knocks on the other side of the door
+    await G.wait(0.6);
+    if (!opened()) {
+      G.sfx('knock', { n: 3, gap: 0.38, pos: [dx - 0.3, 1.4, dz] });
+      let t = 0;
+      await G.loop((dt) => { t += dt; if (!opened()) { const k = t % 0.38; leaf(t < 1.14 && k < 0.09 ? 0.012 * (1 - k / 0.09) : 0); } return t >= 1.2; });
+    }
+    await G.wait(1.4);
+    // 4. the tube stutters back
+    G.sfx('tube_flicker', { pos: [24.5, 2.7, dz], vol: 0.45, dur: 0.4 });
+    for (const v of [true, false, true]) { set(v); await G.wait(0.06 + Math.random() * 0.06); }
+    await G.wait(1.3);
+    // 5. and the door creaks open by itself, slowly, onto the fog
+    if (!opened() && shut) {
+      G.sfx('creak', { pos: DOOR, vol: 0.7, dur: 2.2 });
+      G.sfx('wind_gust', { vol: 0.55 });
+      if (rec && rec.collider) rec.collider.enabled = false;
+      let t = 0;
+      await G.loop((dt) => { t += dt; if (opened()) return true; leaf(amt0 * U.ease.inOut(clamp(t / 2.4, 0, 1))); return t >= 2.4; });
+    }
+    reopen();
+  }
+
   defineRoom({
     id: 'c8_compound', name: 'MAST COMPOUND', area: 'THE MAST', chapter: 8, outdoor: true, surface: 'gravel', ambient: 'wind_heavy',
     fog: { density: 0.05 }, outageFog: { density: 0.04, color: C8_OUTFOG },
@@ -1058,7 +1236,7 @@
       // the phone's ring (Wai), started by the approach trigger below
       K.trigger([6, 20.2, 24, 27], async (G) => {
         if (!flag('waiSaved') || flag('c8_phone') || C8.ring) return;
-        C8.ring = sfx('ring', { pos: [epx, 1.3, epz + 0.1], loop: true, vol: 0.9 });
+        C8.ring = sfx('ring', { pos: [epx, 1.3, epz + 0.1], loop: true, vol: 0.6 });   // (revised after playtesting: was 0.9)
         await G.wait(1.2);
         if (!C8.inCall && !flag('c8_phone') && G.once('c8:ringThought')) await G.think('The emergency phone. [beat] It\'s ringing.');
       }, { id: 'c8_compound:ring', once: false, when: () => flag('waiSaved') && !flag('c8_phone') });
@@ -1140,6 +1318,8 @@
         await G.think('Every entry after that says the same thing. [beat] "Follow up tomorrow."');
       }, { id: 'c8c:log', r: 1.1 });
       K.examine(23.2, 0.5, 6.9, ['A camp bed and a sleeping bag. Somebody stayed up here.', 'Waiting for a part, maybe. Or for someone to call back.'], { id: 'c8c:bed', r: 1.2 });
+      // JUMP SCARE c8:hut (C8_hutScare): the door slams shut behind him
+      K.trigger([22.2, 5.1, 26.9, 9.4], C8_solo(C8_hutScare), { id: 'c8_compound:scare', once: false, when: () => !!S.outage && !done('scare:c8:hut') && !C8.scaring });
       K.examine(24.6, 1.65, 9.1, 'A calendar stuck on August. [beat] Nobody\'s turned it over.', { id: 'c8c:cal', r: 1.2 });
 
       // ---- the fenced pens behind the huts (so nobody walks round the back of a hut, out of every camera's sight): gas
@@ -1201,7 +1381,7 @@
       C8_fogStep(dt);
       C8_laterTick(dt);
     },
-    onLeave() { C8_ambientOff(); C8.fogTo = null; C8.inCall = false; if (C8.ring) { try { C8.ring.stop(0.2); } catch (e) { /* audio */ } C8.ring = null; } C8.gate = null; },
+    onLeave() { C8_ambientOff(); C8.fogTo = null; C8.dim = 0; C8.inCall = false; if (C8.ring) { try { C8.ring.stop(0.2); } catch (e) { /* audio */ } C8.ring = null; } C8.gate = null; },
     async onEnter(G) {
       G.bars(null);
       if (S.chapter === 8 && !S.outage) G.setOutage(true);
@@ -1478,6 +1658,40 @@
       await G.run(async (G2) => { await G2.cutscene('8-2'); }, { control: false, skippable: false, inheritSkip: false, name: 'c8:pitch' });
     } finally { C8.pitchChain = false; }
   }
+  // JUMP SCARE c8:ladder — the first climb. Halfway up the ladder, in the shot straight down the cage: keys, far below
+  // him. The wind. He goes on up. On platform 1, a moment after he's stepped off the ladder (the shot from out over the
+  // compound): keys again — close, right behind him — and over the lip of the platform, at the head of the ladder he just
+  // came up, the Standard rises into the fog's light, climbing, its head turned to him, the clipboard over its face.
+  // A breath, and the ladder's empty; the keys fall away below. (A glimpse: it never touches him, no freeze, nothing on
+  // the ladder itself. The real Standard only starts at platform 2, and nothing here touches it.)
+  const C8_L1 = { x: 1.0, z: 2.09 };                  // (where a climber hangs on the first ladder)
+  async function C8_ladderScare(G) {
+    if (done('scare:c8:ladder') || done('cs:8-1') || World.room !== 'c8_mast') return;
+    const P = () => Player.pos;
+    const onL1 = () => World.room === 'c8_mast' && !!P() && Player.mode === 'ladder' && !!Player.ladder && Player.ladder.id === 'c8_mast:l1';
+    const onP1 = () => World.room === 'c8_mast' && !!P() && Player.mode !== 'ladder' && Math.abs(P().y - 20) < 0.7 && P().x > 1.4 && P().x < 5.6 && P().z > -1.1 && P().z < 2.95;
+    if (!onL1() || !G.scareReady) return;
+    // keys, far below him; the wind
+    G.sfx('keys_far', { pos: [C8_L1.x, 1.4, 3.4], vol: 0.7 });
+    await G.wait(1.3);
+    G.sfx('wind_gust', { vol: 0.9 });
+    // on up, onto the platform (climbing back down lets it go, unspent)
+    if (!(await G.until(() => onP1() || !onL1(), { timeout: 45 })) || !onP1()) return;
+    const ready = () => G.scareReady && C8_calm(10) && onP1() && C8_camIs('c8_mast:p1') && !Enemies.get('c8_mast:std') && Math.hypot(P().x - C8_L1.x, P().z - C8_L1.z) > 1.0;
+    await G.wait(0.7);
+    if (!(await G.until(() => ready() || !onP1(), { timeout: 8 })) || !ready()) return;
+    let gl = null;
+    G.finally(() => { if (gl) gl.remove(); });
+    // keys — close, at the head of the ladder behind him; it rises over the lip, climbing
+    G.sfx('keys', { pos: [C8_L1.x, 19.8, C8_L1.z], vol: 0.8 });
+    gl = G.glimpse({ kind: 'standard', pos: [C8_L1.x, 17.7, C8_L1.z], yaw: 180, anim: 'climb', lookAt: 'player', dur: 1.35, onlyIfOnScreen: true, wait: 0.8, def: { name: 'AIDAN' } });
+    const rise = G.loop((dt) => { const r = gl.actor && gl.actor.root; if (r && gl.shown) r.position.y = Math.min(18.9, r.position.y + 0.7 * dt); return gl.done; });
+    await G.until(() => gl.shown || gl.done, { timeout: 1.0 });
+    if (gl.shown) await G.scare({ id: 'c8:ladder', kind: 'stab', shake: 0.35, flash: 0.26, heart: 6 });
+    await rise;
+    // the keys, falling away down the ladder
+    G.sfx('keys_far', { pos: [C8_L1.x, 9, C8_L1.z + 0.4], vol: 0.4 });
+  }
   defineRoom({
     id: 'c8_mast', name: 'THE MAST', area: 'THE MAST', chapter: 8, outdoor: true, surface: 'gravel', ambient: 'wind_heavy',
     fog: { density: 0.035 }, outageFog: { density: 0.03, color: C8_OUTFOG },
@@ -1585,6 +1799,8 @@
         note(G, 'Keep climbing. Don\'t stop.', 'c8_climb');
       }, { id: 'c8_mast:p2', once: false, when: () => Player.pos && Player.pos.y > 39.5 && Player.pos.y < 40.8 && Player.mode !== 'ladder' && !Enemies.get('c8_mast:std') });
       K.trigger([-5.5, -2.6, -1.05, 1.4], (G) => G.cutscene('8-1'), { id: 'c8_mast:top', once: false, when: () => !done('cs:8-1') && Player.pos && Player.pos.y > 55.5 && Player.mode !== 'ladder' });
+      // JUMP SCARE c8:ladder (C8_ladderScare): halfway up the first ladder (the keys below), then platform 1
+      K.trigger([0.2, 1.2, 1.8, 2.9], C8_solo(C8_ladderScare), { id: 'c8_mast:scare', once: false, y: [10.5, 16.2], when: () => Player.mode === 'ladder' && !done('scare:c8:ladder') && !done('cs:8-1') && !C8.scaring });
     },
     onUpdate(dt) {
       C8_ambient(0, C8_OUTAMB);
@@ -1597,7 +1813,7 @@
       C8.gustT = (C8.gustT ?? 4) - dt;
       if (C8.gustT <= 0) { C8.gustT = Math.max(2.5, 9 - y * 0.1) + Math.random() * 5; sfx('wind_gust', { vol: 0.5 + clamp(y / 56, 0, 1) * 0.5 }); }
     },
-    onLeave() { C8_ambientOff(); C8.fogTo = null; C8.hutObj = null; C8.doorObj = null; },
+    onLeave() { C8_ambientOff(); C8.fogTo = null; C8.dim = 0; C8.hutObj = null; C8.doorObj = null; },
     async onEnter(G) {
       if (S.chapter === 8 && !S.outage) G.setOutage(true);
       // nothing here is sure: the bars flicker between 0 and 5 at random (cleared on leaving)
@@ -2407,7 +2623,7 @@
       await G.loop((dt) => { t += dt; if (d) d.rotation.y = 1.45 * U.ease.out(clamp(t / 1.3, 0, 1)); return t >= 1.3; });
       if (d) d.rotation.y = 1.45;
     }
-    G.sfx('chime', { vol: 0.8 });
+    G.sfx('chime', { vol: 0.5 });   // (revised after playtesting: the door chime quieter — was 0.8)
     await G.post({ white: 0.35, dur: 1.2 });
     // state (plain statements)
     if (e && !e.removed) e.remove();
@@ -2432,7 +2648,7 @@
     // 1. SHOT — the sales floor, impossibly large: white plinths, spotlights, a gleaming counter; beyond the windows,
     //    only fog and the faint lights of the town
     G.cam({ pos: [13.3, 0.95, 19.45], target: [15, 2.1, 2.4], fov: 50, to: { pos: [13.7, 1.05, 17.7], target: [15, 2.2, 2.4], fov: 44 }, dur: 10 });
-    G.sfx('chime', { vol: 0.7 });
+    G.sfx('chime', { vol: 0.4 });   // (revised after playtesting: quieter — it follows 8-1's own chime; was 0.7)
     await G.wait(1.0);
     const walkIn = q(A.walkTo(15, 16.2, { speed: 0.6 }));
     await G.wait(4.6);
@@ -2777,7 +2993,7 @@
     G.sfx('beep', { pos: [px, 0.1, pz], vol: 0.3 });
     await G.wait(0.5);
     if (C8.ringback) { try { C8.ringback.stop(0); } catch (err) { /* audio */ } }
-    C8.ringback = sfx('ringback', { loop: true, vol: 0.9 });
+    C8.ringback = sfx('ringback', { loop: true, vol: 0.7 });
     await G.wait(1.6);
     // 2. SHOT — the Closer freezes mid-lunge. The smile trembles.
     const P = Player.pos;
@@ -2847,7 +3063,7 @@
     if (e && !e.removed) e.remove();
     C8.closer = null;
     G.set('c8_rang', true);
-    if (!C8.ringback || !C8.ringback.playing) C8.ringback = sfx('ringback', { loop: true, vol: 0.9 });
+    if (!C8.ringback || !C8.ringback.playing) C8.ringback = sfx('ringback', { loop: true, vol: 0.7 });
     if (A.raw) A.raw.idleLife = true;
   }, { letterbox: true, skippable: true });
 
@@ -2872,7 +3088,7 @@
     const P = Player.pos;
     A.place(P.x, P.z, Player.yawDeg);
     await C8_callPose(G);
-    if (!C8.ringback) C8.ringback = sfx('ringback', { loop: true, vol: 0.9 });
+    if (!C8.ringback) C8.ringback = sfx('ringback', { loop: true, vol: 0.7 });
     await G.wait(1.6);
     // a soft click
     stopRing();
@@ -2903,7 +3119,7 @@
     const P = Player.pos;
     A.place(P.x, P.z, Player.yawDeg);
     await C8_callPose(G);
-    if (!C8.ringback) C8.ringback = sfx('ringback', { loop: true, vol: 0.9 });
+    if (!C8.ringback) C8.ringback = sfx('ringback', { loop: true, vol: 0.7 });
     // the call rings out
     await G.wait(6.2);
     stopRing();
@@ -2924,7 +3140,7 @@
     const P = Player.pos;
     A.place(P.x, P.z, Player.yawDeg);
     await C8_callPose(G);
-    if (!C8.ringback) C8.ringback = sfx('ringback', { loop: true, vol: 0.9 });
+    if (!C8.ringback) C8.ringback = sfx('ringback', { loop: true, vol: 0.7 });
     await G.wait(2.4);
     // the call connects — to the automated voice
     stopRing();

@@ -62,6 +62,18 @@
   const C7_paging = () => C7.pageS === S && C7.pageUntil > now();
   const C7_page = (sec) => { C7.pageUntil = now() + sec; C7.pageS = S; };
   try { if (typeof window !== 'undefined' && window.SH) window.SH.c7 = C7; } catch (e) { /* tests only */ }
+  // Jump scares (ENGINE_NOTES "Jump scares"): background trigger beats, each once per save (S.done['scare:<id>']) — they
+  // never take control (at most the scare's own flinch), never damage, never touch a scene, and each one holds off (the
+  // id kept for the next pass) while a blocking beat, a pin or a call holds him, or something awake is near. One beat at a
+  // time (C7.scaring). Not in the stand-off, never in the tea room or at a payphone.
+  function C7_calm() {
+    try { if (Script.busy || Script.cutscene || World.transitioning) return false; } catch (e) { /* script */ }
+    try { if (Phone.ringing || Phone.inCall) return false; } catch (e) { /* phone */ }
+    if (!Player.pos || Player.dead || Player.control === false || C7.pinning) return false;
+    try { const t = Enemies.nearestThreat(Player.pos, { aware: true }); if (t && t.dist < 10) return false; } catch (e) { /* enemies */ }
+    return true;
+  }
+  function C7_solo(fn) { return async (G) => { if (C7.scaring || !C7_calm()) return; C7.scaring = true; try { await fn(G); } finally { C7.scaring = false; } }; }
 
   // ---------------------------------------------------------------------------------------------------------------
   // Canvas textures (drawn once, shared, never disposed)
@@ -888,7 +900,10 @@
       K.plane(19.4, 3.62, 6.56, 3.6, 0.3, plate('mainent', 'MAIN ENTRANCE', { bg: '#1d5d78', w: 512, h: 64, size: 40, age: 0.3 }), {});
       for (const x of [16.2, 19.4, 22.6]) K.cyl(x, 3.38, 3.2, 0.18, 0.07, x === 19.4 ? { color: '#e8eee8', emissive: '#e8eee8', emissiveIntensity: 1.4 } : { color: '#d8d8d0', roughness: 0.4 });
       // (the one canopy downlight still on, cold and weak: the drop-off reads, and so does anyone standing under it)
-      K.light('point', 19.4, 3.25, 3.2, { color: '#d6e2dc', intensity: 1.3, distance: 8.5, halo: false });
+      K.light('point', 19.4, 3.25, 3.2, { color: '#d6e2dc', intensity: 1.3, distance: 8.5, halo: false, name: 'c7cp:canopy' });   // (named: C7_doorsScare)
+      // JUMP SCARE c7:doors — the first walk up to the main entrance, under the canopy (C7_doorsScare)
+      K.trigger([14.2, 3.8, 24.8, 11.0], C7_solo(C7_doorsScare), { id: 'c7_carpark:doors', once: false, world: 'fog',
+        when: () => S.chapter === 7 && !flag('c7_arrived') && !done('scare:c7:doors') });
       // the drop-off lane: zebra stripes and DROP OFF painted on the bitumen
       for (let i = 0; i < 6; i++) K.box(17.4 + i * 0.8, 0.005, 7.9, 0.45, 0.012, 2.4, { color: '#c9c6ba', roughness: 0.8 }, { shadow: false });
       K.plane(27.0, 0.012, 8.4, 3.4, 0.85, dropTex(), { rot: [-90, 0, 0], transparent: true });
@@ -1161,6 +1176,48 @@
     }
   }
 
+  // JUMP SCARE c7:doors (the Fog world, the car park, the first walk up to the main entrance): in the shot from out over
+  // the drop-off, the one canopy light stutters and goes; when it comes back someone is standing a few steps ahead of him,
+  // off to the side of his way in, like the greeter at a store's door, facing him — a salesperson in a spotless teal polo,
+  // the smile ear to ear, a flare of light where the eyes should be, the pen held out. The stab. The light stutters again,
+  // and when it steadies there's nobody there. (The store is waiting inside; these aren't his. Harmless — a glimpse that
+  // never moves, never touches. Turning back before the shot keeps the id.)
+  async function C7_doorsScare(G) {
+    if (done('scare:c7:doors') || flag('c7_arrived') || S.outage || World.room !== 'c7_carpark' || !G.scareReady) return;
+    const inShot = () => { const c = Cam.current; return !!(c && c.id === 'c7_carpark:entrance'); };
+    const gone = () => World.room !== 'c7_carpark' || !Player.pos || Player.dead || Player.pos.z > 12.5 || flag('c7_arrived');
+    if (!(await G.until(() => inShot() || gone(), { timeout: 3 })) || gone()) return;
+    // (walking up to the doors, not away; still a few steps short of them)
+    if (!(await G.until(() => gone() || Math.cos(Player.yaw) < -0.3, { timeout: 2.5 })) || gone() || Player.pos.z < 3.6) return;
+    const canopy = G.light('c7cp:canopy');
+    const cano = (on) => { try { if (canopy) canopy.on(on); } catch (e) { /* light */ } };
+    let g = null, lit = null;
+    G.finally(() => { if (g) g.remove(); if (lit) lit.free(); cano(true); });
+    // the canopy light stutters, and goes
+    G.sfx('tube_flicker', { pos: [19.4, 3.2, 3.2], vol: 0.55, dur: 0.9 });
+    for (const [on, t] of [[false, 0.12], [true, 0.08], [false, 0.3], [true, 0.06], [false, 0.4]]) { cano(on); await G.wait(t); }
+    if (gone() || !G.scareReady || !C7_calm()) { cano(true); return; }
+    // it comes back on him: someone standing a few steps ahead, off to the side of his way to the doors (off his line:
+    // the shot looks over his shoulder), facing him — like the greeter at a store's door
+    const P = Player.pos, side = P.x > 19.4 ? -1 : 1;
+    const GP = [clamp(P.x + side * 1.25, 15.2, 23.6), Math.max(1.0, P.z - 3.3)];
+    g = G.glimpse({ kind: 'smile', pos: GP, lookAt: 'player', dur: 1.6, onlyIfOnScreen: true, wait: 0.8, def: { seed: 74 } });
+    lit = G.addLight('point', { pos: [GP[0] - side * 0.2, 2.7, GP[1] + 1.2], color: '#dbe8e2', intensity: 3.0, distance: 4.2 });
+    cano(true);
+    G.sfx('tube_flicker', { pos: [19.4, 3.2, 3.2], vol: 0.35, dur: 0.25 });
+    await G.until(() => g.shown || g.done, { timeout: 1.0 });
+    if (!g.shown || gone()) return;
+    try { if (g.actor) q(g.actor.gesture('offer', { hand: 'R', dur: 1.2 })); } catch (e) { /* rig */ }
+    await G.scare({ id: 'c7:doors', kind: 'stab', pos: [GP[0], 1.5, GP[1]], shake: 0.3, flash: 0.22, heart: 3 });
+    await G.wait(0.5);
+    // the light stutters — and when it steadies, nobody
+    cano(false); if (lit) { lit.free(); lit = null; }
+    await G.wait(0.16);
+    g.remove(); g = null;
+    await G.wait(0.08);
+    cano(true);
+  }
+
   // =================================================================================================================
   // Hospital interiors: pale sage paint over a grey-green dado and a timber bumper rail, hospital lino, tiled ceilings
   // at 2.9 m. In the Smile store the same walls are gloss teal with a yellow band.
@@ -1334,7 +1391,7 @@
       G.bars(null);
       if (from === 'c7_carpark' && !flag('c7_arrived')) {
         G.set('c7_arrived', true);
-        G.sfx('chime', { vol: 0.35, pos: [8, 2.2, 12] });
+        G.sfx('chime', { vol: 0.3, pos: [8, 2.2, 12] });                    // (the entrance's door chime, faint: playtest)
         await G.wait(1.6);
         await G.think('Somebody should be at the desk. [beat] Somebody\'s always at the desk.');
         note(G, 'Find her room. The visitor book?', 'c7_goal');
@@ -1634,7 +1691,7 @@
       C7_enterDoors('c7_corridor', from);
       if (store()) {
         G.bars('noservice', { room: true });
-        if (from === 'c7_reception') G.sfx('chime', { vol: 0.8 });
+        if (from === 'c7_reception') G.sfx('chime', { vol: 0.4 });           // (every visit: kept soft — playtest)
         if (C7_paging()) C7_assignPage('c7_corridor');
         if (G.once('c7:storeTip') && flag('c7_s71')) { /* the first time back in after 7-1 */ }
         return;
@@ -1782,18 +1839,64 @@
     // the empty corner (north-east) and the one who steps into it
     K.trigger([21.7, -18.3, 26, -17.4], (G) => C7_cornerStep(G), { id: 'c7_corridor:ne', when: () => flag('c7_store') && !C7_paging() });
   }
-  // cuts to an empty corner before a Smile steps into it (spec §7B)
+  // cuts to an empty corner before a Smile steps into it (spec §7B) — JUMP SCARE c7:corner: the cut to the north-east
+  // corner shows it empty, the third leg hidden round it; a beat; a swell rises and, as it lands, a Smile steps round the
+  // corner into the light — the badge, AIDAN, the smile, the flare where the eyes are — "Hi there! What brings you in
+  // today?" — and then it comes for him, friendly, never running. (The swell's hit is timed to the step; without the
+  // scare — spent, the cooldown, a skip — the Smile still steps in and comes for him, as before.)
   async function C7_cornerStep(G) {
     const e = G.enemy('c7_corridor:s3');
     if (!e || e.removed || !Player.pos) return;
     if (Math.hypot(e.pos.x - 24, e.pos.z + 20) < 5.5 || Math.hypot(e.pos.x - Player.pos.x, e.pos.z - Player.pos.z) < 6) return;
-    const D = e.data;
-    D.scripted = true;
-    e.pos.set(18.6, 0, -21.1); e.yaw = 90 * D2R; D.state = 'patrol';
-    await G.wait(1.3);
-    D.scripted = false;
-    D.state = 'approach'; D.lostT = 0;
-    smileSay(e, 0, true);
+    const D = e.data, a = e.actor;
+    D.scripted = true; D.path = null;
+    // round the corner in the third leg, where the inner block hides it from the corner's shot
+    e.pos.set(20.3, 0, -20.3); e.yaw = 90 * D2R; D.state = 'patrol';
+    try { if (a) { a.setAnim('idle', { blend: 0 }); a.lookAt(null); } } catch (err) { /* rig */ }
+    let released = false;
+    const release = (approach) => {
+      if (released || e.removed) return;
+      released = true;
+      D.scripted = false; D.path = null;
+      if (approach && !C7_paging()) { D.state = 'approach'; D.lostT = 0; smileSay(e, 0, true); } else D.state = 'return';
+    };
+    G.finally(() => release(false));
+    const inShot = () => { const c = Cam.current; return !!(c && c.id === 'c7_corridor:ne'); };
+    const off = () => World.room !== 'c7_corridor' || !store() || e.removed || !Player.pos || Player.dead || C7.pinning || C7_paging();
+    // (another Smile on him, or he's already round the corner / gone back down the leg: no reveal, it just comes)
+    const crowded = () => (Enemies.byType ? Enemies.byType('c7_smile') : []).some((s) => s !== e && !s.removed && !s.hidden && Player.pos && flat(s.pos, Player.pos) < 4.5);
+    const past = () => !Player.pos || Player.pos.x < 21.4 || Player.pos.z > -14;
+    await G.until(() => inShot() || off(), { timeout: 1.5 });
+    if (off()) return;
+    // the empty corner; then the swell, and it walks round into the light as the hit lands (≈ 1.2 s in)
+    const scare = inShot() && !past() && !crowded() && !busy() && G.scareReady;
+    const sw = scare ? G.scare({ id: 'c7:corner', kind: 'swell', pos: [22.4, 1.6, -20.2], shake: 0, flash: 0, flinch: false, rumble: false, heart: 4 }) : null;
+    let t = 0, hit = !scare;
+    await G.loop((dt) => {
+      if (off()) return true;
+      t += dt;
+      if (t > 0.15) smMove(e, 22.75, -20.2, SM.walk + 0.25, dt, 0.12);
+      if (!hit && t >= 1.2) {
+        hit = true;
+        // (the hit, on the step into the light: the jolt, the pulse, his flinch)
+        try { G.shake(0.35, 0.5); } catch (err) { /* cam */ }
+        try { if (Render.flash) Render.flash(0.22, 0.3); } catch (err) { /* render */ }
+        try {
+          const pa = Player.actor, prev = pa && pa.faceState ? pa.faceState.expr : null;
+          if (pa) { q(pa.gesture('flinch')); pa.expr('scared'); }
+          if (pa && prev && prev !== 'scared') G.bg(async (G2) => { await G2.wait(2.6); try { if (pa.faceState && pa.faceState.expr === 'scared') pa.expr(prev); } catch (err) { /* rig */ } });
+          G.sfx('gasp', { pos: [Player.pos.x, Player.pos.y + 1.6, Player.pos.z], vol: 0.9 });
+        } catch (err) { /* rig */ }
+      }
+      return t >= 2.9 || (t > 1.3 && Math.hypot(e.pos.x - 22.75, e.pos.z + 20.2) < 0.2);
+    });
+    if (sw) await sw;
+    if (off()) return;
+    // it turns to him, smiling, and offers the pen; then it comes
+    try { if (a) { a.setAnim('idle', { blend: 0.3 }); a.lookAt(Player.actor); q(a.gesture('offer', { hand: 'R', dur: 1.2 })); } } catch (err) { /* rig */ }
+    e.yaw = Math.atan2(Player.pos.x - e.pos.x, Player.pos.z - e.pos.z);
+    await G.wait(0.7);
+    release(true);
   }
 
   // =================================================================================================================
@@ -2010,12 +2113,43 @@
       K.examine(2.93, 1.5, -13.0, '"Who are you trying to reach." [beat] You know who.', { id: 'c7w3:writing', r: 1.6 });
       // CUTSCENE 7-2 — straight away, the first time in
       K.trigger([0, -3.2, 3, 0], (G) => C7_threeTimes(G), { id: 'c7_ward3:72', when: () => !flag('c7_luke') });
+      // JUMP SCARE c7:chair — back up the ward to Room 12 after the stand-off, halfway (C7_chairScare)
+      K.trigger([0, -21.2, W3.W, -16.5], C7_solo(C7_chairScare), { id: 'c7_ward3:chair', once: false, world: 'fog',
+        when: () => S.chapter === 7 && flag('c7_standoff') && !flag('c7_room12') && !done('scare:c7:chair') });
     },
     async onEnter(G, from) {
       G.bars(null);
       if (flag('c7_luke') && !flag('c7_room12') && flag('c7_standoff') && G.once('c7:w3back')) { await G.wait(1.2); await G.think('The chair\'s empty. [beat] Room twelve.'); }
     },
   });
+
+  // JUMP SCARE c7:chair (the Fog world, Ward 3, back up to Room 12 after the stand-off — "The chair's empty."): halfway
+  // down the long symmetrical line the plastic chair at the far end creaks, the way a chair does when somebody sits down
+  // in it. It's empty. He walks on to Room 12's door — and as he comes level with the chair, somebody is in it, right
+  // beside him: a grey Tethered hunched in Luke's chair, its head coming up and round to him.
+  // The stab. Then the chair is empty again, and creaks once more. (Harmless: a glimpse, gone in a moment. Turning back
+  // down the ward first keeps the id.)
+  async function C7_chairScare(G) {
+    if (done('scare:c7:chair') || !flag('c7_standoff') || flag('c7_room12') || S.outage || World.room !== 'c7_ward3' || !G.scareReady) return;
+    if (Math.cos(Player.yaw) > -0.3) return;                               // (walking up the ward, toward Room 12)
+    const CH = [W3.chair[0] - 0.04, W3.chair[1]];
+    const gone = () => World.room !== 'c7_ward3' || !Player.pos || Player.dead || Player.pos.z > -12 || flag('c7_room12');
+    // (level with the chair — the end shot from the west wall has them side by side, not one behind the other)
+    const beside = () => !!Player.pos && Player.pos.z < CH[1] + 1.75;
+    let g = null;
+    G.finally(() => { if (g) g.remove(); });
+    G.sfx('creak', { pos: [CH[0], 0.5, CH[1]], vol: 0.6, metal: false, dur: 0.8 });
+    if (!(await G.until(() => beside() || gone(), { timeout: 20 })) || gone()) return;
+    if (!G.scareReady || !C7_calm()) return;
+    g = G.glimpse({ kind: 'tethered', pos: CH, yaw: -90, anim: 'sit', lookAt: 'player', dur: 1.3, onlyIfOnScreen: true, wait: 0.6 });
+    await G.until(() => g.shown || g.done, { timeout: 0.8 });
+    if (!g.shown || gone()) return;
+    await G.scare({ id: 'c7:chair', kind: 'stab', pos: [CH[0], 1.0, CH[1]], shake: 0.4, flash: 0.26, heart: 2.5 });
+    await G.until(() => g.done, { timeout: 1.5 });
+    g = null;
+    await G.wait(0.5);
+    if (!gone()) G.sfx('creak', { pos: [CH[0], 0.5, CH[1]], vol: 0.35, metal: false, dur: 0.6 });
+  }
 
   // =================================================================================================================
   // 7F ROOM 12 — 6 × 4 m: the bed (its head to the west wall) with the blanket turned back and her glasses on the
@@ -2233,7 +2367,7 @@
     await G.wait(1.0);
     // the tubes, one after another down the corridor; a door chime from nowhere
     for (const [x, d] of [[14, 0.28], [10, 0.24], [6, 0.3]]) { G.sfx('tube_flicker', { pos: [x, 2.8, 2], vol: 0.9 }); await G.wait(d); }
-    G.sfx('chime', { vol: 1.0 });
+    G.sfx('chime', { vol: 0.6 });                                              // (spec 7-1: a door chime — heard, not a doorbell in the ear)
     await G.post({ exposure: 2.6, white: 0.94, dur: 0.9 });
     // (state) the corridor is the store now; NO SERVICE, no bars at all
     G.set('c7_store', true); G.set('c7_s71', true);
@@ -2299,10 +2433,10 @@
     q(A.gesture('reach', { hand: 'L', target: [mx + 0.04, 1.04, mz - 0.03], dur: 1.0 }));
     await G.wait(0.5);
     G.sfx('click', { vol: 0.6 });
-    G.sfx('pa_ding', { vol: 1.0 });
+    G.sfx('pa_ding', { vol: 0.7 });
     await G.wait(1.0);
     await G.say('AIDAN', 'Would... would Aidan please come to the front counter.');
-    G.sfx('pa_ding', { vol: 0.7 });
+    G.sfx('pa_ding', { vol: 0.5 });
     const ds = ['c7_nurses:d1', 'c7_nurses:d2', 'c7_nurses:d3'].map((id) => G.enemy(id)).filter((e) => e && !e.removed && !e.hidden);
     for (const e of ds) { e.data.scripted = true; e.actor.lookAt(null); e.actor.setAnim('idle', { blend: 0.2 }); }
     // the three in the doors: every head turns at once
@@ -2580,7 +2714,7 @@
         G.cam({ pos: [2.0, 1.6, 1.1], target: [7.0, 1.3, 4.3], fov: 40 });
         await A.walkTo([[4.6, 3.6], [6.3, 4.3]], { speed: 1.2 });
         try { G.door('c7_flashback:door').open(); } catch (e) { /* door */ }
-        G.sfx('chime', { vol: 1.0 });
+        G.sfx('chime', { vol: 0.5 });
         await A.walkTo(7.9, 4.3, { speed: 1.2 });
         await G.wait(0.4);
       }
@@ -2813,7 +2947,7 @@
     try { ph.userData.setText('SIGNAL HILL MAST'); ph.userData.setRinging(true); } catch (e) { /* prop */ }
     const lcd = G.obj('c7r12:lcd');
     if (lcd && lcd.material) lcd.material.map = r12Lcd('SIGNAL HILL MAST');
-    const ring = G.sfx('ring', { loop: true, pos: [px, 0.75, pz], vol: 0.9 });
+    const ring = G.sfx('ring', { loop: true, pos: [px, 0.75, pz], vol: 0.5 });   // (playtest: rings much quieter; it's right there in the shot)
     G.cam({ pos: [px + 0.36, 0.96, pz + 0.03], target: [px - 0.015, 0.67, pz + 0.016], fov: 22 });
     await G.wait(2.6);
     // 3. close on Aidan answering. Static, then a faint, patient voice.

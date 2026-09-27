@@ -48,8 +48,21 @@
   const busy = () => { try { return !!Script.busy; } catch (e) { return false; } };
   const V3 = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
   // transient presentation state (never saved)
-  const C6 = { walls: 0, mid: null, lastCam: null, hands: null, car: null, amb: -1 };
+  const C6 = { walls: 0, mid: null, lastCam: null, hands: null, car: null, amb: -1, scaring: false, motif: null };
   try { if (typeof window !== 'undefined' && window.SH) window.SH.c6 = C6; } catch (e) { /* tests only */ }
+  // Jump scares (ENGINE_NOTES "Jump scares"): background trigger beats, each once per save (S.done['scare:<id>']) — they
+  // never take control (at most the scare's own flinch), never damage, never touch a scene, and each one holds off (the
+  // id kept for the next pass) while a blocking beat or a call holds him, something awake is near, or the Standard
+  // itself walks this floor (a second one would be a lie). One beat at a time (C6.scaring).
+  function C6_calm() {
+    try { if (Script.busy || Script.cutscene || World.transitioning) return false; } catch (e) { /* script */ }
+    try { if (Phone.ringing || Phone.inCall) return false; } catch (e) { /* phone */ }
+    if (!Player.pos || Player.dead || Player.control === false) return false;
+    try { const t = Enemies.nearestThreat(Player.pos, { aware: true }); if (t && t.dist < 10) return false; } catch (e) { /* enemies */ }
+    try { const se = Enemies.standard.e; if (se && !se.removed) return false; } catch (e) { /* enemies */ }
+    return true;
+  }
+  function C6_solo(fn) { return async (G) => { if (C6.scaring || !C6_calm()) return; C6.scaring = true; try { await fn(G); } finally { C6.scaring = false; } }; }
 
   // ---------------------------------------------------------------------------------------------------------------
   // Canvas textures (drawn once, shared, never disposed)
@@ -544,7 +557,7 @@
     await G.wait(9 + Math.random() * 8);
     for (;;) {
       if (tok !== C6.walls || !G.inRoom(room)) return;
-      const ok = S.chapter === 6 && !flag('c6_voice') && !busy() && !World.transitioning && Player.control !== false;
+      const ok = S.chapter === 6 && !flag('c6_voice') && !busy() && !World.transitioning && Player.control !== false && !C6.scaring;
       if (ok) {
         const p = Player.pos, yaw = Player.yaw + Math.PI + (Math.random() - 0.5) * 1.4, d = 6 + Math.random() * 3.5;
         let x = p.x + Math.sin(yaw) * d, z = p.z + Math.cos(yaw) * d;
@@ -714,7 +727,7 @@
     }
     A.look(null);
     if (A.raw) { A.raw.eyes('down'); A.raw.expr('sad'); }
-    G.music('tomorrow');
+    C6.motif = G.music('tomorrow');                                            // (6-terminal lets it finish: C6_motifLeft)
     await G.wait(0.6);
     await G.say('AIDAN', 'Hospital. [beat] She fell. [long beat] She fell and the alarm didn\'t— [beat] it didn\'t—');
     await G.wait(1.2);
@@ -728,6 +741,12 @@
     note(G, 'The terminal. The case is still open.', 'c6_goal');
   }, { letterbox: false, skippable: true });
 
+  // seconds of 6-case's Tomorrow still to play (its notes, not the hall's ring-out): a quick player can reach the terminal
+  // and close the case while it still sounds, and the reopened case's clipped Tomorrow crossfaded it away mid-phrase
+  function C6_motifLeft() {
+    const m = C6.motif;
+    try { if (!m || !m.playing || !Snd.ctx || !(m.dur > 0)) return 0; return Math.max(0, m.t0 + m.dur - Snd.ctx.currentTime); } catch (e) { return 0; }
+  }
   // (his reaction at the terminal: from over the desk, low and to his left — his face, not the back of his head)
   function C6_faceCam(A) {
     const hp = V3(ES.term[0] - 0.05, 1.6, 1.08);
@@ -768,7 +787,8 @@
       G.sfx('error', { vol: 0.7 });
       try { q(h.glitch(0.5, 1.2)); } catch (e) { /* ui */ }
       h = G.screen(spec({ fields: undefined, history: undefined, historyTitle: undefined, text: 'CASE 118-2231 — REOPENED — FOLLOW UP: TOMORROW' }), { style: 'case' });
-      G.music('tomorrow', { clipped: true });
+      // (the reopened case's Tomorrow, cut short — unless 6-case's is still playing: then that one carries it and finishes)
+      if (C6_motifLeft() < 0.5) G.music('tomorrow', { clipped: true });
       await G.wait(2.4);
       await G.screen(null);
       G.cam(C6_faceCam(A));
@@ -802,6 +822,44 @@
   // (x 4.1–5.85, y 7.2). Doors on the south wall. The stair mass is solid concrete to the ground.
   // =================================================================================================================
   const FS = { W: 5.85, D: 5.8, H: 10.2, zN: 1.4, zS: 4.2, l4: 0.8, l5: 2.85, l6: 4.95 };
+  // JUMP SCARE c6:l6door (the Fog world, fire stairs B, before the Level 5 site power is on — the Level 6 door is still
+  // maglocked): climbing the last flight, keys somewhere beyond that door. On the landing, in the low shot up at the door,
+  // the handle is tried from the other side and the leaf jerks at its magnet; a breath of nothing — then something
+  // throws its whole weight at the door, three times, the leaf jumping in its frame and the maglock's red light
+  // stuttering. The magnet holds. Keys, going away. (Harmless: a locked door between them. Walking back down before the
+  // landing keeps the id for the next climb.)
+  async function C6_l6DoorScare(G) {
+    if (done('scare:c6:l6door') || flag('c6_power') || S.outage || World.room !== 'c6_firestairs' || !G.scareReady) return;
+    const DP = [FS.l6, 7.2 + 1.25, FS.D + 0.3];                                // (just beyond the door, on Level 6)
+    const d = G.door('c6_firestairs:l6'), rec = d && d.rec, led = G.light('c6_firestairs:l6:led');
+    const leaf = (v) => { try { if (rec && rec.setOpen) rec.setOpen(v); } catch (e) { /* door */ } };
+    G.finally(() => { leaf(0); try { if (led) led.on(true); } catch (e) { /* light */ } });
+    const onLanding = () => !!Player.pos && Player.pos.y > 6.9 && Player.pos.z > 4.3 && Player.pos.x > 4.1;
+    const gone = () => World.room !== 'c6_firestairs' || !Player.pos || Player.pos.y < 5.0 || flag('c6_power');
+    G.sfx('keys_far', { pos: [FS.l6 - 0.8, 8.4, FS.D + 1.8], vol: 0.6, n: 2 });
+    if (!(await G.until(() => onLanding() || gone(), { timeout: 9 })) || gone()) return;
+    // (the low shot up at the door has him)
+    await G.until(() => { const c = Cam.current; return !!(c && c.id === 'c6_firestairs:l6door'); }, { timeout: 1.2 });
+    await G.wait(0.4);
+    if (gone() || !G.scareReady || !C6_calm()) return;
+    // the handle, tried from the other side; the leaf jerks at its magnet
+    G.sfx('handle', { pos: DP, vol: 0.9 });
+    for (const k of [0.028, 0, 0.022, 0]) { leaf(k); await G.wait(0.08); }
+    await G.wait(0.9);
+    if (gone() || !G.scareReady || !C6_calm()) return;
+    // three blows; the leaf jumps with each, the maglock's light stutters
+    const blow = async (k) => {
+      G.sfx('pound', { n: 1, pos: DP, vol: 1.0 });
+      if (led && k !== 1) { try { led.on(false); } catch (e) { /* light */ } }
+      leaf(0.045); await G.wait(0.05); leaf(0.012); await G.wait(0.05); leaf(0.03); await G.wait(0.06); leaf(0);
+      try { if (led) led.on(true); } catch (e) { /* light */ }
+    };
+    const hit = G.scare({ id: 'c6:l6door', kind: 'slam', pos: DP, shake: 0.45, flash: 0.26, heart: 4 });
+    await blow(0); await G.wait(0.32); await blow(1); await G.wait(0.24); await blow(2);
+    await hit;
+    await G.wait(1.6);
+    if (!gone()) G.sfx('keys_far', { pos: [FS.l6 - 2.5, 8.4, FS.D + 3.5], vol: 0.35, n: 2 });
+  }
   defineRoom({
     id: 'c6_firestairs', name: 'FIRE STAIRS B', area: 'REGIONAL OFFICE', chapter: 6, outdoor: false, surface: 'concrete', ambient: 'interior',
     fog: { density: 0.03, color: '#3b4543' },
@@ -891,6 +949,9 @@
       if (!power) K.plane(FS.l6 + 0.02, 7.2 + 1.35, FS.D - 0.115, 0.3, 0.21, powerNoteTex(), { rotY: 180 });
       // not up before the terminal
       if (!fv('c6_case')) K.blocker(0, 3.55, 1.15, 4.3, 'Escalations first. I have to see it.');
+      // JUMP SCARE c6:l6door — the last flight and the Level 6 landing, while that door is still maglocked (C6_l6DoorScare)
+      K.trigger([4.4, 1.4, 5.85, 5.8], C6_solo(C6_l6DoorScare), { id: 'c6_firestairs:l6door', once: false, world: 'fog', y: [5.3, 7.6],
+        when: () => S.chapter === 6 && !!fv('c6_case') && !flag('c6_power') && !done('scare:c6:l6door') });
       // ---- examine lines ----
       K.examine(1.4, 1.8 + 1.5, 0.3, ['"Fire stairs B. Levels four to six."', 'It doesn\'t go down from here. Only up.'], { id: 'c6fs:sign', r: 1.3 });
       K.examine(1.4, 0.6, 3.0, ['The well goes down a long way past four floors.', 'I dropped my keys down one of these once. I never heard them land.'], { id: 'c6fs:well', r: 1.2 });
@@ -931,6 +992,76 @@
   // =================================================================================================================
   const L5 = { W: 32, D: 24, H: 3.4, board: [28.12, 9.2], lifts: [22.5, 25.5] };
   const L5_FEST = [[2, 7.5], [10, 2], [22, 2], [30, 15], [15, 22]];
+  // JUMP SCARE c6:festoons (the Fog world, Level 5, after the site power and Luka's call 7): walking away from the power
+  // board along the east leg, the isolator behind him clunks off by itself — every festoon on the floor and the work light
+  // die, and it's his torch and keys, close. The isolator clunks back on; the strings buzz up — and the Standard is
+  // standing there, stooped under the slab, the clipboard up, LUKA on its lanyard: going south, a few steps ahead of him
+  // (behind the dust barrier, its shape through the plastic, while that's between them); going back north, right behind
+  // him, following. The stab. The bulbs stutter; when they steady there's nobody there. (Harmless: a glimpse, never a
+  // threat. With the real Standard on this floor, a call up, something awake near, or a blocking beat, it holds off and
+  // waits for the next walk along the leg.)
+  async function C6_festoonScare(G) {
+    if (done('scare:c6:festoons') || !flag('c6_power') || flag('c6_doors') || S.outage || World.room !== 'c6_level5' || !G.scareReady) return;
+    // (walking along the leg, one way or the other — a moment's grace to turn into it)
+    if (!(await G.until(() => !Player.pos || Math.abs(Math.cos(Player.yaw)) >= 0.55, { timeout: 3 })) || !Player.pos) return;
+    const P = Player.pos, dir = Math.cos(Player.yaw) > 0 ? 1 : -1;
+    // where it will stand (worked out again when the lights come back — he may walk on in the dark): the leg's camera
+    // looks down it from the north end, so it goes on his far side from the lens and off his line (his body would hide
+    // it) — going south, ahead of him, behind the dust barrier (z 13.4) while that's still between them; going north,
+    // behind him, following
+    const spot = () => {
+      const z = dir > 0 ? (14.3 - P.z >= 1.8 ? 14.3 : Math.min(P.z + 4.2, 21.3)) : Math.min(P.z + 3.6, 21.3);
+      return z - P.z >= 1.5 ? [P.x > 30 ? 29.15 : 30.9, z] : null;          // (always south of him, 1.5 m at least)
+    };
+    if (!spot()) return;
+    const [bx, bz] = L5.board;
+    let [xt, zt] = spot();
+    const fest = L5_FEST.map((_, i) => G.light('c6l5:fest' + i)).filter(Boolean);
+    const wl = G.light('c6l5:wlE'), face = G.obj('c6l5:wlE:face'), lever = G.obj('c6l5:lever'), led = G.light('c6l5:led');
+    let g = null, glow = null;
+    const power = (on) => {
+      C6_festoonOn(on);
+      for (const l of fest) { try { l.on(on); } catch (e) { /* light */ } }
+      try { if (wl) wl.on(on); if (face && face.material) face.material.emissiveIntensity = on ? 2.2 : 0; } catch (e) { /* light */ }
+      if (lever) lever.rotation.x = on ? 0 : 1.4;
+      try { if (led) led.set({ color: on ? '#2aff5a' : '#ff2a1c' }); } catch (e) { /* light */ }
+    };
+    G.finally(() => { if (g) g.remove(); if (glow) glow.free(); if (flag('c6_power') && World.room === 'c6_level5') power(true); });
+    const gone = () => World.room !== 'c6_level5' || !Player.pos || Player.dead;
+    // a bulb pops over him; the isolator clunks off
+    G.sfx('shatter', { pos: [xt, 3.1, P.z + dir * 0.9], vol: 0.4 });
+    await G.wait(0.12);
+    G.sfx('clunk', { pos: [bx + 0.4, 1.3, bz + 0.16], vol: 0.9 });
+    power(false);
+    await G.wait(0.5);
+    G.sfx('keys', { pos: [xt, 1.6, zt], vol: 0.5, n: 2 });
+    await G.wait(0.9);
+    if (gone()) return;
+    // it clunks back on; the strings come up, and it's standing there
+    G.sfx('clunk', { pos: [bx + 0.4, 1.3, bz + 0.16], vol: 0.8 });
+    const at = spot();
+    const ok = !!at && G.scareReady && C6_calm();
+    if (ok) {
+      [xt, zt] = at;
+      g = G.glimpse({ kind: 'standard', pos: [xt, zt], lookAt: 'player', dur: 1.15, onlyIfOnScreen: true, wait: 0.8, def: { name: fv('standardName') || 'LUKA' } });
+      // (a bare bulb over it, on the lens's side: the clipboard and the bent head read)
+      glow = G.addLight('point', { pos: [xt, 3.05, zt - 0.7], color: '#ffd49a', intensity: 3.6, distance: 5.5 });
+    }
+    power(true);
+    G.sfx('tube_flicker', { pos: [xt, 3.0, (P.z + zt) / 2], vol: 0.5, dur: 0.5 });
+    if (!ok) return;
+    await G.until(() => g.shown || g.done, { timeout: 1.0 });
+    if (!g.shown || gone()) return;
+    await G.scare({ id: 'c6:festoons', kind: 'stab', pos: [xt, 1.8, zt], shake: 0.35, flash: 0.24, heart: 4 });
+    await G.wait(0.45);
+    // the bulbs stutter — and when they steady, nobody
+    C6_festoonOn(false); for (const l of fest) { try { l.on(false); } catch (e) { /* light */ } }
+    await G.wait(0.14);
+    g.remove(); g = null;
+    if (glow) { glow.free(); glow = null; }
+    await G.wait(0.1);
+    power(true);
+  }
   defineRoom({
     id: 'c6_level5', name: 'LEVEL 5', area: 'REGIONAL OFFICE', chapter: 6, outdoor: false, surface: 'concrete', ambient: 'interior',
     fog: { density: 0.034, color: '#3b4543' },
@@ -1047,7 +1178,7 @@
       C6_scaffold(K, 31.1, 17.3, 90, {});
       // ---- light: two battery work lights; the festoons (dead until the site power's back) ----
       C6_workLight(K, 3.4, 21.3, -40, { intensity: 5.5, distance: 9, bank: 1 });
-      C6_workLight(K, 31.3, 7.4, -135, { intensity: 5.0, distance: 8, bank: 2 });
+      C6_workLight(K, 31.3, 7.4, -135, { intensity: 5.0, distance: 8, bank: 2, name: 'c6l5:wlE' });   // (named: C6_festoonScare)
       C6_workLight(K, 14.2, 3.6, -80, { intensity: 4.6, distance: 9, bank: 2 });
       C6_festoon(K, [2, 1.2], [2, 22.5], H); C6_festoon(K, [2.5, 2], [29.5, 2], H); C6_festoon(K, [30, 2.5], [30, 22.5], H); C6_festoon(K, [2.5, 22], [29.5, 22], H);
       C6_festoonOn(power);
@@ -1057,6 +1188,10 @@
       K.examine(bx + 0.45, 1.2, bz, 'The isolator\'s on. [beat] Somebody\'s written "WHO TURNED THIS OFF??" on the lid.', { id: 'c6l5:boardon', r: 1.3, when: () => flag('c6_power') });
       // CALL 7, as the lights come back (he's standing at the board)
       K.trigger([bx - 0.3, bz - 2.2, L5.W, bz + 2.2], (G) => G.call('luka7'), { id: 'c6_level5:call7', when: (s) => s.chapter === 6 && !!(s.flags && s.flags.c6_power) && !(s.calls && s.calls.luka7) });
+      // JUMP SCARE c6:festoons — after the call, walking away from the board up or down the east leg (C6_festoonScare)
+      const festWhen = () => S.chapter === 6 && flag('c6_power') && !!(S.calls && S.calls.luka7) && !flag('c6_doors') && !done('scare:c6:festoons');
+      K.trigger([28.2, 11.9, L5.W, 19.6], C6_solo(C6_festoonScare), { id: 'c6_level5:festS', once: false, world: 'fog', when: festWhen });
+      K.trigger([28.2, 3.9, L5.W, 6.5], C6_solo(C6_festoonScare), { id: 'c6_level5:festN', once: false, world: 'fog', when: festWhen });
       // ---- examine lines ----
       K.examine(6.4, 1.75, L5.D - 0.35, ['"Refurbishment in progress. Contractors only."', 'Nobody\'s been contracted to anything in a while, by the look of it.'], { id: 'c6l5:notice', r: 1.4 });
       K.examine(9.2, 1.35, L5.D - 0.35, ['Two hard hats and a hi-vis vest on a hook.', 'Everybody left at the same time. Nobody took their hat.'], { id: 'c6l5:hats', r: 1.3 });
@@ -1451,7 +1586,7 @@
     onLeave() { C6_ambientOff(); },
     async onEnter(G, from) {
       G.bars(null);
-      if (from === 'c6_level6') G.sfx('chime', { vol: 0.8 });
+      if (from === 'c6_level6') G.sfx('chime', { vol: 0.45 });              // (every visit: kept soft — playtest)
       C6_std('c6_lukaoffice');
       // keys outside the door when it stops there (it never comes in)
       G.bg(async (G2) => {

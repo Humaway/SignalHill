@@ -43,7 +43,8 @@
   // the jump scares' triggers: one scare beat at a time (a trigger box re-entered while its beat still runs — the yard's
   // breath waiting for the gate shot — never starts a second one; a beat is never longer than 30 s), and never with
   // something awake and close to him (a scare is never a fight's cover: the id waits for the next pass)
-  const C3_calm = () => { try { const t = Enemies.nearestThreat(Player.pos, { aware: true }); return !t || t.dist > 8; } catch (e) { return true; } };
+  // (… nor while a blocking beat holds him: an examine, a call, a scene — the scare waits or lets go)
+  const C3_calm = () => { if (Script.busy) return false; try { const t = Enemies.nearestThreat(Player.pos, { aware: true }); return !t || t.dist > 8; } catch (e) { return true; } };
   function C3_solo(fn) { return async (G) => { if ((C3.scareAt && Script.time - C3.scareAt < 30) || !C3_calm()) return; C3.scareAt = Script.time; try { await fn(G); } finally { C3.scareAt = 0; } }; }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -740,7 +741,7 @@
     if (!(await G.until(inLow, { timeout: 3 })) || !G.scareReady) return;
     const g = G.glimpse({ kind: 'rep', pos: [6.15, 0.62], lookAt: 'player', expr: 'smile_huge', anim: 'stand_still', dur: 1.3, onlyIfOnScreen: true, wait: 2, rig: { seed: 61 } });
     await G.until(() => g.shown || g.done, { timeout: 3 });
-    if (!g.shown || !G.scareReady) { g.remove(); return; }
+    if (!g.shown || !G.scareReady || !C3_calm()) { g.remove(); return; }
     // (the grey from the glass doors catches his face — the smile reads from the doors)
     const fill = G.addLight('point', { pos: [6.0, 1.85, 1.75], color: '#b4c6c2', intensity: 1.8, distance: 3.2 });
     await G.scare({ id: 'c3:greeter', kind: 'stab', shake: 0.3, flash: 0.22, heart: 2.5 });
@@ -1003,7 +1004,7 @@
       await G.wait(0.7);
       G.sfx('murmur_tethered', { pos: [FB.x - 2.05, 1.2, FB.z + 0.3], dur: 2.2, vol: 0.45 });
       await G.wait(2.1);
-      if (World.room !== 'c3_hall' || !G.scareReady) return;
+      if (World.room !== 'c3_hall' || !G.scareReady || !C3_calm()) return;
       // every lamp at once, the relays going off like hail, amber light thrown across the aisle
       if (ov) ov.visible = true;
       for (const l of fls) l.on(true);
@@ -2518,7 +2519,7 @@
       if (!(await G.until(() => inGateShot() || gone(), { timeout: 20 }))) return;
       if (gone() || !G.scareReady) return;
       await G.wait(0.25);                               // (the cut has landed)
-      if (gone() || !G.scareReady) return;
+      if (gone() || !G.scareReady || !C3_calm()) return;
       const g = G.glimpse({ kind: 'reach', pos: [-0.74, 8.15], yaw: 90, lookAt: 'player', anim: 'brace', dur: 0.95, fadeOut: 0.5 });
       if (g.actor) { try { g.actor.setTint('#8a1a10', 0.5, { skin: true }); } catch (e) { /* rig */ } }
       G.sfx('pound', { n: 2, pos: HIT, vol: 1.0 });

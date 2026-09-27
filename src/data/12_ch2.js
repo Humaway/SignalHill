@@ -48,7 +48,8 @@
   // the jump scares' triggers: one scare beat at a time (a trigger box re-entered while its beat still runs — the
   // lookout waiting for its shot, the porch's dark — never starts a second one; a beat is never longer than 12 s), and
   // never with something awake and close to him (a scare is never a fight's cover: the id waits for the next pass)
-  const C2_calm = () => { try { const t = Enemies.nearestThreat(Player.pos, { aware: true }); return !t || t.dist > 8; } catch (e) { return true; } };
+  // (… nor while a blocking beat holds him: an examine, the answering machine, a scene — the scare waits or lets go)
+  const C2_calm = () => { if (Script.busy) return false; try { const t = Enemies.nearestThreat(Player.pos, { aware: true }); return !t || t.dist > 8; } catch (e) { return true; } };
   function C2_solo(fn) { return async (G) => { if ((C2.scareAt && Script.time - C2.scareAt < 12) || !C2_calm()) return; C2.scareAt = Script.time; try { await fn(G); } finally { C2.scareAt = 0; } }; }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -1770,7 +1771,7 @@
       if (C2.tick && C2.tick.stop) C2.tick.stop(0.08);                 // the clock stops
       C2.tick = null;
       await G.wait(1.5);
-      if (World.room !== 'c2_unit9' || S.done['cs:2-2'] || !G.scareReady) { clockBack(); return; }
+      if (World.room !== 'c2_unit9' || S.done['cs:2-2'] || !G.scareReady || !C2_calm()) { clockBack(); return; }
       leak = G.addLight('point', { pos: [4.0, 1.5, 7.7], color: '#a7b6b3', intensity: 0, distance: 5.5 });
       const hit = G.scare({ id: 'c2:u9door', kind: 'slam', pos: DOOR, shake: 0.35, flash: 0.22, heart: 3 });
       await jolt(0.035); await G.wait(0.3);

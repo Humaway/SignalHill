@@ -3,12 +3,14 @@
 // §6 the Closer / the Standard, §4 ending logic, §2A riddle row "Ch 8 gate"; CONTENT_PLAN §2 / §7 / §8).
 //
 //   node tools/build.mjs --out .build/c8.html && node tools/run.mjs --file .build/c8.html --script tools/tests/ch8.mjs
-//   env: CH8_PATH=connected|coverage|tomorrow|deal|fair  CH8_RIDDLE=easy|normal|hard  CH8_SAVELOAD=1  CH8_SHOTS=<dir>
+//   env: CH8_PATH=connected|coverage|tomorrow|deal|fair|reload  CH8_RIDDLE=easy|normal|hard  CH8_SAVELOAD=1  CH8_SHOTS=<dir>
 //        CH8_TITLE=1 (after the hand-off, skip through the ending to the title screen)
 //        CH8_ACTION=easy|normal|hard (fair: the action difficulties to probe, comma-separated; default normal,hard)
 //        CH8_REACT=0.25 (fair: the bot's reaction time in The Close, s)
 //   With no CH8_PATH it runs the matrix connected/normal/saveLoad(+to the title) · tomorrow/hard · coverage/easy(+to the
-//   title) · deal/normal · the fairness probe (Normal, and Hard reported) in one browser.
+//   title) · deal/normal · the fairness probe (Normal, and Hard reported) · the reload probe in one browser.
+//   reload — the autosaves around the knockdown: a death in the opening → CONTINUE → the opening again; Fight → a death
+//   in The Close → CONTINUE → The Close again from 250 HP, no second knockdown or choice → 30 % → 8-3.
 //   fair — the fairness probe (revised Closer): a fresh game at the transmitter room (SH.chapter(8), cs:8-2 marked, the
 //   room's reload path starts the fight); fightBot() lands the opening's 2 hits, 8-2B is skipped (the choice still
 //   waits) and answered Fight, then fightBot() fights The Close from the knockdown to 30 % with real swings and a
@@ -41,7 +43,7 @@
 // opts.saveLoad — save at the compound payphone (the chapter's first), open the gate, reload that slot
 // (Game.continueFrom) and play on (the gate shut again: the padlock again).
 // → { chapter: 8, F, A, flags, ending, notes }
-import { ev, advance, advanceUntil, mustReach, choose, press, walkTo, payphoneSave, errorCount, report } from './lib.mjs';
+import { ev, advance, advanceUntil, mustReach, choose, press, walkTo, payphoneSave, errorCount, report, menuReady, nav } from './lib.mjs';
 
 const PATHS = {
   connected: { cut: true, borrowed: 'examine', wrongCode: true, pickups: true, torchNest: true, listen: true, deal: false, play: true, examine: true, fight: true },
@@ -819,8 +821,69 @@ async function fairOne(h, action, shots) {
   for (const e of errs) console.log('   ! error:', e);
   return ok;
 }
+// ---- the reload probe (CH8_PATH=reload): the autosaves around the knockdown -------------------------------------------
+// A death in the opening → CONTINUE (8-2's autosave) → the opening again (no prompt, one Closer); 2 hits → 8-2B → Fight
+// (its autosave holds c8_fight) → a death in The Close → CONTINUE → The Close again from 250 HP — no second knockdown,
+// no second choice — → real swings to 30 % → 8-3.
+async function deathContinue8(h, what) {
+  await ev(h, 'SH.mod.Game.death(); return 1');
+  if (!(await advanceUntil(h, `SH.mode === 'death' && ${menuReady('death')} && SH.mod.Menus._top.st.listF.v >= 0.5`, 40, { step: 0.2 }))) throw new Error('no death screen (' + what + ')');
+  await nav(h, 'confirm', 0.3);
+  await mustReach(h, "SH.mode === 'play' && SH.mod.World.room === 'c8_transmitter' && !SH.mod.World.transitioning && !SH.mod.Menus.isOpen()", 40, 'CONTINUE after ' + what, { step: 0.1 });
+}
+async function reloadOne(h) {
+  const e0 = await errorCount(h), bad = [], info = [];
+  await ev(h, 'await SH.newGame({ skipIntro: true }); return 1');
+  await advance(h, 1);
+  await ev(h, 'await SH.chapter(8); return 1');
+  await mustReach(h, "SH.mod.World.room === 'c8_summit' && !SH.mod.World.transitioning && SH.mode === 'play'", 30, 'Chapter 8');
+  await spy(h);
+  // (as 8-2 leaves it: cs:8-2 seen, the autosave in the transmitter room)
+  await ev(h, "SH.S.done['cs:8-2'] = true; await SH.goto('c8_transmitter', 'door'); return 1");
+  await mustReach(h, "SH.mod.World.room === 'c8_transmitter' && !SH.mod.World.transitioning", 20, 'the transmitter room');
+  await ev(h, 'SH.mod.Save.autosave(); return 1');
+  await mustReach(h, '!!(SH.c8 && SH.c8.fight && SH.c8.fight.phase === 1) && !SH.mod.Script.busy', 20, 'the opening');
+  await advance(h, 3);
+  const m0 = await mark(h);
+  await deathContinue8(h, 'a death in the opening');
+  await mustReach(h, '!!(SH.c8 && SH.c8.fight && SH.c8.fight.phase === 1) && !SH.mod.Script.busy', 20, 'the opening again');
+  const a = await ev(h, "return { closers: SH.mod.Enemies.list.filter((e) => e && !e.removed && e.type === 'closer').length, fight: !!SH.S.flags.c8_fight, kd: !!SH.S.done['cs:8-2B'] }");
+  info.push('after a death in the opening: ' + JSON.stringify(a));
+  if (a.closers !== 1 || a.fight || a.kd) bad.push('the opening after CONTINUE: ' + JSON.stringify(a));
+  await equip(h, ['steel_bar']);
+  const r1 = await fightBot(h, { maxSec: 40 });
+  if (!r1.reached || r1.hits < 2) bad.push('the opening did not end in the knockdown: ' + JSON.stringify(r1));
+  await mustReach(h, 'SH.mod.Script.choosing', 60, 'the choice', { each: 'if (SH.mod.Script.skippable) SH.skip();', step: 0.2 });
+  await ev(h, 'return SH.choose(1)');
+  await mustReach(h, '!!(SH.c8.fight && SH.c8.fight.phase === 2) && !SH.mod.Script.busy', 30, 'The Close', { each: 'if (SH.mod.Script.skippable) SH.skip();', step: 0.2 });
+  const sv = await ev(h, "let a = null; try { a = JSON.parse(localStorage.getItem(SH.mod.Save._key('auto'))); } catch (e) {} return { fight: !!(a && a.S && a.S.flags.c8_fight), room: a && a.S && a.S.room }");
+  if (!sv.fight) bad.push('the autosave after Fight lacks c8_fight: ' + JSON.stringify(sv));
+  // hurt it, then die in The Close
+  await ev(h, "const e = SH.mod.Enemies.get('c8_transmitter:closer'); e.hp = 140; return 1");
+  await advance(h, 2);
+  const kd0 = await ev(h, "return (window.__c8lines || []).filter((l) => l.includes('CHOICE[')).length");
+  await deathContinue8(h, 'a death in The Close');
+  await mustReach(h, '!!(SH.c8 && SH.c8.fight && SH.c8.fight.phase === 2) && !SH.mod.Script.busy', 20, 'The Close again');
+  await advance(h, 3);
+  const b = await ev(h, "const e = SH.mod.Enemies.get('c8_transmitter:closer'); return { phase: SH.c8.fight.phase, hp: e ? e.hp : null, closers: SH.mod.Enemies.list.filter((x) => x && !x.removed && x.type === 'closer').length, choosing: SH.mod.Script.choosing, fight: !!SH.S.flags.c8_fight }");
+  const kd1 = await ev(h, "return (window.__c8lines || []).filter((l) => l.includes('CHOICE[')).length");
+  info.push('after a death in The Close: ' + JSON.stringify(b) + ` · choices shown ${kd0} → ${kd1}`);
+  if (b.phase !== 2 || b.hp !== 250 || b.closers !== 1 || b.choosing || !b.fight || kd1 !== kd0) bad.push('The Close after CONTINUE: ' + JSON.stringify(b) + ` choices ${kd0} → ${kd1}`);
+  const r2 = await fightBot(h, { maxSec: 180, heal: 40 });
+  info.push('The Close after the reload: ' + JSON.stringify(r2));
+  if (!r2.reached) bad.push('The Close did not reach 30 % after the reload');
+  await mustReach(h, "!!SH.S.done['cs:8-3']", 10, '8-3');
+  const removed = await ev(h, `return (window.__c8lines || []).slice(${m0}).filter((l) => /Lower your hands/.test(l)).length`);
+  if (removed) bad.push('the removed prompt came up');
+  const errs = await ev(h, `return SH.errors.slice(${e0})`);
+  report('ch8 reload', !bad.length && !errs.length, bad.length ? bad.join(' | ') : 'death in the opening → the opening again; death in The Close → The Close again from 250 HP (no second knockdown) → 8-3');
+  for (const n of info) console.log('   ·', n);
+  for (const e of errs) console.log('   ! error:', e);
+  return !bad.length && !errs.length;
+}
 export default async function (page, h) {
   const one = process.env.CH8_PATH;
+  if (one === 'reload') return reloadOne(h);
   const shots = process.env.CH8_SHOTS || null;
   if (one === 'fair') {
     let ok = true;
@@ -829,12 +892,13 @@ export default async function (page, h) {
   }
   const runs = one
     ? [{ path: one, riddle: process.env.CH8_RIDDLE || 'normal', saveLoad: process.env.CH8_SAVELOAD === '1', shots, toTitle: process.env.CH8_TITLE === '1' }]
-    : [{ path: 'connected', riddle: 'normal', saveLoad: true, shots, toTitle: true }, { path: 'tomorrow', riddle: 'hard', saveLoad: false }, { path: 'coverage', riddle: 'easy', saveLoad: false, toTitle: true }, { path: 'deal', riddle: 'normal', saveLoad: false }, { path: 'fair' }];
+    : [{ path: 'connected', riddle: 'normal', saveLoad: true, shots, toTitle: true }, { path: 'tomorrow', riddle: 'hard', saveLoad: false }, { path: 'coverage', riddle: 'easy', saveLoad: false, toTitle: true }, { path: 'deal', riddle: 'normal', saveLoad: false }, { path: 'fair' }, { path: 'reload' }];
   let all = true;
   for (const cfg of runs) {
     const notes = [];
     try {
       if (cfg.path === 'fair') { for (const a of ['normal', 'hard']) all = (await fairOne(h, a, shots)) && all; continue; }
+      if (cfg.path === 'reload') { all = (await reloadOne(h)) && all; continue; }
       all = (await runOne(h, cfg, notes)) && all;
     } catch (e) {
       all = false;

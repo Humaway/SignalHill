@@ -995,6 +995,23 @@
       K.prop('box', 13.5, 4.3, 20, { w: 0.4, h: 0.3, d: 0.3, variant: 'returns', text: 'RETURNS', y: 0.06 });
       const cutterTaken = !!(S.taken && S.taken['p4_busshelter:cutter']);
       const cutter = cutterTaken ? null : K.prop('box_cutter', 13.0, 5.45, 28, { y: 0.19, name: 'p4_cutter' });
+      // (weapons were easy to miss: a battery lantern left on beside the boxes lights them and the cutter, which catches
+      // the light — and the first time he comes down into the clearing, 'P-4w' shows it to him)
+      const lanternOn = () => !(S.taken && S.taken['p4_busshelter:cutter']);
+      const lantern = new THREE.Group(); lantern.name = 'p4_lantern'; lantern.position.set(12.45, 0, 5.05);
+      const lBody = { color: '#2f5b3a', roughness: 0.6 };
+      const lPart = (geo, mat, y) => { const m = new THREE.Mesh(geo, mat); m.position.y = y; m.userData.ownedGeo = true; lantern.add(m); return m; };
+      lPart(new THREE.CylinderGeometry(0.075, 0.085, 0.05, 14), K.mat(lBody), 0.025);
+      const lGlass = new THREE.MeshStandardMaterial({ color: '#fff1cf', emissive: '#ffd79a', emissiveIntensity: 2.2, roughness: 0.3 });
+      lPart(new THREE.CylinderGeometry(0.06, 0.06, 0.13, 14), lGlass, 0.115);
+      lPart(new THREE.CylinderGeometry(0.07, 0.075, 0.035, 14), K.mat(lBody), 0.2);
+      lPart(new THREE.TorusGeometry(0.045, 0.006, 6, 14, Math.PI), K.mat({ color: '#9aa29c', roughness: 0.4 }), 0.22);
+      K.mesh(lantern, { name: 'p4_lantern' });
+      const lLight = K.light('point', 12.75, 0.5, 5.3, { color: '#ffd9a4', intensity: 2.6, distance: 3.4, name: 'p4:lantern' });
+      let lHalo = null;
+      try { lHalo = Render.halo([0, 0.12, 0], { parent: lantern, color: '#ffd9a0', size: 0.55, opacity: 0.5, name: 'p4:lanternHalo' }); } catch (e) { /* render */ }
+      K.animate(() => { const on = lanternOn(); lGlass.emissiveIntensity = on ? 2.2 : 0.05; if (lHalo) lHalo.visible = on; if (lLight && lLight.on && lLight.isOn !== on) lLight.on(on); });
+      if (cutter) K.glint(cutter, { size: 0.32, strength: 1, when: lanternOn });
       let hCut = null;
       hCut = K.interact(13.0, 0.35, 5.45, async (G) => {
         if (S.taken['p4_busshelter:cutter']) return;
@@ -1025,6 +1042,11 @@
       K.exit({ id: 'p4_busshelter:west', box: [-1.7, 3.5, -1.2, 9.9], to: 'p3_hillroad', entry: 'bottom' });
       // the shelter-front trigger: getting too close reveals it (without the box cutter)
       K.trigger([2.2, 1.9, 6.6, 3.6], (G) => G.cutscene('P-4'), { id: 'p4_busshelter:near', when: (s) => !(s.done && s.done['p4:reveal']) && !(s.spawns && s.spawns['p4_busshelter:teth']) });
+      // the box cutter, shown: the first time he comes down out of the fog into the clearing, before anything else
+      K.trigger([-1.2, 3.5, 3.4, 9.9], (G) => G.cutscene('P-4w'), { id: 'p4_busshelter:showCutter', when: (s) => !(s.taken && s.taken['p4_busshelter:cutter']) && !(s.done && (s.done['p4:cutterShown'] || s.done['p4:reveal'])) });
+      // not up Relay Street empty-handed (the first time through): he turns back for the cutter
+      const noCutter = K.collider(6.4, -5.0, 12.6, -4.75, { h: 3, blocker: 'Not with nothing in my hands. There was a box cutter back by the bin.', soft: true });
+      K.animate(() => { if (noCutter) noCutter.enabled = S.chapter === 0 && !(S.taken && S.taken['p4_busshelter:cutter']); });
     },
     async onEnter(G) {
       // the outcome lines (the engine already tracks F / A for cut free / stomp)
@@ -1260,6 +1282,18 @@
   // =================================================================================================================
   // IN-ENGINE P-4: the figure in the shelter turns. Bars climb to 2 with the EFTPOS beep; low behind Aidan.
   // =================================================================================================================
+  // P-4w (in-engine, a look): the box cutter on the flattened boxes by the bin, lit by the lantern someone left on. The
+  // weapons were easy to walk past; this is the only one the Prologue gives him.
+  defineCutscene('P-4w', async (G) => {
+    S.done['p4:cutterShown'] = true;
+    const A = G.aidan;
+    A.look([13.0, 0.25, 5.45]);
+    G.cam({ pos: [11.35, 1.05, 6.75], target: [12.98, 0.2, 5.45], fov: 34, to: { pos: [11.6, 0.95, 6.55], fov: 26 }, dur: 2.8 });
+    await G.wait(2.5);
+    A.look(null);
+    G.camRelease();
+  }, { letterbox: true, skippable: true });
+
   defineCutscene('P-4', async (G) => {
     S.done['p4:reveal'] = true;
     const e = G.enemy('p4_busshelter:teth');

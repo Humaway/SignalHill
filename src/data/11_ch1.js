@@ -21,6 +21,7 @@
   const pickDoc = (base) => (typeof DOC_pick === 'function' ? DOC_pick(base) : base);
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const isPad = () => { try { return Input.lastDevice === 'gamepad'; } catch (e) { return false; } };
+  const hasBar = () => Array.isArray(S.inv) && S.inv.some((i) => i && i.id === 'steel_bar');
   // an actor move/turn started without await: keep its rejection (Script.ABORT when the scene is cut short) handled
   const q = (p) => { if (p && typeof p.catch === 'function') p.catch(() => {}); return p; };
 
@@ -900,19 +901,23 @@
         if (sees) { C1.cctv.seenT += 0.07; C1.cctv.away = false; }
         else if (C1.cctv.seenT > 2.0) { C1.cctv.away = true; S.done['c1:cctvGone'] = true; }
       });
-      // the steel bar leaning on the monitor bank (a pickup: the examine line first)
+      // the steel bar laid on the key register desk, along its front edge beside the staff room key, under the desk lamp
+      // (a pickup: the examine line first). Weapons were easy to miss: it sits where he has to go for the key, it
+      // catches the lamp, and the first time he comes in 'c1-bar' shows it to him.
       const barTaken = !!(S.taken && S.taken['c1_security:bar']);
       if (!barTaken) {
-        const bar = K.prop('bar_steel', 7.0, 4.25, 0, { name: 'c1s_bar' });
-        if (bar) { bar.rotation.set(0, -Math.PI / 2, 0); bar.rotateZ(0.32); bar.position.y = 0.02; }
+        const bar = K.prop('bar_steel', 1.44, 1.38, 90, { variant: 'flat', y: 0.745, name: 'c1s_bar' });
+        if (bar) K.glint(bar, { size: 0.3, strength: 1, when: () => !(S.taken && S.taken['c1_security:bar']) });
       }
-      K.interact(7.05, 0.8, 4.25, async (G) => {
+      K.prop('desk_lamp', 1.02, 2.12, 0, { y: 0.745 });
+      K.trigger([3.0, 0.2, 5.0, 1.9], (G) => G.cutscene('c1-bar'), { id: 'c1_security:showBar', when: () => !(S.taken && S.taken['c1_security:bar']) && !hasBar() && !done('c1:barShown') });
+      K.interact(1.6, 0.85, 1.85, async (G) => {
         if (S.taken['c1_security:bar']) return;
         await G.think('Snapped off a demo table. Heavy.');
         const bar = G.obj('c1s_bar');
         await Script.builtins.pickup(G, { id: 'c1_security:bar', item: 'steel_bar', obj: bar });
         if (!S.equipped || S.equipped === 'box_cutter') G.prompt(isPad() ? 'Hold {ready} and press {attack} to swing it. Slow, but it hits hard.' : 'Tab: items. Equip the bar there. Slow, but it hits hard.', { id: 'c1_bar' });
-      }, { id: 'c1_security:barx', r: 1.3, when: () => !(S.taken && S.taken['c1_security:bar']) });
+      }, { id: 'c1_security:barx', r: 1.2, when: () => !(S.taken && S.taken['c1_security:bar']) });
       // the key register desk by the door: the Plaza Directory, the staff room key in the tray, the logbook
       K.prop('desk', 1.3, 1.55, 90, { variant: 'office' });
       K.prop('office_chair', 2.2, 1.7, -100, {});
@@ -1875,6 +1880,21 @@
       K.interact(BO.term[0], 1.0, BO.term[1] + 0.3, (G) => C1_terminal(G), { id: 'c1_backoffice:terminal', r: 1.3, when: () => !flag('c1_address') });
       K.examine(BO.term[0], 1.0, BO.term[1] + 0.3, ['UNIT 9, HILLTOP VILLAGE, SIGNAL HILL. [beat] It\'s still on the screen.', 'Glitch. It was a glitch.'], { id: 'c1bo:termafter', r: 1.3, when: () => flag('c1_address') });
       K.light('screen', BO.term[0], 1.1, BO.term[1] + 0.5, { color: '#6f9fcf', intensity: 1.4, distance: 3.2 });
+      // a second chance before the Returns Cage: if he never picked up the bar in the security office, another one leans
+      // beside the stockroom door in the Outage (its desk lamp on the filing cabinet lights it), shown by 'c1-bar2'
+      const spareBar = () => !!S.outage && !hasBar() && !(S.taken && S.taken['c1_backoffice:bar']);
+      if (spareBar()) {
+        const bar2 = K.prop('bar_steel', 5.78, 3.45, -90, { variant: 'lean', name: 'c1b_bar', world: 'outage' });
+        if (bar2) K.glint(bar2, { size: 0.3, strength: 1, when: spareBar });
+        K.light('point', 5.35, 1.35, 3.35, { color: '#ffd8a0', intensity: 1.6, distance: 2.6, name: 'c1b:barLamp', world: 'outage' });
+        K.interact(5.72, 0.8, 3.45, async (G) => {
+          if (!spareBar()) return;
+          await G.think('Snapped off a demo table. Heavy.');
+          await Script.builtins.pickup(G, { id: 'c1_backoffice:bar', item: 'steel_bar', obj: G.obj('c1b_bar') });
+          if (!S.equipped || S.equipped === 'box_cutter') G.prompt(isPad() ? 'Hold {ready} and press {attack} to swing it. Slow, but it hits hard.' : 'Tab: items. Equip the bar there. Slow, but it hits hard.', { id: 'c1_bar' });
+        }, { id: 'c1_backoffice:barx', r: 1.2, world: 'outage', when: spareBar });
+        K.trigger([0, 0, 6, 5], (G) => G.cutscene('c1-bar2'), { id: 'c1_backoffice:showBar', world: 'outage', when: () => spareBar() && !done('c1:bar2Shown') });
+      }
       K.prop('mug', BO.term[0] - 0.55, 0.3, 20, { y: 0.745, text: 'CHLOE' });
       for (let k = 0; k < 4; k++) K.prop('energy_can', BO.term[0] + 0.6 + k * 0.09, 0.62 + (k % 2) * 0.1, k * 40, { y: 0.745 });
       K.prop('printer', 4.6, 0.35, 180, { y: 0.745 });
@@ -2956,6 +2976,27 @@
   // =================================================================================================================
   // CUTSCENE 1-3 "Returns"
   // =================================================================================================================
+  // c1-bar / c1-bar2 (in-engine looks): the steel bar, shown the first time he comes into the security office (leaning on
+  // the key register desk under its lamp), and — if he still has no bar — the spare by the stockroom door
+  defineCutscene('c1-bar', async (G) => {
+    S.done['c1:barShown'] = true;
+    const A = G.aidan;
+    A.look([1.45, 0.8, 1.85]);
+    G.cam({ pos: [3.2, 1.55, 3.05], target: [1.45, 0.78, 1.8], fov: 36, to: { pos: [2.95, 1.45, 2.85], fov: 29 }, dur: 2.8 });
+    await G.wait(2.5);
+    A.look(null);
+    G.camRelease();
+  }, { letterbox: true, skippable: true });
+  defineCutscene('c1-bar2', async (G) => {
+    S.done['c1:bar2Shown'] = true;
+    const A = G.aidan;
+    A.look([5.78, 0.6, 3.45]);
+    G.cam({ pos: [3.9, 1.45, 4.2], target: [5.75, 0.55, 3.35], fov: 38, to: { pos: [4.15, 1.35, 4.05], fov: 31 }, dur: 2.8 });
+    await G.wait(2.5);
+    A.look(null);
+    G.camRelease();
+  }, { letterbox: true, skippable: true });
+
   defineCutscene('1-3', async (G) => {
     const A = G.aidan, e = C1.boss || G.enemy('c1_stockroom:cage');
     // 1. the stockroom from a high corner: he walks toward the chain-link returns cage. Boxes shift inside it.

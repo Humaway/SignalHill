@@ -301,6 +301,11 @@ Aidan is not a fighter, and combat is short, heavy and a little clumsy. Holding 
 | Steel security bar | Ch 1 | 20 | Slow | 30% knockdown chance |
 | Fire extinguisher | Ch 3 | 12 (bash) | Slow | Spray stuns for 3 s and scatters the Unread; 6 sprays each |
 
+- *Revised after playtesting (weapons were easy to walk past):*
+  - Each weapon is lit where it lies and catches the light: a battery lantern by the box cutter, the desk lamp over the steel bar (now on the key register desk beside the staff room key), and the emergency light over the canteen door.
+  - The first time Aidan comes near a weapon he doesn't have, a short skippable in-engine look shows it to him (P-4w, c1-bar, c3-ext).
+  - The Prologue won't let him up Relay Street without the box cutter.
+  - If he still has no bar at the Returns Cage, or no extinguisher on the way to the cable vault, a spare waits by the stockroom door (Outage) or at the fire point beside the vault door, with its own look (c1-bar2, c3-ext2).
 - Downed enemies stay down for 6 seconds. E stomps (kills). With the box cutter equipped, holding E for 2 seconds on a downed or unaware Tethered cuts it free instead.
 - Enemies drop nothing. All supplies are hand-placed.
 - Difficulty is set by Action level and Riddle level when starting a new game (section 2A).

@@ -55,6 +55,7 @@
   const WATTS = { HALL: '960 W', FRAME: '1,440 W', RECORDS: '480 W', BASEMENT: '720 W', CANTEEN: '240 W', 'MAST FEED': '1,920 W' };
   const circList = () => { const v = S.done && S.done['c3:circ']; return v === undefined || v === null ? ['BASEMENT'] : String(v).split('|').filter(Boolean); };
   const circOn = (n) => circList().includes(n);
+  const hasExt = () => Array.isArray(S.inv) && S.inv.some((i) => i && i.id === 'extinguisher');
   const setCirc = (list) => { S.done['c3:circ'] = CIRC.filter((c) => list.includes(c)).join('|'); };
   const loadOf = (list) => list.reduce((s, c) => s + (AMPS[c] || 0), 0);
 
@@ -1358,8 +1359,17 @@
       K.sign('FIRE\nEXTINGUISHER', 9.93, 1.95, 1.4, 0.3, 0.2, { rotY: -90, style: 'shop', bg: '#a3231b', fg: '#ffffff' });
       if (!extTaken) {
         const ext = Kit.itemModel('extinguisher');
-        if (ext) { ext.position.set(9.83, 0.4, 1.4); ext.rotation.y = -Math.PI / 2; K.obj('c3c_ext', ext); K.mesh(ext, { name: 'c3c_ext' }); }
+        if (ext) {
+          ext.position.set(9.83, 0.4, 1.4); ext.rotation.y = -Math.PI / 2; K.obj('c3c_ext', ext); K.mesh(ext, { name: 'c3c_ext' });
+          K.glint(ext, { size: 0.3, strength: 1, when: () => !(S.taken && S.taken['c3_canteen:extinguisher']) });
+        }
       }
+      // (weapons were easy to miss, and the canteen is dark until its circuit is on: the battery emergency light over the
+      // door lights the extinguisher and the corner, and the first time he comes in without one 'c3-ext' shows it)
+      K.box(9.25, 2.55, 0.1, 0.42, 0.14, 0.12, { color: '#e8e6dc', roughness: 0.5 });
+      for (const dx of [-0.13, 0.13]) K.sphere(9.25 + dx, 2.5, 0.2, 0.045, { color: '#fff4dc', emissive: '#fff0cc', emissiveIntensity: on ? 0.1 : 2.2 });
+      if (!on) K.light('point', 9.35, 2.3, 0.55, { color: '#fff1d8', intensity: 2.4, distance: 4.2, name: 'c3c:emergency' });
+      K.trigger([7.4, 0, 9.9, 2.0], (G) => G.cutscene('c3-ext'), { id: 'c3_canteen:showExt', when: () => !hasExt() && !(S.taken && S.taken['c3_canteen:extinguisher']) && !done('c3:extShown') });
       K.interact(9.3, 1.0, 1.4, async (G) => {
         if (S.taken['c3_canteen:extinguisher']) return;
         await G.think('Still charged. Nineteen seventy-something.');
@@ -1440,6 +1450,24 @@
       for (const [x, r0, c] of [[0.18, 0.04, '#7a2a22'], [0.32, 0.025, '#8d9594'], [3.82, 0.035, '#8d9594']]) K.cyl(x, ST.low, 8.85, r0, 6.2, { tex: 'metal', color: c });
       K.cyl(3.84, ST.low, 0.2, 0.03, 6.2, { tex: 'metal', color: '#8d9594' });
       K.prop('first_aid_box', 0.08, 8.1, 90, { variant: 'wall', mount: 1.45, y: ST.low });
+      // a second chance: if he walked past the canteen's extinguisher, the fire point beside the cable vault door (the
+      // Unread are in there) has one on its bracket, shown by 'c3-ext2' when he first reaches the landing
+      const spareExt = () => !hasExt() && !(S.taken && S.taken['c3_stairs:extinguisher']);
+      if (spareExt()) {
+        K.box(0.07, ST.low + 0.95, 7.75, 0.04, 0.12, 0.1, { tex: 'metal', color: '#3a3f3d' });
+        K.sign('FIRE\nEXTINGUISHER', 0.07, ST.low + 1.95, 7.75, 0.3, 0.2, { rotY: 90, style: 'shop', bg: '#a3231b', fg: '#ffffff' });
+        const ext2 = Kit.itemModel('extinguisher');
+        if (ext2) {
+          ext2.position.set(0.17, ST.low + 0.4, 7.75); ext2.rotation.y = Math.PI / 2; K.obj('c3s_ext', ext2); K.mesh(ext2, { name: 'c3s_ext' });
+          K.glint(ext2, { size: 0.3, strength: 1, when: spareExt });
+        }
+        K.interact(0.75, ST.low + 1.0, 7.75, async (G) => {
+          if (!spareExt()) return;
+          await G.think('Still charged. Nineteen seventy-something.');
+          await Script.builtins.pickup(G, { id: 'c3_stairs:extinguisher', item: 'extinguisher', obj: G.obj('c3s_ext') });
+        }, { id: 'c3_stairs:ext', r: 1.2, when: spareExt });
+        K.trigger([0, 5.9, 4, 9], (G) => G.cutscene('c3-ext2'), { id: 'c3_stairs:showExt', when: () => spareExt() && !done('c3:ext2Shown') && !Script.busy });
+      }
       K.prop('mop_bucket', 1.1, 8.5, 200, { y: ST.low });
       K.prop('exit_sign', 2.0, 0.075, 0, { mount: 2.45, text: 'EXIT' });
       K.prop('exit_sign', 0.075, ST.vault + 0.85, 90, { mount: 2.4, y: ST.low, text: 'EXIT' });
@@ -2569,6 +2597,27 @@
     C3_noCord(W.raw);
     return W;
   }
+  // c3-ext / c3-ext2 (in-engine looks): the fire extinguisher on its bracket by the canteen door (under the emergency
+  // light), and — if he still has none — the one at the fire point beside the cable vault door
+  defineCutscene('c3-ext', async (G) => {
+    S.done['c3:extShown'] = true;
+    const A = G.aidan;
+    A.look([9.8, 0.7, 1.4]);
+    G.cam({ pos: [7.35, 1.5, 2.75], target: [9.78, 0.62, 1.4], fov: 36, to: { pos: [7.6, 1.4, 2.55], fov: 29 }, dur: 2.8 });
+    await G.wait(2.5);
+    A.look(null);
+    G.camRelease();
+  }, { letterbox: true, skippable: true });
+  defineCutscene('c3-ext2', async (G) => {
+    S.done['c3:ext2Shown'] = true;
+    const A = G.aidan;
+    A.look([0.2, ST.low + 0.7, 7.75]);
+    G.cam({ pos: [2.9, ST.low + 1.55, 6.55], target: [0.22, ST.low + 0.62, 7.75], fov: 36, to: { pos: [2.65, ST.low + 1.45, 6.7], fov: 29 }, dur: 2.8 });
+    await G.wait(2.5);
+    A.look(null);
+    G.camRelease();
+  }, { letterbox: true, skippable: true });
+
   defineCutscene('3-1', async (G) => {
     const A = G.aidan, W = C3_wai(G);
     const board = G.obj('c3_waiboard');

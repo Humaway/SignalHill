@@ -276,7 +276,7 @@ export async function play(h, opts = {}) {
       if (P.readAll) await useAt(h, P, notes, 5.6, 3.0, 90);                                         // the CCTV feeds
       await useAt(h, P, notes, 2.0, 1.25, -90);                                                        // the Plaza Directory
       await useAt(h, P, notes, 2.05, 2.0, -90);                                                        // the staff room key
-      await useAt(h, P, notes, 6.2, 4.25, 90);                                                         // the steel bar
+      await useAt(h, P, notes, 2.6, 2.25, -90);                                                        // the steel bar
       await useAt(h, P, notes, 1.1, 4.55, -90);                                                        // the coffee
       for (const [id, want] of [['map_plaza', 1], ['staff_key', 1], ['steel_bar', 1]]) if (!(await has(id))) throw new Error(`security office: no ${id} (want ${want})`);
       // the CCTV figure: seen on camera three, then gone once he has looked away

@@ -32,7 +32,8 @@
 //   K.drop(…,{side}) (edge the road meets; inferred), K.door({hinge:'left'|'right', swing:±1, open:0..1|bool, chain,
 //     reader:'card'|'keypad'|'maglock', sign, signBack, color, window:false, depth, maxAngle}),
 //   K.pickup(…,{rot, scale, glint, extraOnEasy}), K.doc(…,{wall, rot, glint, color}) (glint: opt-in, true|size — a
-//     sparkle only where the torch / a lamp lights the item), K.sticker(…,{pitch, size}),
+//     sparkle only where the torch / a lamp lights the item), K.glint(obj,{y,size,strength,when}) (the same sparkle on
+//     any object), K.sticker(…,{pitch, size}),
 //   K.payphone(…,{own:true}), K.breakTable(…,{time:[h,m], clock:[x,y,z,rot]|false, own}), K.npc(…,{rig, y, whenTalk}),
 //   K.light(…,{name, on:false, rot, len, fixture, diffuser, halo, size, duty, phase, target, angle}),
 //   K.prop(…,{static, interact, examineId}); K.stairs(…,{rail, nosing, solid:false, bottom}); K.wall openings
@@ -1457,6 +1458,21 @@ const Kit = (() => {
     const whenVis = (obj, when, w) => { if (obj && when) { const f = () => { obj.visible = safeWhen(when) && matchWorld(w, S.outage); }; f(); rb.animated.push(f); } };
     const glintTick = (s) => rb.animated.push((dt, t) => { if (s.parent && s.parent.visible) s.userData.tick(t, dt); });
     const glintSize = (g, def) => (typeof g === 'number' ? g : def);
+    // CONTRACT+: K.glint(obj, {y, size = 0.24, strength = 0.9, when}) — the pickup sparkle on any object (a weapon prop
+    // leaning on a desk, an item model placed by hand). Same rule as K.pickup's: only where the torch or a lamp lights it.
+    // It hides with the object and while when() is false. y = height above the object's origin (default: its top + 0.05).
+    K.glint = (obj, o = {}) => {
+      if (!obj) return null;
+      obj.updateMatrixWorld(true);
+      let y = o.y;
+      if (y == null) { const bb = new THREE.Box3().setFromObject(obj), p = obj.getWorldPosition(new THREE.Vector3()); y = bb.isEmpty() ? 0.15 : bb.max.y - p.y + 0.05; }
+      const s = makeGlint(obj, y, glintSize(o.size, 0.24), o.strength ?? 0.9);
+      rb.animated.push((dt, t) => {
+        if (!s.parent || !s.parent.visible || (o.when && !safeWhen(o.when))) { s.visible = false; return; }
+        s.userData.tick(t, dt);
+      });
+      return s;
+    };
     K.pickup = (item, x, y, z, o = {}) => {
       const id = o.id || uid(`${roomId}:${item}`);
       if (S.taken && S.taken[id]) return dummyHandle(id);

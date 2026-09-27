@@ -969,3 +969,13 @@ Chromium hangs while it boots, with several browsers running). `run.mjs` exits 1
   `getContext('2d', { willReadFrequently: true })` (every chapter's `ctex` helper does now; Tex / Kit / props always did).
   A GPU-backed canvas makes each readback wait for the GPU process: entering Stairwell A stalled for 10 s to minutes in
   headless runs on one aged 128 × 160 level-number texture.
+
+## Presenting weapons (K.glint, the in-engine looks)
+
+- `K.glint(obj, {y, size, strength, when})` (Kit, CONTRACT+) puts the pickup sparkle on any object, such as a weapon prop placed by hand.
+- Like `K.pickup`'s glint, it only shows where the torch or a lamp actually lights the object. Each weapon therefore gets a nearby light source.
+- The three weapons each have a short letterboxed, skippable in-engine look, a 2.5 s camera push-in with Aidan's head turned, played the first time he comes near one he doesn't have:
+  - P-4w: the box cutter.
+  - c1-bar: the steel bar.
+  - c3-ext: the extinguisher.
+- The spares have their own looks: c1-bar2 (the back office, Outage) and c3-ext2 (the stairwell landing). They only exist while he has no bar / no extinguisher.

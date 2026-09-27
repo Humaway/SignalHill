@@ -1085,26 +1085,32 @@
     if (!(await G.until(() => ready() || !inHut(), { timeout: 30 })) || !ready()) return;
     const d = G.door('c8_compound:hut2'), rec = d && d.rec;
     const amt0 = rec && rec.amount != null ? rec.amount : 0.8;
-    const leaf = (a) => { try { if (rec && rec.setOpen) rec.setOpen(clamp(a, 0, 1)); } catch (e) { /* door */ } };
-    let shut = false;
-    // (he opened it himself — E on the door while it was shut: the scene leaves the door to him)
-    const opened = () => !!(rec && shut && rec.open);
-    const reopen = () => { if (!rec || !shut) return; shut = false; if (!rec.open) { leaf(amt0); rec.open = amt0 >= (rec.passAt ?? 0.5); if (rec.collider) rec.collider.enabled = !rec.open; } };
+    let shut = false, mine = null, user = false;
+    const leaf = (a) => { mine = clamp(a, 0, 1); try { if (rec && rec.setOpen) rec.setOpen(mine); } catch (e) { /* door */ } };
+    // (he opened it himself — E on the door while it was shut, the door's own swing moving the leaf: the scene leaves the
+    // door to him from then on)
+    const opened = () => { if (!user && rec && shut && (rec.open || (mine !== null && Math.abs((rec.amount ?? mine) - mine) > 0.002))) user = true; return user; };
+    const reopen = () => { if (!rec || !shut) return; if (!opened()) { leaf(amt0); rec.open = amt0 >= (rec.passAt ?? 0.5); if (rec.collider) rec.collider.enabled = !rec.open; } shut = false; };
     const set = C8_blackout(G, C8_lightsNear(24.3, dz, 3.4));
     G.finally(() => reopen());
     const DOOR = [dx, 1.2, dz];
     // 1. the wind leans on the hut; the tin creaks; the door trembles; the tube stutters
     G.sfx('wind_gust', { vol: 1.0 });
     G.sfx('creak', { pos: [24.5, 2.6, dz], vol: 0.55, dur: 1.5 });
+    // (the door's used meanwhile — E on it moves the leaf: the scene lets go of it and stops, unspent)
+    const touched = () => !!rec && mine !== null && Math.abs((rec.amount ?? mine) - mine) > 0.002;
     {
-      let t = 0;
-      await G.loop((dt) => { t += dt; leaf(amt0 - 0.05 * Math.sin(t * 17) * Math.sin(Math.min(1, t / 1.2) * Math.PI)); return t >= 1.2; });
+      let t = 0, hands = false;
+      await G.loop((dt) => { if (touched()) { hands = true; return true; } t += dt; leaf(amt0 - 0.05 * Math.sin(t * 17) * Math.sin(Math.min(1, t / 1.2) * Math.PI)); return t >= 1.2; });
+      if (hands) return;
       leaf(amt0);
     }
     G.sfx('tube_flicker', { pos: [24.5, 2.7, dz], vol: 0.5, dur: 0.45 });
     for (const v of [false, true, false, true]) { set(v); await G.wait(0.05 + Math.random() * 0.07); }
     await G.wait(0.5);
-    if (!(await G.until(() => (C8_calm(10) && inHut()) || !inHut(), { timeout: 5 })) || !inHut() || !G.scareReady) return;
+    // (never on him in the doorway)
+    const clear = () => inHut() && Math.hypot(P().x - dx, P().z - dz) > 1.4;
+    if (!(await G.until(() => (C8_calm(10) && clear()) || !inHut(), { timeout: 5 })) || !clear() || touched() || !G.scareReady) return;
     // 2. SLAM — the door, shut behind him; the tube dies with it
     const hit = G.scare({ id: 'c8:hut', kind: 'slam', pos: DOOR, shake: 0.5, flash: 0.22, lock: 0.3, heart: 5 });
     shut = true;

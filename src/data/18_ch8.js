@@ -1679,14 +1679,17 @@
   //   (CUTSCENE 8-2B) after 2 landed hits or 25 s; its HP is then set to 250, so The Close runs 250 → 90 (30 %): 7 bar
   //   hits (6.4), plus ~1–2 for every contract it gets signed. A reload into The Close starts it at 250 too.
   //   Wind-ups ≥ 0.7 s (the pen raised with a glint on the nib and a pen click): the opening's slow slash 1.1 s, the
-  //   slash 0.85 s, the lunge 1.0 s. After every attack it stands open 1.5 s, smoothing its uniform.
+  //   slash 0.9 s (swung from ~2 m: a step back gets him out of the 2.3 m reach), the lunge 1.0 s. After every attack
+  //   it stands open 1.5 s, smoothing its uniform.
   //   Its hitbox is 0.8 m round (the bar lands from 1.5 + 0.8 m) and its slash reaches 2.3 m: whenever it can reach him
-  //   he can reach it. Every 2nd hit that lands staggers it (0.9 s; a wind-up it was in is lost).
+  //   he can reach it. Between attacks (1.3–2.2 s) it keeps 2.75 m off, just out of reach, then steps in and swings: the
+  //   rhythm is "step back from the wind-up, hit it while it stands open". In the opening every hit rocks it back; in
+  //   The Close every 2nd hit that lands during a wind-up breaks it (a 0.9 s stagger; the swing is lost).
   //   To Aidan (× DIFF.dmg: Easy ½, Hard 1½): pen slash 13, lunge 13 (knocks him down), the spotlight 8. Every hit that
   //   lands on him stamps a signature; the third signs the contract: the stamps clear and it recovers 10 % of its HP.
   const CLK = {
     hp: 300, hitMul: 1.25, knockHp: 250, openHits: 2, openMax: 25, openR: 2.0,
-    wind: { open: 1.1, slash: 0.85, lunge: 1.0 }, recover: 1.5, reach: 2.3, arc: 55, hitR: 0.8,
+    wind: { open: 1.1, slash: 0.9, lunge: 1.0 }, recover: 1.5, reach: 2.3, arc: 55, hitR: 0.8, keep: 2.75,
     dmg: 13, beam: 8, beamCd: 3.0, heal: 0.1, stagger: 0.9,
   };
   function C8_closerCreate(e, def) {
@@ -1828,8 +1831,12 @@
     sfx('hit', { pos: [e.pos.x, 1.4, e.pos.z], vol: 0.6 });
     C8_closerTears(e);
     C8_ink(e);
-    if (F.hits % 2 === 0) C8_stagger(e, CLK.stagger);
-    else if (D.st === 'windup' || D.st === 'lunge') { try { q(e.actor.gesture('tremor', { amount: 0.7, dur: 0.5 })); } catch (err) { /* rig */ } }
+    // the opening: every hit rocks it back. The Close: every 2nd hit that lands in a wind-up breaks it (a stagger); the
+    // others only make it flinch — the swing it's winding up still comes
+    const winding = D.st === 'windup' || D.st === 'lunge';
+    if (F.phase === 1) C8_stagger(e, 0.6);
+    else if (winding && F.hits % 2 === 0) C8_stagger(e, CLK.stagger);
+    else if (winding) { try { q(e.actor.gesture('tremor', { amount: 0.7, dur: 0.5 })); } catch (err) { /* rig */ } }
     else { try { q(e.actor.gesture('flinch')); } catch (err) { /* rig */ } }
   }
   // Player hit by the Closer: the damage, and a signature on the lens; in The Close the third one signs the contract
@@ -1934,7 +1941,7 @@
         D.t += dt;
         if (a.anim !== 'idle') a.setAnim('idle', { blend: 0.3 });
         if (!D.smoothed && D.t >= 0.6) { D.smoothed = true; q(a.gesture('smooth_uniform', { dur: 1.5 })); }
-        if (D.t >= CLK.recover) { D.st = 'move'; D.cd = opening ? 5.5 + Math.random() * 2 : 1.0 + Math.random() * 0.8; }
+        if (D.t >= CLK.recover) { D.st = 'move'; D.cd = opening ? 5.5 + Math.random() * 2 : 1.3 + Math.random() * 0.9; D.circle = Math.random() < 0.5 ? -1 : 1; }
         break;
       }
       default: {
@@ -1956,10 +1963,20 @@
           if (a.anim !== an) a.setAnim(an, { blend: 0.4 });
           break;
         }
+        // The Close: between attacks it keeps just out of his reach, sidestepping round him, facing him (it backs off when
+        // he comes in); when it's ready it steps in and swings — or, when he's kept his distance, lunges
         C8_face(e, P.x, P.z, 3.2, dt);
-        if (D.cd <= 0 && d <= 2.15) { C8_startAttack(e, 'slash', CLK.wind.slash); break; }
-        if (D.cd <= 0 && d > 3.2 && d < 7 && Math.random() < dt * 0.8) { C8_startAttack(e, 'lunge', CLK.wind.lunge); break; }
-        const moving = d > 1.8 && C8_closerMove(e, P.x, P.z, 1.35, dt, 1.7);
+        if (D.cd <= 0) {
+          if (d <= 2.12) { C8_startAttack(e, 'slash', CLK.wind.slash); break; }
+          if (d > 3.4 && d < 7 && Math.random() < dt * 0.9) { C8_startAttack(e, 'lunge', CLK.wind.lunge); break; }
+          const moving = C8_closerMove(e, P.x, P.z, 1.6, dt, 1.95);
+          const an = moving ? 'walk' : 'idle';
+          if (a.anim !== an) a.setAnim(an, { blend: 0.3 });
+          break;
+        }
+        const ang = Math.atan2(e.pos.x - P.x, e.pos.z - P.z) + (D.circle || 1) * 0.35;
+        const tx = clamp(P.x + Math.sin(ang) * CLK.keep, 1.2, 28.8), tz = clamp(P.z + Math.cos(ang) * CLK.keep, 5.0, 18.8);
+        const moving = C8_closerMove(e, tx, tz, 1.25, dt, 0.2);
         const an = moving ? 'walk' : 'idle';
         if (a.anim !== an) a.setAnim(an, { blend: 0.35 });
       }
@@ -2244,7 +2261,7 @@
       // perfect — the kit's props keep their Fog-world materials here (S.outage stays true; only the dissolve is held off)
       try { if (Tex.outage > 0 && !World.outageBusy) Tex.setOutage(0); } catch (e) { /* tex */ }
     },
-    onLeave() { C8_clRelease(); C8_inkClear(); C8.beam = null; C8.fight = null; C8.closer = null; C8.kd = null; try { UI.stamp(null); UI.holdPrompt(null); } catch (e) { /* ui */ } },
+    onLeave() { C8_clRelease(); C8_inkClear(); C8.beam = null; C8.fight = null; C8.closer = null; C8.kd = null; C8.pitchSaid = 0; try { UI.stamp(null); UI.holdPrompt(null); } catch (e) { /* ui */ } },
     async onEnter(G) {
       G.bars(0);
       if (C8.pitchChain) return;
@@ -2546,7 +2563,7 @@
     G.cam({ ...lc0, fov: 54, to: { ...lc1, fov: 48 }, dur: 14 });
     if (Cl) { Cl.look(headAt(A)); Cl.eyes('at', A); q(Cl.gesture('offer', { hand: 'L', target: A, hold: true })); }
     if (A.raw) { A.raw.expr('pain'); if (e) A.raw.eyes('at', e.actor); }
-    G.fade(0, 0.8);
+    q(G.fade(0, 0.8));
     q(G.post({ ca: 0.2, vignette: 0.5, blur: 0, dur: 2.5 }));
     G.sfx('breath', { vol: 0.5 });
     await G.wait(1.6);
@@ -2588,7 +2605,9 @@
     G.sfx('breath', { vol: 0.5 });
     await G.wait(0.6);
     A.pose('kneel_one');
-    if (Cl) q(Cl.walkTo(Lx + fx * 2.9, Lz + fz * 2.9, { speed: 0.9, face: Math.atan2(-fx, -fz) / D2R }));
+    // (where it steps back to: clear of the plinths down the sides, the chair and the demo tables)
+    const bx = clamp(Lx + fx * 2.9, 5.5, 24.5), bz = clamp(Lz + fz * 2.9, 6.8, 16.2), byaw = Math.atan2(Lx - bx, Lz - bz);
+    if (Cl) q(Cl.walkTo(bx, bz, { speed: 0.9, face: byaw / D2R }));
     await G.wait(0.6);
     A.pose('idle');
     if (A.raw) { A.raw.expr('neutral'); A.raw.eyes('ahead'); }
@@ -2596,7 +2615,7 @@
     await G.wait(1.3);
     // state (plain statements)
     A.place(Lx, Lz, yaw / D2R); A.pose('idle'); A.look(null);
-    if (e) { e.pos.set(Lx + fx * 2.9, 0, Lz + fz * 2.9); e.yaw = Math.atan2(-fx, -fz); e.actor.setAnim('idle', { blend: 0.2 }); }
+    if (e) { e.pos.set(bx, 0, bz); e.yaw = byaw; e.actor.setAnim('idle', { blend: 0.2 }); }
     if (A.raw) A.raw.idleLife = true;
     G.set('c8_fight', true);
     G.camRelease();

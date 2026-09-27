@@ -36,7 +36,8 @@
 //   3. Chapter 8 hands over to Game.ending: the ending must be the path's (connected → connected, coverage → coverage,
 //      tomorrow → tomorrow, deal → tomorrow via 8-2A), chosen through the path's branch of spec §4 (read off F/A and
 //      acceptedDeal as the in-room scene starts: the deal / A ≥ F / F > A), its cutscenes must run in order, each over
-//      before the next (8-4 → E-C1 → E-C2 → E-C3 · 8-4 → E-OC0 → E-OC · 8-4 → E-FT0 → E-FT · 8-2A → E-FT), then
+//      before the next (8-2B → 8-3 → 8-4 → E-C1 → E-C2 → E-C3 · 8-2B → 8-3 → 8-4 → E-OC0 → E-OC · 8-2B → 8-3 → 8-4 →
+//      E-FT0 → E-FT · 8-2B → 8-2A → E-FT: the Closer's knockdown and its choice on every path, Surrender on deal), then
 //      credits → fates (not after tomorrow) → results → the title with EXTRA (tools/tests/endings.mjs playEnding).
 //   4. §14 saves: every payphone save the chapters made in 2 / 5 / 7 (the last one of each) is loaded from the title's
 //      LOAD GAME and must restore room, inventory, F/A, fate flags, chaseHits, calls, voicemails and the freed
@@ -65,20 +66,21 @@ const FATE_BY = {
   // (Wai's jacks are re-patched and Chloe's figure is never hit on 'tomorrow': those are not Avoid choices)
   tomorrow: { 3: { waiSaved: true }, 5: { chloeSaved: true }, 6: { lukaSaved: false }, 7: { chaseSaved: false, lukeSaved: false } },
 };
+// (every path goes through the Closer's knockdown, 8-2B, and its choice: Surrender on the deal path, Fight on the others)
 const ENDING_CS = {
-  connected: { must: ['E-C1', 'E-C2', 'E-C3'], never: ['E-OC0', 'E-OC', 'E-FT0', 'E-FT', '8-2A'] },
-  coverage: { must: ['E-OC0', 'E-OC'], never: ['E-C1', 'E-C2', 'E-C3', 'E-FT0', 'E-FT', '8-2A'] },
-  tomorrow: { must: ['E-FT0', 'E-FT'], never: ['E-C1', 'E-C2', 'E-C3', 'E-OC0', 'E-OC', '8-2A'] },
-  deal: { must: ['8-2A', 'E-FT'], never: ['E-FT0', 'E-C1', 'E-C2', 'E-C3', 'E-OC0', 'E-OC'] },
+  connected: { must: ['8-2B', 'E-C1', 'E-C2', 'E-C3'], never: ['E-OC0', 'E-OC', 'E-FT0', 'E-FT', '8-2A'] },
+  coverage: { must: ['8-2B', 'E-OC0', 'E-OC'], never: ['E-C1', 'E-C2', 'E-C3', 'E-FT0', 'E-FT', '8-2A'] },
+  tomorrow: { must: ['8-2B', 'E-FT0', 'E-FT'], never: ['E-C1', 'E-C2', 'E-C3', 'E-OC0', 'E-OC', '8-2A'] },
+  deal: { must: ['8-2B', '8-2A', 'E-FT'], never: ['E-FT0', 'E-C1', 'E-C2', 'E-C3', 'E-OC0', 'E-OC', '8-3', '8-4'] },
 };
 // the ending's scenes in the order they must run, each one over before the next starts (8-4 "Ringing" → Game.endingFor →
-// the in-room scene → Game.ending's scenes; the deal: 8-2A → E-FT); `at` is the scene that starts once the ending is
-// chosen: F/A and acceptedDeal as it starts are what spec §4 decided on
+// the in-room scene → Game.ending's scenes; the deal: the knockdown 8-2B → Surrender → 8-2A → E-FT); `at` is the scene
+// that starts once the ending is chosen: F/A and acceptedDeal as it starts are what spec §4 decided on
 const ENDING_ORDER = {
-  connected: { order: ['8-4', 'E-C1', 'E-C2', 'E-C3'], at: 'E-C1' },
-  coverage: { order: ['8-4', 'E-OC0', 'E-OC'], at: 'E-OC0' },
-  tomorrow: { order: ['8-4', 'E-FT0', 'E-FT'], at: 'E-FT0' },
-  deal: { order: ['8-2A', 'E-FT'], at: 'E-FT' },
+  connected: { order: ['8-2B', '8-3', '8-4', 'E-C1', 'E-C2', 'E-C3'], at: 'E-C1' },
+  coverage: { order: ['8-2B', '8-3', '8-4', 'E-OC0', 'E-OC'], at: 'E-OC0' },
+  tomorrow: { order: ['8-2B', '8-3', '8-4', 'E-FT0', 'E-FT'], at: 'E-FT0' },
+  deal: { order: ['8-2B', '8-2A', 'E-FT'], at: 'E-FT' },
 };
 
 // ---- the page-side recorder (Bus events, teleports, begin() calls, saves) -----------------------------------------
@@ -117,11 +119,13 @@ async function install(h, o = {}) {
     // of that chapter sets it off after C.death.delay s of game time (and once C.death.cond[n]() holds, if given) while the
     // fight still runs: Game.death() as if the last hit landed. window.__deathAbort then makes the chapter test unwind
     // (tools/tests/chain.mjs deathH) and SH.advance stops ticking until the chain has taken over.
-    C.death = { arm: {}, cond: {}, delay: 4, pending: null, log: [], t: 0 };
+    // (C.death.boss[n]: the one boss script of chapter n to die in — Chapter 8: The Close, 'boss:closer_close')
+    C.death = { arm: {}, cond: {}, boss: {}, delay: 4, pending: null, log: [], t: 0 };
     if (${o.death ? 'true' : 'false'}) {
     B.on('script', (what, name) => {
       const D = C.death;
       if (what !== 'start' || !/^boss:/.test(String(name)) || D.pending || D.arm[M.S.chapter] !== 'boss') return;
+      if (D.boss[M.S.chapter] && String(name) !== D.boss[M.S.chapter]) return;
       D.arm[M.S.chapter] = false;
       D.pending = { boss: String(name), ch: M.S.chapter, at: D.t + D.delay };
     });
@@ -498,9 +502,10 @@ export default async function (page, h) {
     await endSpy(h);
     // SH_SIGNAL: the SIGNAL option as Options sets it (META.options.signal, persisted); none → the game's default
     if (signal) await ev(h, `SH.mod.Save.setOption('signal', ${JSON.stringify(signal)}); return 1`);
-    // (Chapter 8: the death comes in Phase 2, "The Close", when the Closer fights back — on the deal path, which never
-    // gets there, during the Pitch)
-    if (DEATH.size && path !== 'deal') await ev(h, 'const D = window.__chain.death; D.cond[8] = () => !!(SH.c8 && SH.c8.fight && SH.c8.fight.phase === 2); return 1');
+    // (Chapter 8: the death comes in Phase 2, "The Close" — its own boss script, after the knockdown and Fight — when the
+    // Closer fights back; CONTINUE loads the autosave 8-2B made and The Close starts again. On the deal path, which
+    // surrenders at the knockdown, it comes in the opening exchange, and CONTINUE loads 8-2's autosave: the opening again)
+    if (DEATH.size && path !== 'deal') await ev(h, "const D = window.__chain.death; D.boss[8] = 'boss:closer_close'; D.cond[8] = () => !!(SH.c8 && SH.c8.fight && SH.c8.fight.phase === 2); return 1");
     // (the notes of a chapter attempt an injected death cut short: kept up to the death — the checks it passed or failed
     // before it still count; what its test's catch blocks wrote while unwinding does not)
     const DN = { notes: null, cut: null };
@@ -679,7 +684,7 @@ export default async function (page, h) {
       }
       console.log(`ending ${want} via ${branch}${atS ? ` (F ${atS.F} / A ${atS.A} as ${EO.at} starts${atS.deal ? ', deal accepted' : ''})` : ''}: ${seq.join(' → ')} → ${(pe.flow || ['?']).join(' → ')}${pe.flow && !pe.flow.includes('fates') ? ' (no fate cards)' : ''}`);
       const meta = await ev(h, 'return { seen: SH.mod.META.endingsSeen, results: (SH.mod.META.results || []).map((r) => r.ending), mode: SH.mode, items: SH.mod.Menus._top && SH.mod.Menus._top.st.list ? SH.mod.Menus._top.st.list.items.map((x) => x.label) : null }');
-      console.log(`ending ${want}: scenes ${[...started].filter((id) => /^E-|^8-2A/.test(id)).join(' ')} · META.endingsSeen ${JSON.stringify(meta.seen)} · title menu ${JSON.stringify(meta.items)}`);
+      console.log(`ending ${want}: scenes ${[...started].filter((id) => /^E-|^8-2[AB]/.test(id)).join(' ')} · META.endingsSeen ${JSON.stringify(meta.seen)} · title menu ${JSON.stringify(meta.items)}`);
       if (meta.mode !== 'title') all.push(`BUG: not back at the title after the ending (${meta.mode})`);
       if (!meta.seen.includes(want)) all.push(`BUG: META.endingsSeen lacks ${want}`);
       if (!meta.items || !meta.items.includes('EXTRA')) all.push('BUG: EXTRA is not on the title menu');

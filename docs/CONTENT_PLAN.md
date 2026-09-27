@@ -196,7 +196,7 @@ time; 2 the village gate; 3 the exchange forecourt; 4 entering the business park
 ## 7. Cutscene ids
 
 Use the spec's numbers: `P-1`, `1-1` … `1-4`, `2-1` … `2-3`, `3-1`, `3-2`, `3-3` / `3-3alt`, `4-1` … `4-3`, `5-1` … `5-4` /
-`5-4alt`, `6-1`, `6-2`, `7-1` … `7-4`, `8-1`, `8-2`, `8-2A`, `8-3`, `8-4`. In-engine beats: `P-4`, `1-8`, `3-3b` (the
+`5-4alt`, `6-1`, `6-2`, `7-1` … `7-4`, `8-1`, `8-2`, `8-2A`, `8-2B`, `8-3`, `8-4`. In-engine beats: `P-4`, `1-8`, `3-3b` (the
 Borrowed on the stairs), `4-4`. Endings: `E-C1` (the connected call, in the transmitter room — Ch 8 file), `E-C2`
 (Morning), `E-C3` (post-credits "Ask First"), `E-OC0` (the call rings out — Ch 8 file), `E-OC` (Out of Coverage shots),
 `E-FT0` (A ≥ F: the automated voice + the Closer's hand — Ch 8 file), `E-FT` (the city store), `E-YES`.
@@ -204,6 +204,16 @@ Ch 8 decides the ending with `Game.endingFor(S)`, plays its in-room part, then `
 plays the rest (`19_endings.js` owns that wiring). The Yes ending is checked when Aidan opens the transmitter-room
 door (spec §12: the door opens onto confetti) — if `Game.endingFor(S) === 'yes'` there, Ch 8 calls `G.ending('yes')`
 instead of the Closer.
+
+**The Closer (revised after playtesting — spec §6 "The Closer" and §12 8-2's notes; `data/18_ch8.js`).** 8-2 "The Pitch"
+→ `BOSS 'closer'`, the opening exchange (no prompt; hittable; the Pitch lines every 8 s) → after 2 landed hits or 25 s
+`8-2B` "The Offer" (the knockdown; `G.choice(['Surrender', 'Fight'])`, cursor on Fight, no timer) → Surrender: `8-2A`
+(from the floor) → `acceptedDeal` → `G.ending('tomorrow')` · Fight: `S.flags.c8_fight` + an autosave → `BOSS
+'closer_close'` (Phase 2 The Close, from 250 HP) → at 30 % `8-3` → `BOSS 'closer_call'` → `8-4` → `Game.endingFor(S)`.
+A reload with `c8_fight` resumes at The Close; without it (8-2's autosave), the opening starts again. The fight's numbers
+live in `CLK` at the top of the Closer's code (wind-ups, the 1.5 s recovery, the 0.8 m hitbox, ×1.25 damage taken,
+13 / 13 / 8 damage dealt, 10 % back per signed contract). `tools/tests/ch8.mjs` drives every branch (`CH8_PATH=fair`: the
+fairness probe).
 
 ## 8. Ollie stickers (12, ids `sticker01` … `sticker12`)
 

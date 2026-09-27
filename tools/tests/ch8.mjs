@@ -3,10 +3,17 @@
 // §6 the Closer / the Standard, §4 ending logic, §2A riddle row "Ch 8 gate"; CONTENT_PLAN §2 / §7 / §8).
 //
 //   node tools/build.mjs --out .build/c8.html && node tools/run.mjs --file .build/c8.html --script tools/tests/ch8.mjs
-//   env: CH8_PATH=connected|coverage|tomorrow|deal  CH8_RIDDLE=easy|normal|hard  CH8_SAVELOAD=1  CH8_SHOTS=<dir>
+//   env: CH8_PATH=connected|coverage|tomorrow|deal|fair  CH8_RIDDLE=easy|normal|hard  CH8_SAVELOAD=1  CH8_SHOTS=<dir>
 //        CH8_TITLE=1 (after the hand-off, skip through the ending to the title screen)
+//        CH8_ACTION=easy|normal|hard (fair: the action difficulties to probe, comma-separated; default normal,hard)
+//        CH8_REACT=0.25 (fair: the bot's reaction time in The Close, s)
 //   With no CH8_PATH it runs the matrix connected/normal/saveLoad(+to the title) · tomorrow/hard · coverage/easy(+to the
-//   title) · deal/normal in one browser.
+//   title) · deal/normal · the fairness probe (Normal, and Hard reported) in one browser.
+//   fair — the fairness probe (revised Closer): a fresh game at the transmitter room (SH.chapter(8), cs:8-2 marked, the
+//   room's reload path starts the fight); fightBot() lands the opening's 2 hits, 8-2B is skipped (the choice still
+//   waits) and answered Fight, then fightBot() fights The Close from the knockdown to 30 % with real swings and a
+//   human-ish 0.25 s reaction (hit it after it swings, walk away from a wind-up), no heals: hits landed, damage taken,
+//   game time. Normal must reach 30 % alive in ≤ 120 s having taken < 100 damage.
 //
 // play(h, opts) — PRECONDITION: play mode at the start of Chapter 8 as a real player arrives (S.chapter === 8, Aidan on
 // Summit Road by the chained gate, the siren of begin() possibly still sounding). It never resets state. It plays the
@@ -16,17 +23,21 @@
 // §2A payphone; the map on the gate; the emergency phone — Wai, or the laminated card; the combination padlock typed on
 // the keyboard; HUT 2's first aid kit and energy drink), the climb (ladders: E + W held; the Unread nest woken by the torch
 // on platform 1 and settled with it off; the Standard climbing after him from platform 2), CUTSCENE 8-1, the hut door,
-// CUTSCENE 8-2, the Closer (Phase 1: the six pitch lines, the [Hold E] prompt; Phase 2 by real swings; 8-3; the crawl to
-// the phone with real keys and E; 8-4; the in-room ending scene) until Game.ending has taken over (SH.mode 'ending').
+// CUTSCENE 8-2, the Closer (revised after playtesting: the opening exchange — real swings until 2 land, or 25 s of
+// listening; no "[Hold E]" prompt anywhere; CUTSCENE 8-2B the knockdown and its choice, Surrender | Fight, which waits
+// even when the scene is skipped; The Close by real swings with human-ish timing (fightBot) from the knockdown to 30 %;
+// 8-3; the crawl to the phone with real keys and E; 8-4; the in-room ending scene) until Game.ending has taken over.
 // Decisions follow opts.path:
 //   connected — cut the Tethered free, examine the Borrowed then step back, a wrong code before the right one, the hut's
-//               pickups, the torch on up the first ladder (the nest wakes), listen to the whole Pitch, then fight;
-//               8-1 / 8-2 / 8-3 / 8-4 / E-C1 play through
-//   coverage  — cut free, talk to the Borrowed (it grabs), fight at once; scenes skipped. (The ending comes from the
+//               pickups, the torch on up the first ladder (the nest wakes), listen to the Pitch without swinging (the
+//               knockdown at 25 s; the rest of the Pitch standing over him), Fight; 8-1 / 8-2 / 8-2B / 8-3 / 8-4 / E-C1
+//               play through
+//   coverage  — cut free, talk to the Borrowed (it grabs), fight at once (2 hits → the knockdown → Fight); scenes skipped
+//               (8-2B too: its choice still comes up). (The ending comes from the
 //               state a coverage player carries in: two of Wai / Chase / Chloe / Luke lost, or F < 35.)
 //   tomorrow  — stomp every Tethered, talk to the Borrowed, run past the Reaches, fight at once; scenes skipped. (A ≥ F:
 //               the call connects to "Your callback has been scheduled for: tomorrow.")
-//   deal      — as connected, but hold E through the Pitch ("[Hold E] Lower your hands", 3 s): 8-2A → Follow Up Tomorrow
+//   deal      — as connected, but Surrender at the knockdown (SH.choose(0)): 8-2A "Signed" → Follow Up Tomorrow
 // opts.saveLoad — save at the compound payphone (the chapter's first), open the gate, reload that slot
 // (Game.continueFrom) and play on (the gate shut again: the padlock again).
 // → { chapter: 8, F, A, flags, ending, notes }
@@ -520,6 +531,66 @@ async function mast(h, P, notes, opts) {
 }
 
 // ---- 8-1, 8-2 and the Closer ------------------------------------------------------------------------------------------
+// The fight bot: real swings (SH.press('attack') — the quick attack's auto-lock), real walking (the injected direction
+// actions, camera-relative like the keys) and a human-ish reaction time (o.react s before it acts on what the Closer
+// starts doing). It hits the Closer whenever it's in reach and not winding up (right after each attack ends: the 1.5 s it
+// stands open), walks away from a wind-up it sees coming (unless it's mid-swing), steps out of the spotlight's disc.
+// Runs until the phase it started in is over (the opening → the knockdown; The Close → 30 %), death, or o.maxSec.
+// o.heal: below that health it heals 50 (a player using an energy drink) and counts it.
+// → { phase, t, hits, swings, taken, heals, dodged, hp0, hp1, maxHp, reached, died, sigs, healed }
+export async function fightBot(h, o = {}) {
+  return ev(h, `
+    const M = SH.mod, F0 = SH.c8 && SH.c8.fight, ph = F0 ? F0.phase : null;
+    const e0 = M.Enemies.get('c8_transmitter:closer');
+    if (!F0 || !e0 || (ph !== 1 && ph !== 2)) return { err: 'no fight (phase ' + ph + ')' };
+    const R = { phase: ph, t: 0, hits: 0, swings: 0, taken: 0, heals: 0, dodged: 0, hp0: Math.round(e0.hp), hp1: null, maxHp: e0.maxHp, reached: false, died: false, sigs: 0, healed: 0, windups: 0 };
+    const react = ${Number(o.react ?? 0.25)}, maxSec = ${Number(o.maxSec ?? 150)}, healAt = ${Number(o.heal ?? 0)};
+    const hits0 = F0.hits | 0, step = 0.1, holds = {};
+    let lastH = SH.S.health, seen = null, seenAt = 0, lastSt = null;
+    const hold = (a, sec) => { if (!holds[a] || holds[a] - R.t < 0.07) { SH.press(a, sec); holds[a] = R.t + sec; } };
+    const walk = (ux, uz) => { const b = M.Cam.basis(), fy = ux * b.fx + uz * b.fz, rx = ux * b.rx + uz * b.rz;
+      if (fy > 0.38) hold('up', 0.2); else if (fy < -0.38) hold('down', 0.2);
+      if (rx > 0.38) hold('right', 0.2); else if (rx < -0.38) hold('left', 0.2); };
+    while (R.t < maxSec) {
+      const F = SH.c8.fight;
+      if (!F || F !== F0 || F.phase !== ph) { R.reached = true; break; }
+      if (M.Player.dead || SH.mode === 'death') { R.died = true; break; }
+      const e = M.Enemies.get('c8_transmitter:closer'); if (!e) break;
+      if (SH.S.health < lastH) R.taken += lastH - SH.S.health;
+      if (healAt > 0 && SH.S.health < healAt) { const h0 = SH.S.health; M.Player.heal(50); R.heals++; lastH = SH.S.health; } else lastH = SH.S.health;
+      R.sigs = Math.max(R.sigs, F.sigs | 0);
+      R.healed = F.healed || 0;
+      if (SH.mode !== 'play' || M.Script.busy) { await SH.advance(step); R.t += step; continue; }
+      const D = e.data, p = M.Player.pos;
+      const st = D.stunT > 0 ? 'stagger' : D.st;
+      if (st !== lastSt) { lastSt = st; seenAt = R.t; if (st === 'windup') R.windups++; }
+      const known = R.t - seenAt >= react;
+      const dx = e.pos.x - p.x, dz = e.pos.z - p.z, d = Math.hypot(dx, dz) || 1, ux = dx / d, uz = dz / d;
+      const busy = !!M.Player.attackState || M.Player.mode === 'down';
+      const B = SH.c8.beam;
+      const inBeam = B && B.disc && B.disc.visible && Math.hypot(p.x - B.x, p.z - B.z) < 1.8;
+      if (st === 'windup' || st === 'lunge') {
+        // a wind-up: once he's seen it, he backs off (a lunge: he steps aside)
+        if (known && !busy && d < 3.6) {
+          if (D.atk === 'lunge') walk(-uz, ux); else walk(-ux, -uz);
+          if (seen !== seenAt) { seen = seenAt; R.dodged++; }
+        }
+      } else if (inBeam && !busy) {
+        const bx = p.x - B.x, bz = p.z - B.z, bl = Math.hypot(bx, bz) || 1; walk(bx / bl, bz / bl);
+      } else if (known || st === 'move') {
+        if (d > 2.05) { if (!busy) walk(ux, uz); }
+        else if (!busy) { SH.press('attack'); R.swings++; }
+      }
+      await SH.advance(step); R.t += step;
+    }
+    const e = M.Enemies.get('c8_transmitter:closer');
+    R.hp1 = e ? Math.round(e.hp) : null;
+    R.hits = ((F0.hits | 0) - hits0);
+    R.t = +R.t.toFixed(1); R.taken = Math.round(R.taken);
+    try { M.Input.releaseAll(); } catch (x) { /* input */ }
+    return R;`);
+}
+const PITCH = ["You don't have to make that call.", "She's in hospital. They look after them in there. She's fine.", "Luka doesn't need to know the rest. And Luke will calm down. They always calm down.", "Stay up here and you'll be the best in the store. Every month. Better than Chloe.", "You said it'd be fine, and you believed it. That's what makes you so good at this.", 'All you have to do is follow up. [beat] Tomorrow.'];
 async function closer(h, P, notes, opts) {
   // CUTSCENE 8-1 "The Mirror" (P3): played (connected) or skipped
   const m0 = await mark(h);
@@ -529,64 +600,81 @@ async function closer(h, P, notes, opts) {
     if (P.play) await sawOrder(h, ['...Yeah. [beat] I know.'], notes, '8-1', m0);
   }
   if (await ev(h, "return !!SH.mod.Enemies.get('c8_mast:std')")) notes.push('BUG: the Standard is still there after 8-1');
-  // CUTSCENE 8-2 "The Pitch" (after a CONTINUE from the autosave before the fight: the Pitch again, without 8-2)
-  const m1 = await mark(h);
-  await playUntil(h, '!!(SH.c8 && SH.c8.fight && SH.c8.fight.phase === 1) && !SH.mod.Script.cutscene', 60, 'the Pitch (Phase 1)', { skip: !P.play, opts, every: P.play ? 3 : 0, name: '82' });
-  if (P.play && !opts.inFight) await sawOrder(h, ['Hi there! [beat] What brings you in today?', '...No.', 'Relax. I\'m you. [beat] The good version. The one who closes.'], notes, '8-2', m1);
-  const auto = await ev(h, "try { const a = SH.mod.Save.list().auto; return a ? (a.room || a.area || JSON.stringify(a).slice(0, 80)) : null; } catch (e) { return String(e); }");
-  notes.push(`the autosave before the fight: ${JSON.stringify(auto)}`);
   await equip(h, ['steel_bar', 'extinguisher', 'box_cutter']);
-  const m2 = await mark(h);
-  await shot(h, opts, 'pitch');
-  if (P.deal) {
-    // hold E through the Pitch: 3 s lowers his hands → 8-2A "Signed" → Follow Up Tomorrow
-    await advance(h, 3);
-    await saw(h, 'Lower your hands', notes, 'the [Hold E] prompt', m2);
-    await holdAction(h, 'interact', 3.6);
-    await playUntil(h, "!!SH.S.done['cs:8-2A']", 6, 'CUTSCENE 8-2A');
-    await playUntil(h, "SH.mode === 'ending' || SH.mode === 'credits'", 60, 'the ending after the deal', { opts, every: 3, name: '82A' });
-    if (!(await ev(h, 'return !!SH.S.flags.acceptedDeal'))) notes.push('BUG: acceptedDeal not set by 8-2A');
-    return 'tomorrow';
-  }
-  if (P.listen) {
-    // the whole Pitch: a line every 8 s, in order
-    await playUntil(h, `(window.__c8lines || []).slice(${m2}).some((l) => l.includes('Tomorrow.'))`, 56, 'the six pitch lines');
-    await advance(h, 2);
-  } else await advance(h, 1.5);
-  const pitch = ["You don't have to make that call.", "She's in hospital. They look after them in there. She's fine.", "Luka doesn't need to know the rest. And Luke will calm down. They always calm down.", "Stay up here and you'll be the best in the store. Every month. Better than Chloe.", "You said it'd be fine, and you believed it. That's what makes you so good at this.", 'All you have to do is follow up. [beat] Tomorrow.'];
-  if (P.listen) await sawOrder(h, pitch, notes, 'the Pitch', m2);
-  await saw(h, 'Lower your hands', notes, 'the [Hold E] prompt', m2);
-  // attack: Phase 2 (real swings; the Enemies API brings it to the 30 % mark, then a last real hit)
-  const m3 = await mark(h);
-  const hitIt = async (n) => {
-    for (let k = 0; k < n; k++) {
-      await ev(h, "const e = SH.mod.Enemies.get('c8_transmitter:closer'); const p = SH.mod.Player.pos; if (e) { const d = Math.hypot(e.pos.x - p.x, e.pos.z - p.z); if (d > 1.9) SH.teleport(e.pos.x - (e.pos.x - p.x) / d * 1.5, e.pos.z - (e.pos.z - p.z) / d * 1.5, 0); SH.mod.Player.face(Math.atan2(e.pos.x - SH.mod.Player.pos.x, e.pos.z - SH.mod.Player.pos.z) * 180 / Math.PI); } return 1;");
-      await ev(h, "SH.press('ready', 600); return true;");
-      await advance(h, 0.2);
-      await press(h, 'attack', 0, 1.0);
-      await ev(h, 'SH.mod.Input.releaseAll(); return true;');
-      if ((await ev(h, 'return SH.S.health')) < 50) await heal(h);
-      if (await ev(h, "return !!(SH.c8.fight && SH.c8.fight.phase !== 1 && SH.c8.fight.phase !== 2)")) return;
+  // a CONTINUE after he chose to fight (the autosave 8-2B made): straight back into The Close — no second knockdown
+  const resumeClose = !!opts.inFight && (await ev(h, 'return !!SH.S.flags.c8_fight'));
+  let m4 = await mark(h);                                  // (The Close's first bark comes as it starts)
+  if (resumeClose) {
+    await playUntil(h, '!!(SH.c8 && SH.c8.fight && SH.c8.fight.phase === 2) && !SH.mod.Script.busy', 20, 'The Close again after a CONTINUE');
+    notes.push('CONTINUE into The Close (c8_fight): no opening, no second knockdown');
+  } else {
+    // CUTSCENE 8-2 "The Pitch" (after a CONTINUE from the autosave before the fight: the opening again, without 8-2),
+    // then the fight at once — no "[Hold E] Lower your hands" any more
+    const m1 = await mark(h);
+    await playUntil(h, '!!(SH.c8 && SH.c8.fight && SH.c8.fight.phase === 1) && !SH.mod.Script.cutscene', 60, 'the opening exchange (Phase 1)', { skip: !P.play, opts, every: P.play ? 3 : 0, name: '82' });
+    if (P.play && !opts.inFight) await sawOrder(h, ['Hi there! [beat] What brings you in today?', '...No.', 'Relax. I\'m you. [beat] The good version. The one who closes.'], notes, '8-2', m1);
+    const auto = await ev(h, "try { const a = SH.mod.Save.list().auto; return a ? (a.room || a.area || JSON.stringify(a).slice(0, 80)) : null; } catch (e) { return String(e); }");
+    notes.push(`the autosave before the fight: ${JSON.stringify(auto)}`);
+    const m2 = await mark(h);
+    await shot(h, opts, 'pitch');
+    const hp0 = await ev(h, 'return SH.S.health');
+    if (P.listen) {
+      // listen: never swing — the knockdown comes at 25 s (three Pitch lines by then, the rest standing over him)
+      await playUntil(h, "SH.mod.Script.active === 'cs:8-2B' || !!SH.S.done['cs:8-2B']", 40, 'the knockdown after 25 s (8-2B)');
+    } else {
+      // real swings until 2 land (a heal below 40, as a player would)
+      const r = await fightBot(h, { maxSec: 40, heal: 40 });
+      notes.push(`the opening by real swings: ${JSON.stringify(r)}`);
+      if (!r.reached || r.hits < 2) notes.push(`BUG: the opening did not end in the knockdown after 2 landed hits (${JSON.stringify(r)})`);
+      await playUntil(h, "SH.mod.Script.active === 'cs:8-2B' || !!SH.S.done['cs:8-2B']", 6, 'the knockdown after 2 hits (8-2B)');
     }
-  };
-  await hitIt(2);
-  await playUntil(h, '!!(SH.c8.fight && SH.c8.fight.phase === 2)', 8, 'Phase 2 (The Close)');
-  await hitIt(4);
-  const hp2 = await ev(h, "const e = SH.mod.Enemies.get('c8_transmitter:closer'); return e ? [e.hp, e.maxHp, (e.data.tears || []).filter((m) => m.visible).length, SH.c8.fight.sigs] : null");
-  notes.push(`Phase 2 after real swings: closer hp/max/tears/sigs ${JSON.stringify(hp2)}`);
-  if (hp2 && hp2[0] >= hp2[1]) notes.push('BUG: real swings did not hurt the Closer in Phase 2');
-  await shot(h, opts, 'close');
-  // (to the edge of 30 %, then the real hit that crosses it)
-  for (let k = 0; k < 8 && (await ev(h, "return !!(SH.c8.fight && SH.c8.fight.phase === 2)")); k++) {
-    await ev(h, "const e = SH.mod.Enemies.get('c8_transmitter:closer'); if (e && !SH.c8.fight.restartT) e.hp = Math.min(e.hp, Math.ceil(e.maxHp * 0.3) + 5); return 1");
-    await hitIt(2);
+    const ko = await ev(h, "const e = SH.mod.Enemies.get('c8_transmitter:closer'); return { hp: e ? e.hp : null, t: +(SH.c8.fight ? SH.c8.fight.t : 0).toFixed(1), said: SH.c8.pitchSaid, health: SH.S.health }");
+    notes.push(`the knockdown: ${JSON.stringify(ko)} (health before the opening ${hp0})`);
+    const removed = await ev(h, `return (window.__c8lines || []).slice(${m1}).filter((l) => /Lower your hands|\\[Hold/.test(l))`);
+    if (removed.length) notes.push(`BUG: the removed prompt came up: ${JSON.stringify(removed)}`);
+    // CUTSCENE 8-2B "The Offer": played or skipped — the choice comes up either way and waits
+    if (!P.play) {
+      await advanceUntil(h, '!!SH.mod.Script.skippable', 3, { step: 0.1 });
+      await ev(h, 'SH.skip(); return 1');
+    }
+    await playUntil(h, 'SH.mod.Script.choosing', 60, 'the choice in 8-2B (Surrender | Fight)', { opts, every: P.play ? 2 : 0, name: '82B' });
+    await advance(h, 0.6);
+    const ch = await ev(h, `return (window.__c8lines || []).slice(${m2}).filter((l) => l.includes('CHOICE[')).slice(-1)[0] || null`);
+    if (!ch || !ch.includes('CHOICE[Surrender|Fight]')) notes.push(`BUG: the knockdown's choice is not Surrender | Fight: ${ch}`);
+    await shot(h, opts, 'choice');
+    // (it waits: 20 s with nothing pressed changes nothing)
+    await advance(h, 20);
+    if (!(await ev(h, 'return SH.mod.Script.choosing'))) notes.push('BUG: the choice went away on its own');
+    if (P.listen) await sawOrder(h, PITCH, notes, 'the Pitch (the opening, then standing over him)', m2);
+    else if (P.play) await sawOrder(h, PITCH.slice(4), notes, 'the Pitch\'s closing pair (8-2B)', m2);
+    const m3 = await mark(h);
+    m4 = m3;
+    await ev(h, `return SH.choose(${P.deal ? 0 : 1})`);
+    if (P.deal) {
+      // Surrender: 8-2A "Signed" (from the floor) → Follow Up Tomorrow
+      await playUntil(h, "!!SH.S.done['cs:8-2A']", 8, 'CUTSCENE 8-2A');
+      await playUntil(h, "SH.mode === 'ending' || SH.mode === 'credits'", 60, 'the ending after the deal', { opts, every: 3, name: '82A' });
+      if (!(await ev(h, 'return !!SH.S.flags.acceptedDeal'))) notes.push('BUG: acceptedDeal not set by 8-2A');
+      if (await ev(h, 'return !!SH.S.flags.c8_fight')) notes.push('BUG: c8_fight set on Surrender');
+      return 'tomorrow';
+    }
+    // Fight: "...No." → he gets up → The Close (the autosave: a death in it comes back here)
+    await playUntil(h, '!!(SH.c8.fight && SH.c8.fight.phase === 2) && !SH.mod.Script.busy', 30, 'The Close after Fight', { skip: !P.play, opts, every: P.play ? 2 : 0, name: '82Bf' });
+    if (P.play) await saw(h, '...No.', notes, '8-2B Fight', m3);
+    const st = await ev(h, "let a = null; try { a = JSON.parse(localStorage.getItem(SH.mod.Save._key('auto'))); } catch (e) {} return { flag: !!SH.S.flags.c8_fight, deal: !!SH.S.flags.acceptedDeal, autoFight: !!(a && a.S && a.S.flags && a.S.flags.c8_fight), ctl: SH.mod.Player.control !== false, mode: SH.mode }");
+    if (!st.flag || st.deal || !st.autoFight || !st.ctl) notes.push(`BUG: after Fight: ${JSON.stringify(st)}`);
   }
-  await saw(h, 'Sign here.', notes, 'the Phase 2 barks', m3);
+  // Phase 2 "The Close": real swings with human-ish timing (the bot above), from the knockdown to 30 %
+  const r2 = await fightBot(h, { maxSec: 180, heal: 40 });
+  notes.push(`The Close by real swings: ${JSON.stringify(r2)}`);
+  if (!r2.reached) notes.push(`BUG: The Close did not reach 30 % with real swings (${JSON.stringify(r2)})`);
+  await shot(h, opts, 'close');
+  await saw(h, 'Sign here.', notes, 'the Phase 2 barks', m4);
   // CUTSCENE 8-3 "The Callback"
-  const m4 = await mark(h);
+  const m5 = await mark(h);
   await playUntil(h, "!!SH.S.done['cs:8-3']", 10, 'CUTSCENE 8-3');
   await playUntil(h, "!!(SH.c8.fight && SH.c8.fight.phase === 3) && !SH.mod.Script.cutscene && SH.mod.Player.mode === 'crawl'", 40, 'the crawl (Phase 3)', { skip: !P.play, opts, every: P.play ? 2 : 0, name: '83' });
-  if (P.play) await saw(h, 'It\'ll be fine! It\'ll be fine! IT\'LL BE FINE!', notes, '8-3', m4);
+  if (P.play) await saw(h, 'It\'ll be fine! It\'ll be fine! IT\'LL BE FINE!', notes, '8-3', m5);
   const ph = await ev(h, "const o = SH.mod.World.obj('c8t:phone'); const p = SH.mod.Player.pos; return o ? [o.visible, +o.position.x.toFixed(2), +o.position.z.toFixed(2), +Math.hypot(o.position.x - p.x, o.position.z - p.z).toFixed(2)] : null");
   notes.push(`8-3: the phone ${JSON.stringify(ph)} (visible, x, z, distance)`);
   if (!ph || !ph[0] || Math.abs(ph[3] - 8) > 0.6) notes.push('BUG: the phone did not stop face up ~8 m away');
@@ -600,21 +688,21 @@ async function closer(h, P, notes, opts) {
   }
   if (minHp < 1) notes.push('BUG: health dropped below 1 during the crawl');
   if (await ev(h, "return SH.mod.Player.mode !== 'crawl'")) notes.push('BUG: not crawling in Phase 3');
-  await saw(h, 'to call', notes, 'the crawl prompt', m4);
+  await saw(h, 'to call', notes, 'the crawl prompt', m5);
   await press(h, 'interact', 0, 0.5);
   // CUTSCENE 8-4 "Ringing", then the ending's in-room scene
-  const m5 = await mark(h);
+  const m6 = await mark(h);
   await playUntil(h, "!!SH.S.done['cs:8-4']", 6, 'CUTSCENE 8-4 (E pressed Call)');
   const want = await ev(h, 'return SH.mod.Game.endingFor(SH.S)');
   // 8-4 (played or skipped), then the path's own in-room ending scene always played through
   await playUntil(h, `!!SH.S.done['cs:${PRE[want] || 'none'}'] || SH.mode === 'ending' || SH.mode === 'credits'`, 90, 'CUTSCENE 8-4', { skip: !P.play, opts, every: P.play ? 3 : 0, name: '84' });
   await playUntil(h, "SH.mode === 'ending' || SH.mode === 'credits'", 120, 'the ending hand-off', { opts, every: 3, name: '84e' });
-  if (P.play) await sawOrder(h, ['I just wanted it to be fine.', 'I know. [beat] It wasn\'t.'], notes, '8-4', m5);
+  if (P.play) await sawOrder(h, ['I just wanted it to be fine.', 'I know. [beat] It wasn\'t.'], notes, '8-4', m6);
   if (want === 'connected') {
     const lines = [...(await ev(h, 'return !!SH.S.flags.waiSaved')) ? ['Putting you through, mate.'] : [], 'Hello? [beat] Is that the young man?', 'It\'s Aidan. [beat] From the store. [beat] I\'m so sorry.', 'Oh, love. [beat] Come and see me.'];
-    await sawOrder(h, lines, notes, 'E-C1', m5);
-  } else if (want === 'coverage') await saw(h, 'The number you have called is not connected.', notes, 'E-OC0', m5);
-  else if (want === 'tomorrow') await saw(h, 'Your callback has been scheduled for: tomorrow.', notes, 'E-FT0', m5);
+    await sawOrder(h, lines, notes, 'E-C1', m6);
+  } else if (want === 'coverage') await saw(h, 'The number you have called is not connected.', notes, 'E-OC0', m6);
+  else if (want === 'tomorrow') await saw(h, 'Your callback has been scheduled for: tomorrow.', notes, 'E-FT0', m6);
   if (PRE[want] && !(await ev(h, `return !!SH.S.done['cs:${PRE[want]}']`))) notes.push(`BUG: the in-room ending scene ${PRE[want]} never played`);
   return want;
 }
@@ -694,17 +782,61 @@ async function runOne(h, cfg, notes) {
   for (const e of errs2) console.log('   ! error:', e);
   return ok;
 }
+// ---- the fairness probe (CH8_PATH=fair): can a player get from the knockdown to 30 % on real swings? --------------------
+async function fairOne(h, action, shots) {
+  const e0 = await errorCount(h);
+  const t0 = Date.now();
+  await ev(h, `await SH.newGame({ skipIntro: true, action: ${JSON.stringify(action)} }); return 1`);
+  await advance(h, 1);
+  await ev(h, 'await SH.chapter(8); return 1');
+  await mustReach(h, "SH.mod.World.room === 'c8_summit' && !SH.mod.World.transitioning && SH.mode === 'play'", 30, 'Chapter 8');
+  // (the room's reload path: 8-2 seen → the fight starts on entering, as after a CONTINUE from 8-2's autosave)
+  await ev(h, "SH.S.done['cs:8-2'] = true; SH.S.health = 100; await SH.goto('c8_transmitter', 'door'); return 1");
+  await mustReach(h, "SH.mod.World.room === 'c8_transmitter' && !SH.mod.World.transitioning", 20, 'the transmitter room');
+  await mustReach(h, '!!(SH.c8 && SH.c8.fight && SH.c8.fight.phase === 1) && !SH.mod.Script.busy', 20, 'the opening');
+  await equip(h, ['steel_bar']);
+  const notes = [];
+  const r1 = await fightBot(h, { maxSec: 40 });
+  notes.push(`the opening: ${JSON.stringify(r1)}`);
+  // 8-2B skipped: the lines go, the choice stays up (and waits) → Fight
+  await mustReach(h, "SH.mod.Script.active === 'cs:8-2B'", 6, 'the knockdown (8-2B)', { step: 0.1 });
+  await ev(h, 'SH.skip(); return 1');
+  await mustReach(h, 'SH.mod.Script.choosing', 10, 'the choice (skipped scene)', { step: 0.1 });
+  if (shots) { await ev(h, 'SH.mod.Render.render(0); return 1'); await h.shot(`${shots}/c8_fair_choice_${action}.png`); }
+  await advance(h, 5);
+  const still = await ev(h, 'return SH.mod.Script.choosing');
+  await ev(h, 'return SH.choose(1)');
+  await mustReach(h, '!!(SH.c8.fight && SH.c8.fight.phase === 2) && !SH.mod.Script.busy', 20, 'The Close', { step: 0.1 });
+  const hp = await ev(h, 'return SH.S.health');
+  const r2 = await fightBot(h, { maxSec: 180, react: Number(process.env.CH8_REACT || 0.25) });
+  notes.push(`The Close (health ${hp} at the start): ${JSON.stringify(r2)}`);
+  const errs = await ev(h, `return SH.errors.slice(${e0})`);
+  const need = action === 'normal';
+  const good = r2.reached && !r2.died && r2.t <= 120 && r2.taken < 100;
+  const ok = still && r1.reached && r1.hits >= 2 && !errs.length && (!need || good);
+  report(`ch8 fair/${action}`, ok, `knockdown → 30 %: ${r2.hits} hits landed (${r2.swings} swings), ${r2.taken} damage taken, ${r2.t} s game time, ${r2.dodged} wind-ups walked away from, signatures max ${r2.sigs}, healed by signing ${r2.healed}, ${r2.reached ? 'reached 30 %' : 'NOT reached'}${r2.died ? ', DIED' : ''}${need ? '' : ' (reported only)'} · the choice waited through a skip: ${still} · ${((Date.now() - t0) / 1000).toFixed(0)}s real`);
+  for (const n of notes) console.log('   ·', n);
+  for (const e of errs) console.log('   ! error:', e);
+  return ok;
+}
 export default async function (page, h) {
   const one = process.env.CH8_PATH;
   const shots = process.env.CH8_SHOTS || null;
+  if (one === 'fair') {
+    let ok = true;
+    for (const a of (process.env.CH8_ACTION || 'normal,hard').split(',').filter(Boolean)) ok = (await fairOne(h, a, shots)) && ok;
+    return ok;
+  }
   const runs = one
     ? [{ path: one, riddle: process.env.CH8_RIDDLE || 'normal', saveLoad: process.env.CH8_SAVELOAD === '1', shots, toTitle: process.env.CH8_TITLE === '1' }]
-    : [{ path: 'connected', riddle: 'normal', saveLoad: true, shots, toTitle: true }, { path: 'tomorrow', riddle: 'hard', saveLoad: false }, { path: 'coverage', riddle: 'easy', saveLoad: false, toTitle: true }, { path: 'deal', riddle: 'normal', saveLoad: false }];
+    : [{ path: 'connected', riddle: 'normal', saveLoad: true, shots, toTitle: true }, { path: 'tomorrow', riddle: 'hard', saveLoad: false }, { path: 'coverage', riddle: 'easy', saveLoad: false, toTitle: true }, { path: 'deal', riddle: 'normal', saveLoad: false }, { path: 'fair' }];
   let all = true;
   for (const cfg of runs) {
     const notes = [];
-    try { all = (await runOne(h, cfg, notes)) && all; }
-    catch (e) {
+    try {
+      if (cfg.path === 'fair') { for (const a of ['normal', 'hard']) all = (await fairOne(h, a, shots)) && all; continue; }
+      all = (await runOne(h, cfg, notes)) && all;
+    } catch (e) {
       all = false;
       report(`ch8 ${cfg.path}/${cfg.riddle}${cfg.saveLoad ? '/saveLoad' : ''}`, false, String(e.stack || e));
       for (const n of notes) console.log('   ·', n);

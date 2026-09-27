@@ -507,6 +507,22 @@ There are five common monsters and seven personal manifestations. Every monster 
 - **Phase 1, The Pitch** (up to 60 s): it circles Aidan and talks (lines in section 12). A faint prompt reads "\[Hold E\] Lower your hands". Holding it for 3 s accepts the deal. Attacking starts Phase 2.
 - **Phase 2, The Close** (HP 300): pen slashes (20 damage), a lunge, and a sweeping spotlight. Every hit that lands on Aidan stamps a signature on screen. Three signatures means the contract is signed and the phase restarts.
 - **Phase 3, The Callback** (at 30% HP): scripted (section 12).
+- **Revised after playtesting:** the Hold-E phase is gone — players read "Lower your hands" as the thing to do and gave up
+  without meaning to, and The Close needed near-perfect timing. Now: after 8-2 the fight starts at once with an
+  **opening exchange**: the Closer circles Aidan close and slow, speaking the Pitch lines in order (a line every 8 s), and
+  now and then makes a slow, well-telegraphed slash; it can be hit, and every hit rocks it back and tears the uniform
+  (it's fought under the room's own cameras, as The Close is: the slow orbit went with the Hold-E phase).
+  After Aidan lands 2 hits (or 25 s pass), it strikes him to the floor: **CUTSCENE 8-2B "The Offer"** (section 12) ends
+  in the choice **Surrender | Fight**. Surrender → 8-2A → Follow Up Tomorrow; Fight → **Phase 2, The Close**, from 250 HP.
+  Fairness rules for The Close: every attack has a readable wind-up (≥ 0.7 s: the pen raised with a glint on the nib and
+  a pen click; slash 0.9 s, lunge 1.0 s) and leaves it standing open for 1.5 s after (it smooths its uniform); between
+  attacks it keeps just out of Aidan's reach, then steps in to swing from ~2 m (a step back clears its 2.3 m reach); its
+  body is 0.8 m round for his swings, so he can always reach what can reach him; every 2nd hit that lands during a
+  wind-up breaks it. Aidan's weapons do ×1.25 on it (the steel bar 25): 7 bar hits take it from 250 to 30 %. Its pen
+  slash and lunge do 13 (the lunge knocks him down), the spotlight 8; every hit that lands on him still stamps a
+  signature, but the third one signs the contract for only 10 % of its HP back (the stamps clear), not a full restart.
+  Healing items and the difficulty's damage scaling apply as everywhere. A death in The Close reloads to The Close (the
+  choice was saved), one before it to the opening.
 
 ## 7. Cutscene and dialogue system
 
@@ -1713,6 +1729,26 @@ The last chapter is short and relentless. Every fear converges, then the game en
 4. The faint prompt "\[Hold E\] Lower your hands" is visible throughout Phase 1.
    - **Holding it for 3 s** → CUTSCENE 8-2A "Signed": Aidan lowers his hands. The Closer kneels and places the pen in his hand. He signs. In the last shot, Aidan looks up, and the Closer's smile is on his face. → Ending: Follow Up Tomorrow.
    - **Attacking** starts Phase 2. Phase 2 barks: "Sign here." "Initial there." "It'll be fine." "Any other questions?"
+
+**Revised after playtesting:** steps 3–4 now play as follows (the original text above is kept for reference; the lines
+are unchanged, only where they fall).
+
+3. The fight starts as soon as 8-2 ends; no prompt appears at any point. The opening exchange: the Closer circles Aidan,
+   speaking the first Pitch lines in order, a line every 8 seconds; it is hittable. After Aidan lands 2 hits (or 25 s):
+4. **CUTSCENE 8-2B "The Offer"**
+   1. SHOT. CAM: side-on, from the middle of the floor. The pen comes round; the blow puts Aidan on the floor (thud,
+      shake) and everything goes black for a moment.
+   2. SHOT. CAM: low, from the floor at his head. The Closer stands over him, leaning in with the contract, smiling. It
+      says the Pitch lines it hasn't said yet (the closing pair, "You said it'd be fine, and you believed it. That's what
+      makes you so good at this." / "All you have to do is follow up." \[beat\] "Tomorrow.", and one more before them if
+      the opening was cut short).
+   3. The choice: **Surrender** / **Fight** (it waits for the player; skipping the scene skips the lines, never the
+      choice).
+   - **Surrender** → CUTSCENE 8-2A "Signed", carrying on from the floor: Aidan lowers his hands. The Closer kneels and
+     places the pen in his hand. He signs. In the last shot, Aidan looks up, and the Closer's smile is on his face. →
+     Ending: Follow Up Tomorrow.
+   - **Fight** → AIDAN: "...No." He gets up; the Closer steps back, smoothing its uniform, and Phase 2 (The Close) begins,
+     with the barks above, until CUTSCENE 8-3 at 30% HP.
 
 **CUTSCENE 8-3 "The Callback"** (at 30% HP)
 

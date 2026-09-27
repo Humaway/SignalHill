@@ -47,7 +47,7 @@
   const busy = () => { try { return !!Script.busy || !!Enemies.paused; } catch (e) { return false; } };
   const weaponKind = () => { try { const w = Player.weapon(); return w && !w.shove ? w.rig || null : null; } catch (e) { return null; } };
   // transient presentation state (never saved)
-  const C4 = { ring: null, far: [], esc: null, chase: null, fight: null, arm: null, armCam: false, podLed: null, bag: [], logs: null, pieces: null, lastCam: null };
+  const C4 = { ring: null, far: [], esc: null, chase: null, fight: null, arm: null, armCam: false, podLed: null, bag: [], logs: null, pieces: null, lastCam: null, hush: false, hushT: null };
   try { if (typeof window !== 'undefined' && window.SH) window.SH.c4 = C4; } catch (e) { /* tests only */ }
 
   // a quad of ground in room coordinates, corners at heights yf(x, z) (planar when yf is linear over the box): drawn
@@ -242,11 +242,14 @@
     for (const h of C4.far) { try { h.stop(0.4); } catch (e) { /* audio */ } }
     C4.far = [];
   }
+  // (decor, not a call for Aidan: the far bed of phones joins its world's scene duck — it drains under a cutscene, and in
+  // the Outage under a line too — so the scenes and the dialogue sit on top of it)
   function C4_farRing(n, vol, lp) {
     for (const h of C4.far) { try { h.stop(0.3); } catch (e) { /* audio */ } }
     C4.far = [];
     if (typeof Snd === 'undefined') return;
-    for (let i = 0; i < n; i++) { try { C4.far.push(Snd.play('ring', { loop: true, far: true, lp: lp + i * 300, vol: vol * (1 - i * 0.2), delay: i * 0.73 + 0.2 })); } catch (e) { /* audio */ } }
+    const duck = S.outage ? 'outage' : 'bed';
+    for (let i = 0; i < n; i++) { try { C4.far.push(Snd.play('ring', { loop: true, far: true, lp: lp + i * 300, vol: vol * (1 - i * 0.2), delay: i * 0.73 + 0.2, duck })); } catch (e) { /* audio */ } }
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -271,15 +274,19 @@
       RF.t += dt;
       const out = !!S.outage;
       const P = (typeof Player !== 'undefined' && Player.pos) ? Player.pos : null;
+      // (a scare can hush the whole floor: every phone stops at once and every message light goes out — C4.hush; after
+      // it they come back one at a time — C4.hushT)
+      const hush = !!C4.hush;
       for (let i = 0; i < n; i++) {
         const p = phones[i];
         const exists = !p.world || (p.world === 'outage') === out;
         if (!out && p.ringing && P && Math.abs(P.x - p.x) < 2 && Math.abs(P.z - p.z) < 2 && Math.hypot(P.x - p.x, P.z - p.z) < 2) p.ringing = false;
-        const ring = exists && (out || p.ringing) && !p.special;
+        const ring = exists && (out || p.ringing) && !p.special && !hush;
         const on = ring && ((RF.t * (out ? 1.3 : 0.9) + p.phase) % 1) < 0.45;
         RF.im.setColorAt(i, exists ? (on ? RF.onRed : RF.off) : col.set('#000000'));
       }
       if (RF.im.instanceColor) RF.im.instanceColor.needsUpdate = true;
+      if (hush) { for (const [p, h] of [...RF.near]) { try { h.stop(0.06); } catch (e) { /* audio */ } RF.near.delete(p); } return; }
       // the three nearest ringing phones ring for real
       RF.pick -= dt;
       if (RF.pick > 0 || !P || typeof Snd === 'undefined') return;
@@ -294,9 +301,13 @@
         cand.push([d, p]);
       }
       cand.sort((a, b) => a[0] - b[0]);
-      const want = new Set(cand.slice(0, out ? 4 : 3).map((c) => c[1]));
+      let cap = out ? 4 : 3;
+      if (C4.hushT != null) { const k = Math.floor((RF.t - C4.hushT) / 0.9); if (k >= cap) C4.hushT = null; else cap = Math.max(0, k); }
+      const want = new Set(cand.slice(0, cap).map((c) => c[1]));
       for (const [p, h] of [...RF.near]) if (!want.has(p)) { try { h.stop(0.08); } catch (e) { /* audio */ } RF.near.delete(p); }
-      for (const p of want) if (!RF.near.has(p)) { try { RF.near.set(p, Snd.play('ring', { loop: true, pos: [p.x, p.y + 0.1, p.z], vol: out ? 0.7 : 0.5, rate: 0.96 + (p.phase * 0.08) })); } catch (e) { /* audio */ } }
+      // (playtest: the rings were the most annoying sound in the game — quieter, and they join the scene duck like the far
+      // bed: every desk phone is decor, not a call for Aidan)
+      for (const p of want) if (!RF.near.has(p)) { try { RF.near.set(p, Snd.play('ring', { loop: true, pos: [p.x, p.y + 0.1, p.z], vol: out ? 0.55 : 0.42, rate: 0.96 + (p.phase * 0.08), duck: out ? 'outage' : 'bed' })); } catch (e) { /* audio */ } }
     });
     return RF;
   }
@@ -337,6 +348,7 @@
   // =================================================================================================================
   const WL = { H: 3.2, L: 90 };
   const wlY = (x) => clamp(x, 0, WL.L) * WL.H / WL.L;
+  const DESP = { x: 24, z: -4.15 };                                     // the despatch's roller door (a jump scare)
   defineRoom({
     id: 'c4_wirelane', name: 'WIRE LANE', area: 'WIRE LANE', chapter: 4, outdoor: true, surface: 'bitumen', ambient: 'wind',
     fog: { density: 0.05 },
@@ -367,7 +379,9 @@
       K.collider(-2, 4.28, 92, 7, { h: 3 });
 
       // ---- NORTH: the cable company's despatch wall ----------------------------------------------------------------------
-      K.wall(6, -4.36, 44.5, -4.36, 6.2, { tex: 'brick', color: '#8d7462' }, { thick: 0.3, grime: true });
+      // (the despatch door is a real doorway: an opening behind the roller door, dark inside — see C4_despatch)
+      K.wall(6, -4.36, 44.5, -4.36, 6.2, { tex: 'brick', color: '#8d7462' }, { thick: 0.3, grime: true, openings: [{ at: DESP.x - 6, w: 3.45, h: 2.95, sill: wlY(DESP.x) + 0.15 }] });
+      K.box(DESP.x, wlY(DESP.x) + 0.15, -4.485, 3.5, 3.0, 0.02, { color: '#050606', roughness: 1 }, { shadow: false });
       K.box(25.25, 6.2, -4.45, 38.8, 0.3, 0.55, { tex: 'concrete', color: '#7b7d77' });
       // the despatch building behind its wall (never a card with the fog behind it): one block back 18 m, a taller store
       // at its west end, parapet caps, a downpipe on each end
@@ -380,7 +394,15 @@
         K.box(14, 8.1, -14.5, 16.3, 0.25, 13.3, CAP, NS);
         for (const x of [5.9, 44.6]) K.cyl(x, 0, -4.7, 0.06, 6.2, { tex: 'metal', color: '#4a4f4c' }, { seg: 6 });
       }
-      K.prop('roller_door', 24, -4.15, 0, { w: 3.6, h: 3.0, open: 0, color: '#8a9088', y: wlY(24) + 0.15 });
+      K.prop('roller_door', DESP.x, DESP.z, 0, { w: 3.6, h: 3.0, open: 0, color: '#8a9088', y: wlY(DESP.x) + 0.15, name: 'c4wl_despatch' });
+      // a caged bulkhead beside it (it keeps the door readable from the lane's rail camera through the fog)
+      K.box(DESP.x + 2.15, wlY(DESP.x) + 2.55, -4.16, 0.3, 0.2, 0.14, { tex: 'metal', color: '#4a4f4c' });
+      K.box(DESP.x + 2.15, wlY(DESP.x) + 2.58, -4.07, 0.22, 0.12, 0.05, { color: '#e8e2cc', roughness: 0.3, emissive: '#ffe2b0', emissiveIntensity: 0.9 });
+      K.light('point', DESP.x + 1.3, wlY(DESP.x) + 2.7, -3.55, { color: '#ffdca8', intensity: 5, distance: 7, name: 'c4wl:despatchlamp' });
+      // a jump scare on the way down the lane (the Fog world, Chapter 4): knocks inside the despatch; the door lurches up
+      // on its motor — somebody's feet, right behind it — and crashes down as he passes
+      K.trigger([DESP.x + 1.2, -4.3, DESP.x + 7.5, 4.3], (G) => C4_despatch(G), { id: 'c4_wirelane:despatch', once: false, world: 'fog',
+        when: (s) => s.chapter === 4 && !(s.done && s.done['c4:despatch']) });
       K.sign('SIGNAL HILL CABLE & LINE — DESPATCH', 24, wlY(24) + 3.8, -4.2, 4.8, 0.45, { style: 'shop', bg: '#2a3a44', fg: '#e8e4d2' });
       K.sign('NO PARKING\nDRIVEWAY IN CONSTANT USE', 30.4, wlY(30.4) + 1.9, -4.2, 0.9, 0.5, { style: 'council' });
       K.writing('WHO ARE YOU TRYING TO REACH', 13.2, wlY(13) + 1.55, -4.2, 2.8, { rotY: 0, world: 'fog' });
@@ -660,6 +682,10 @@
       K.prop('gum_tree', 64, 6, 200, { seed: 47 });
       // CALL 4 rings on entering the business park
       K.trigger([35.3, 27.5, 42.7, 36.5], (G) => G.call('luka4'), { id: 'c4_park:call4', when: (s) => s.chapter === 4 && !(s.calls && s.calls.luka4) });
+      // a jump scare (the Fog world, after CALL 4, on his first walk up to the doors): for a moment somebody is standing
+      // inside the Care Centre's glass, smiling out at him
+      K.trigger([23.8, 5.8, 37.2, 13.9], (G) => C4_greeter(G), { id: 'c4_park:greeter', once: false, world: 'fog',
+        when: (s) => s.chapter === 4 && !!(s.calls && s.calls.luka4) && !(s.flags && s.flags.c4_metChase) && !(s.done && s.done['c4:greeter']) });
 
       // ---- examine lines (Aidan) ---------------------------------------------------------------------------------------------
       K.examine(26.4, 1.8, 5.0, ['Customer Care Centre.', 'Every call I ever put on hold ended up somewhere like this.'], { id: 'c4pk:sign', r: 1.5 });
@@ -1216,6 +1242,11 @@
       // ---- triggers ---------------------------------------------------------------------------------------------------------------
       // CUTSCENE 4-1 as he comes into Chase's aisle
       K.trigger([0.2, 16.9, 11.5, 20.0], (G) => G.cutscene('4-1'), { id: 'c4_floor:41', when: (s) => !s.outage && !(s.flags && s.flags.c4_outage) && !(s.done && s.done['cs:4-1']) });
+      // a jump scare in the Outage maze (the corridor where Chase's row stood, walking east from the wallboard): every
+      // phone on the floor stops at once; the tube dies; when it comes back the man from the counter is standing behind
+      // him, holding up his phone
+      K.trigger([3.2, 15.3, 8.6, 19.8], (G) => C4_mazeMan(G), { id: 'c4_floor:mazeman', once: false, world: 'outage',
+        when: (s) => s.chapter === 4 && !(s.flags && s.flags.c4_bossDone) && !(s.done && s.done['c4:mazeMan']) });
 
       // ---- examine lines (Aidan) --------------------------------------------------------------------------------------------------
       K.examine(25, 1.8, 0.6, ['Calls waiting: four thousand one hundred and twelve. Longest wait: two hours, fourteen minutes.', 'Service level: three percent. [beat] Nobody\'s been answering for a long time.'], { id: 'c4fl:board', r: 2.6, world: 'fog' });
@@ -1238,9 +1269,9 @@
       C4_ambient(['#5a6664', 0.32], ['#1f6f6a', 0.15]);
       // the far bed of phones follows the world
       const w = S.outage ? 'o' : 'f';
-      if (C4.floorBed !== w) { C4.floorBed = w; if (S.outage) C4_farRing(3, 0.34, 1900); else C4_farRing(2, 0.2, 1300); }
+      if (C4.floorBed !== w && !C4.hush) { C4.floorBed = w; if (S.outage) C4_farRing(3, 0.34, 1900); else C4_farRing(2, 0.2, 1300); }
     },
-    onLeave() { C4_ambientOff(); C4_stopRing(); C4.floorBed = null; C4.arm = null; },
+    onLeave() { C4_ambientOff(); C4_stopRing(); C4.floorBed = null; C4.arm = null; C4.hush = false; C4.hushT = null; },
     async onEnter(G, from) {
       if (S.chapter !== 4) return;
       if (!S.outage && G.once('c4:floorIn')) {
@@ -2430,6 +2461,169 @@
     G.camRelease();
     Script.run(async (G2) => { await G2.wait(1.2); if (G2.inRoom('c4_secoffice') && !G2.has('gate_key')) await G2.think('The key board. [beat] "Boom gate."'); }, { control: true, name: 'c4:keyhint' });
   }, { letterbox: true, skippable: true });
+
+  // =================================================================================================================
+  // Jump scares (ENGINE_NOTES "Jump scares"): three, spaced through the chapter, each once per save — Wire Lane (the
+  // despatch door), the business park (someone inside the glass), the Outage maze (the man from the counter). Background
+  // trigger scripts: they never take control (at most the scare's short flinch), never damage, never touch a scene or the
+  // Escalation, and each waits — and stays armed — while a call rings, an aware monster is near or the 20 s cooldown runs.
+  // =================================================================================================================
+  function C4_calm(r = 12) {
+    try { if (Script.busy || Script.cutscene) return false; } catch (e) { /* script */ }
+    try { if (Phone.ringing || Phone.inCall) return false; } catch (e) { /* phone */ }
+    if (!Player.pos || Player.dead) return false;
+    try {
+      const p = Player.pos;
+      for (const e of Enemies.list) {
+        if (e.removed || e.resolved || e.glimpse || !Enemies.aware(e)) continue;
+        if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) < r) return false;
+      }
+    } catch (e) { /* enemies */ }
+    return true;
+  }
+  // the room's lights burning within r of (x, z) (the ones a scare's blackout switches)
+  function C4_lightsNear(x, z, r, filter) {
+    const out = [];
+    try { for (const l of World.build.lights) { const h = l.handle; if (!h || !h.isOn || (filter && !filter(h))) continue; if (Math.hypot(h.pos.x - x, h.pos.z - z) <= r) out.push(h); } } catch (e) { /* room */ }
+    return out;
+  }
+
+  // Wire Lane: the Cable & Line despatch. Two soft knocks from inside the roller door; its motor clunks and it lurches up
+  // half a metre — somebody's feet, standing right behind it — then it crashes down as he passes, and shudders
+  async function C4_despatch(G) {
+    if (done('c4:despatch') || S.outage || S.chapter !== 4 || C4.despatching || !G.scareReady || !C4_calm()) return;
+    C4.despatching = true;
+    S.done['c4:despatch'] = true;
+    const door = G.obj('c4wl_despatch'), setOpen = door && door.userData.setOpen, z0 = door ? door.position.z : DESP.z;
+    const lamp = G.light('c4wl:despatchlamp');
+    const y0 = wlY(DESP.x) + 0.15, at = [DESP.x, y0 + 1.1, DESP.z];
+    let gl = null, open = 0;
+    const setDoor = (v) => { open = v; if (setOpen) setOpen(v); };
+    G.finally(() => {
+      C4.despatching = false;
+      setDoor(0); if (door) door.position.z = z0;
+      if (gl) gl.remove();
+      if (lamp) { try { lamp.flicker(false); lamp.on(true); } catch (e) { /* room */ } }
+    });
+    G.sfx('knock', { n: 2, gap: 0.62, soft: true, pos: at, vol: 0.9 });
+    await G.wait(1.7);
+    if (!C4_calm()) return;
+    // the motor: a clunk up in the housing, the curtain rattles up
+    G.sfx('clunk', { pos: [DESP.x, y0 + 3.2, DESP.z], vol: 0.8 });
+    G.sfx('roller', { pos: at, dur: 0.55, vol: 0.9 });
+    // (standing in the doorway behind the curtain: only the legs show under it, in the bulkhead's low spill)
+    gl = G.glimpse({ kind: 'customer', pos: [DESP.x + 0.3, y0, -4.37], yaw: 0, dur: 8, rig: { seed: 12 } });
+    let spill = G.addLight('point', { pos: [DESP.x + 0.35, y0 + 0.45, -3.6], color: '#ffd9a8', intensity: 2.4, distance: 2.4 });
+    let t = 0;
+    await G.loop((dt) => { t += dt; setDoor(0.3 * U.ease.out(Math.min(1, t / 0.55))); return t >= 0.55; });
+    // it waits for him — not for long
+    await G.until(() => !Player.pos || Math.abs(Player.pos.x - DESP.x) < 2.3, { timeout: 2.4 });
+    // the crash
+    G.sfx('roller', { pos: at, dur: 0.3, vol: 1 });
+    const from = open;
+    t = 0;
+    await G.loop((dt) => { t += dt; setDoor(from * (1 - Math.min(1, t / 0.12))); return t >= 0.12; });
+    setDoor(0);
+    if (gl) { gl.remove(); gl = null; }
+    if (spill) { spill.free(); spill = null; }
+    if (lamp) lamp.flicker(true);
+    t = 0;
+    const jolt = q(G.loop((dt) => { t += dt; if (door) door.position.z = z0 + 0.05 * Math.exp(-t * 8) * Math.cos(t * 42); return t >= 0.7; }));
+    await G.scare({ id: 'c4:despatch', kind: 'slam', pos: at, shake: 0.5, flash: 0.25 });
+    await jolt;
+    if (door) door.position.z = z0;
+    await G.wait(1.2);
+    if (lamp) { lamp.flicker(false); lamp.on(true); }
+  }
+
+  // the business park: the canopy lamp stutters out; when it comes back somebody is standing on the path between him and
+  // the doors, right under it — a rep in the teal polo, lanyard on the chest, waiting to greet him, smiling with their
+  // whole face; it stutters again: nobody. (Never hidden behind him from the low entrance camera.)
+  async function C4_greeter(G) {
+    if (done('c4:greeter') || S.outage || S.chapter !== 4 || flag('c4_metChase') || C4.greeting) return;
+    const inBox = () => !!Player.pos && Player.pos.x > 23.4 && Player.pos.x < 37.6 && Player.pos.z > 5.4 && Player.pos.z < 14.3;
+    const ready = () => { const c = Cam.current; return !!c && c.id === 'c4_park:entrance' && G.scareReady && C4_calm() && Player.pos.z > 7.6; };
+    if (!(await G.until(() => ready() || !inBox(), { timeout: 12 })) || !ready()) return;
+    C4.greeting = true;
+    // on the entrance path toward the doors, 4.5 m ahead of him (not past the canopy columns, not inside them)
+    const P = Player.pos, dx = 30.2 - P.x, dz = 4.8 - P.z, dl = Math.hypot(dx, dz) || 1, k = Math.min(4.5, Math.max(0, dl - 0.2));
+    let fx = clamp(P.x + (dx / dl) * k, 28.1, 32.3), fz = clamp(P.z + (dz / dl) * k, 4.8, 9.6);
+    // (from the camera, never straight behind him: push it sideways out of his line)
+    {
+      const cx = 30.2, cz = 19.2, a1 = Math.atan2(P.x - cx, P.z - cz), a2 = Math.atan2(fx - cx, fz - cz);
+      if (Math.abs(U.angleDiff(a1, a2)) < 0.09) fx = clamp(fx + (P.x >= 30.2 ? -1.4 : 1.4), 28.1, 32.3);
+    }
+    const lamp = G.light('c4park:canopy');
+    let gl = null, key = null;
+    G.finally(() => { C4.greeting = false; if (gl) gl.remove(); if (lamp) { try { lamp.on(true); } catch (e) { /* room */ } } });
+    G.sfx('tube_flicker', { pos: [30.2, 2.85, 5.0], vol: 0.5, dur: 0.35 });
+    if (lamp) lamp.on(false);
+    await G.wait(0.45);
+    gl = G.glimpse({ kind: 'rep', pos: [fx, fz], lookAt: 'player', dur: 1.6, expr: 'smile_huge', rig: { seed: 3 }, onlyIfOnScreen: true, wait: 1.0 });
+    key = G.addLight('point', { pos: [fx + dx / dl * -0.9, 1.75, fz + dz / dl * -0.9], color: '#dcefe9', intensity: 2.4, distance: 2.6 });
+    if (lamp) lamp.on(true);
+    await G.frame();
+    if (!gl.shown) await G.until(() => gl.shown || gl.done, { timeout: 1.1 });
+    if (!gl.shown) { gl.remove(); gl = null; if (key) key.free(); return; }      // (not seen: it stays armed)
+    S.done['c4:greeter'] = true;
+    await G.scare({ id: 'c4:greeter', kind: 'stab', vol: 0.9, shake: 0.3, flash: 0.25 });
+    await G.wait(0.8);
+    G.sfx('tube_flicker', { pos: [30.2, 2.85, 5.0], vol: 0.5, dur: 0.3 });
+    if (lamp) lamp.on(false);
+    if (gl) { gl.remove(); gl = null; }
+    if (key) { key.free(); key = null; }
+    await G.wait(0.35);
+    if (lamp) lamp.on(true);
+  }
+
+  // the Outage maze, in the corridor where Chase's row stood (walking east, away from the wallboard): every phone on the
+  // floor stops at once — silence, every message light out; the tube over him dies; it stutters back on and the man from
+  // the counter is standing behind him against the red wallboard, holding up his phone; it dies again and he's gone. The
+  // phones come back one at a time.
+  async function C4_mazeMan(G) {
+    if (done('c4:mazeMan') || !S.outage || S.chapter !== 4 || flag('c4_bossDone') || C4.mazeScare) return;
+    const inBox = () => !!Player.pos && Player.pos.x > 3.0 && Player.pos.x < 9.2 && Player.pos.z > 15.0 && Player.pos.z < 20.0;
+    const ready = () => G.scareReady && C4_calm(9) && Math.sin(Player.yaw) > 0.3 && Player.pos.x > 3.5;
+    if (!(await G.until(() => ready() || !inBox(), { timeout: 15 })) || !ready()) return;
+    C4.mazeScare = true;
+    S.done['c4:mazeMan'] = true;
+    const tubes = C4_lightsNear(8, 17.7, 4.5, (h) => h.kind === 'fluoro');
+    const set = (v) => { for (const h of tubes) { try { h.flicker(false); h.on(v); } catch (e) { /* room */ } } };
+    let gl = null;
+    const unhush = () => { if (C4.hush) { C4.hush = false; C4.hushT = C4.ring ? C4.ring.t : 0; } };
+    G.finally(() => {
+      C4.mazeScare = false; unhush();
+      if (gl) gl.remove();
+      for (const h of tubes) { try { h.on(true); h.flicker(true); } catch (e) { /* room */ } }
+    });
+    C4.hush = true;
+    for (const h of C4.far) { try { h.stop(0.5); } catch (e) { /* audio */ } }
+    C4.far = []; C4.floorBed = null;
+    await G.wait(1.7);
+    G.sfx('tube_flicker', { pos: [8, 3.1, 17.7], vol: 0.55, dur: 0.4 });
+    set(false);
+    await G.wait(0.2);
+    // (a little beside his line from the camera — never hidden behind him — and in front of the wallboard's red glow)
+    const P = Player.pos, mz = clamp(P.z >= 17.5 ? P.z - 0.8 : P.z + 0.8, 16.7, 18.3);
+    gl = G.glimpse({ kind: 'man_counter', pos: [1.35, mz], lookAt: 'player', dur: 2.4, onlyIfOnScreen: true, wait: 1.5 });
+    await G.wait(0.6);
+    G.sfx('tube_flicker', { pos: [8, 3.1, 17.7], vol: 0.45, dur: 0.25 });
+    set(true);
+    // (the tube's cold light just reaching him)
+    let key = G.addLight('point', { pos: [2.6, 1.8, mz], color: '#cfe0dc', intensity: 2.2, distance: 2.8 });
+    await G.frame();
+    if (gl.shown) await G.scare({ id: 'c4:mazeMan', kind: 'stab', vol: 0.95, shake: 0.35, flash: 0.28 });
+    else await G.wait(0.6);
+    await G.wait(0.5);
+    G.sfx('tube_flicker', { pos: [8, 3.1, 17.7], vol: 0.55, dur: 0.35 });
+    set(false);
+    if (gl) { gl.remove(); gl = null; }
+    if (key) { key.free(); key = null; }
+    await G.wait(0.4);
+    for (const h of tubes) { try { h.on(true); h.flicker(true); } catch (e) { /* room */ } }
+    await G.wait(1.5);
+    unhush();
+  }
 
   // =================================================================================================================
   // Chapter 4

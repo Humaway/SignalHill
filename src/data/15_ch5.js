@@ -859,7 +859,14 @@
       K.box(10.6, 0.002, 8.8, 0.3, 0.004, 0.06, { color: '#0f7a77', roughness: 0.7 }, { rot: 30 });
       K.box(10.75, 0.004, 8.7, 0.08, 0.005, 0.11, { color: '#e8e8e0', roughness: 0.5 }, { rot: 30 });
       // ---- north of the gates: the lift lobby, the planted bed, Stairwell A --------------------------------------
-      for (const x of LB.lifts) K.prop('lift_doors', x, 0.02, 0, { floor: 'G', sign: 'OUT OF SERVICE', w: 1.1 });
+      LB.lifts.forEach((x, i) => K.prop('lift_doors', x, 0.02, 0, { floor: 'G', sign: 'OUT OF SERVICE', w: 1.1, name: 'c5lb_lift' + i }));
+      // (the lift car's light behind the second lift's doors: a blade of it shows only while they're forced apart)
+      const blade = K.plane(LB.lifts[1], 1.07, 0.0, 0.34, 2.04, { color: '#e2f2ec', roughness: 1, emissive: '#e2f2ec', emissiveIntensity: 1.8 }, { name: 'c5lb_liftblade' });
+      if (blade) blade.visible = false;
+      // a jump scare (the Fog world, the pass printed, before the stairwell): keys chime inside the dead lift beside the
+      // stairs door; as he passes, something inside slams into its doors
+      K.trigger([14.4, 0.3, 21.2, 4.4], (G) => C5_liftScare(G), { id: 'c5_lobby:lift', once: false, world: 'fog',
+        when: (s) => s.chapter === 5 && !!(s.flags && s.flags.c5_pass) && !(s.flags && s.flags.c5_chase) && !(s.done && s.done['c5:lift']) });
       K.box(5.2, 0, 3.45, 0.4, 0.55, 6.9, { tex: 'concrete', color: '#8a8880' }, { collide: true });
       K.box(2.5, 0, 3.45, 5.0, 0.5, 6.9, { tex: 'dirt', color: '#3e3a30' }, { collide: true });
       for (const [x, z] of [[1.5, 1.2], [3.2, 2.8], [1.4, 4.6], [3.0, 5.8]]) K.prop('shrub', x, z, 0, { w: 1.4, h: 1.2, dead: true, collide: false, y: 0.5 });
@@ -1860,6 +1867,11 @@
       // ---- triggers: CALL 5 while the Standard roams; the print room's breathing is positional (onUpdate) ------------
       K.trigger([0, 5, 10.8, 30], (G) => C5_call5(G), { id: 'c5_level4:call5', once: false, when: () => L4_std() && !(S.calls && S.calls.luka5) && flag('c5_l4') && C5.stdOn });
       K.trigger([16, 24.2, 26, 30], (G) => C5_call5(G), { id: 'c5_level4:call5b', once: false, when: () => L4_std() && !(S.calls && S.calls.luka5) && flag('c5_l4') && C5.stdOn });
+      // a jump scare in the Outage (through the receipt curtain, north up the west walkway to the feature stair): the
+      // walkway's lights die; when they come back one of the Pedestal's reps kneels on the walkway ahead; again — and it's
+      // right in front of him
+      K.trigger([10.7, 16.8, 13.1, 20.3], (G) => C5_repScare(G), { id: 'c5_level4:reps', once: false, world: 'outage',
+        when: (s) => s.chapter === 5 && !!(s.flags && s.flags.c5_outage) && !(s.flags && s.flags.c5_bossDone) && !(s.done && s.done['c5:reps']) });
       // ---- examine lines (Aidan) --------------------------------------------------------------------------------------
       K.examine(7.4, 1.0, 16.2, 'Somebody\'s kid drew a picture on this desk. Their mum\'s a sixty-three.', { id: 'c5l4:drawing', r: 1.3 });
       K.examine(2.8, 1.0, 8.4, ['A photo frame on a desk. The face in it is just "87%".', 'On the next desk, "112%". Every frame. Every face.'], { id: 'c5l4:frames', r: 1.3 });
@@ -1956,6 +1968,129 @@
     if ((S.calls && S.calls.luka5) || C5.call5Busy) return;
     C5.call5Busy = true;
     try { await G.call('luka5'); } finally { C5.call5Busy = false; }
+  }
+
+  // =================================================================================================================
+  // Jump scares (ENGINE_NOTES "Jump scares"): two, each once per save — the lobby's dead lift (the Fog world, before the
+  // stairwell) and the Outage walkway to the feature stair (the Pedestal's reps). Background trigger scripts: they never
+  // take control (at most the scare's short flinch), never damage, never touch a scene, the chase or the Pedestal, and
+  // each waits — and stays armed — while a call rings, an aware monster is near or the 20 s cooldown runs.
+  // =================================================================================================================
+  function C5_calm(r = 12) {
+    try { if (Script.busy || Script.cutscene) return false; } catch (e) { /* script */ }
+    try { if (Phone.ringing || Phone.inCall) return false; } catch (e) { /* phone */ }
+    if (!Player.pos || Player.dead) return false;
+    try {
+      const p = Player.pos;
+      for (const e of Enemies.list) {
+        if (e.removed || e.resolved || e.glimpse || !Enemies.aware(e)) continue;
+        if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) < r) return false;
+      }
+    } catch (e) { /* enemies */ }
+    return true;
+  }
+  // the room's lights burning within r of (x, z) (the ones a scare's blackout switches)
+  function C5_lightsNear(x, z, r, filter) {
+    const out = [];
+    try { for (const l of World.build.lights) { const h = l.handle; if (!h || !h.isOn || (filter && !filter(h))) continue; if (Math.hypot(h.pos.x - x, h.pos.z - z) <= r) out.push(h); } } catch (e) { /* room */ }
+    return out;
+  }
+
+  // the lobby: keys chime somewhere inside the dead lift by the stairs door, and its cables groan. As he comes level with
+  // it, something inside slams into the doors — they jolt apart on a hand's width of black and grind shut — and a moment
+  // later the keys again, far down the shaft. (If he's on the lift button, the slam waits for "Stairs, then.")
+  async function C5_liftScare(G) {
+    if (done('c5:lift') || S.outage || S.chapter !== 5 || flag('c5_chase') || C5.liftScare) return;
+    const inBox = () => !!Player.pos && Player.pos.x > 14.2 && Player.pos.x < 21.4 && Player.pos.z > 0.2 && Player.pos.z < 4.6;
+    const ready = () => G.scareReady && C5_calm();
+    if (!(await G.until(() => ready() || !inBox(), { timeout: 10 })) || !ready()) return;
+    C5.liftScare = true;
+    S.done['c5:lift'] = true;
+    const lx = LB.lifts[1], lift = G.obj('c5lb_lift1'), setOpen = lift && lift.userData.setOpen, blade = G.obj('c5lb_liftblade');
+    const at = [lx, 1.3, -0.25];
+    let spill = null;
+    G.finally(() => { C5.liftScare = false; if (setOpen) setOpen(0); if (blade) blade.visible = false; });
+    G.sfx('keys', { pos: [lx, 1.4, -0.5], vol: 0.45, n: 2 });
+    G.sfx('lift_groan', { pos: [lx, 2.6, -0.6], vol: 0.55, dur: 2.8 });
+    await G.wait(1.5);
+    await G.until(() => !Player.pos || Math.abs(Player.pos.x - lx) < 1.7 || Player.pos.x > lx + 2.6 || Player.pos.z > 4.8, { timeout: 3.5 });
+    if (!(await G.until(() => C5_calm(), { timeout: 6 }))) return;
+    // the doors jolt apart — a blade of cold light from the car — and grind shut
+    let t = 0;
+    spill = G.addLight('point', { pos: [lx, 1.3, 0.45], color: '#dff4ee', intensity: 3.2, distance: 3.6 });
+    const jolt = q(G.loop((dt) => {
+      t += dt;
+      const k = t < 0.07 ? t / 0.07 : Math.exp(-(t - 0.07) * 5.5);
+      if (setOpen) setOpen(0.26 * k);
+      if (blade) blade.visible = k > 0.18;
+      if (spill && k <= 0.18) { spill.free(); spill = null; }
+      return t >= 1.0;
+    }));
+    await G.scare({ id: 'c5:lift', kind: 'slam', pos: at, shake: 0.45, flash: 0.25 });
+    await jolt;
+    if (setOpen) setOpen(0);
+    if (blade) blade.visible = false;
+    if (spill) { spill.free(); spill = null; }
+    G.sfx('clunk', { pos: at, vol: 0.6 });
+    await G.wait(1.8);
+    G.sfx('keys_far', { pos: [lx, -5, -0.6], vol: 0.35 });
+    G.sfx('lift_groan', { pos: [lx, -3, -0.6], vol: 0.3, dur: 2.2 });
+  }
+
+  // the Outage, north up the west walkway toward the feature stair (through the receipt curtain): the walkway's lights
+  // die; when they stutter back one of the Pedestal's reps kneels on the walkway ahead — white, smiling, arms up, holding
+  // up nothing; they die again, and it's right in front of him; again — gone
+  async function C5_repScare(G) {
+    if (done('c5:reps') || !S.outage || S.chapter !== 5 || !flag('c5_outage') || flag('c5_bossDone') || C5.repScare) return;
+    const inBox = () => !!Player.pos && Player.pos.x > 10.5 && Player.pos.x < 13.3 && Player.pos.z > 16.4 && Player.pos.z < 20.6;
+    const ready = () => G.scareReady && C5_calm(10) && Math.cos(Player.yaw) < -0.4;
+    if (!(await G.until(() => ready() || !inBox(), { timeout: 12 })) || !ready()) return;
+    C5.repScare = true;
+    S.done['c5:reps'] = true;
+    const lights = C5_lightsNear(11.9, 15, 7, (h) => h.kind !== 'led');
+    const set = (v) => { for (const h of lights) { try { h.flicker(false); h.on(v); } catch (e) { /* room */ } } };
+    const rep = C5_rep('kneel');
+    rep.visible = false; rep.name = 'c5:scarerep';
+    try { World.build.group.add(rep); } catch (e) { /* room */ }
+    let key = null;
+    const unkey = () => { if (key) { key.free(); key = null; } };
+    const hide = () => { rep.visible = false; unkey(); };
+    G.finally(() => {
+      C5.repScare = false;
+      rep.removeFromParent();
+      try { rep.userData.face.geometry.dispose(); } catch (e) { /* gone */ }
+      for (const h of lights) { try { h.on(true); if (h.kind === 'fluoro') h.flicker(true); } catch (e) { /* room */ } }
+    });
+    // kneeling on the walkway `ahead` m in front of him, facing him — turned a little toward the void, so the camera out
+    // over it sees the face — lit from below like the plinths
+    const place = (ahead) => {
+      const p = Player.pos, fx = Math.sin(Player.yaw), fz = Math.cos(Player.yaw);
+      const x = clamp(p.x + fx * ahead, 11.1, 12.7), z = clamp(p.z + fz * ahead, 8.6, 22.0);
+      const y0 = Math.atan2(p.x - x, p.z - z), yaw = y0 + clamp(U.angleDiff(y0, Math.PI / 2), -0.8, 0.8);
+      rep.position.set(x, 0.004, z); rep.rotation.set(0, yaw, 0); rep.visible = true;
+      unkey();
+      key = G.addLight('point', { pos: [x + Math.sin(yaw) * 0.55, 0.5, z + Math.cos(yaw) * 0.55], color: '#dff6f2', intensity: 2.4, distance: 2.6 });
+    };
+    const flick = (vol, dur) => G.sfx('tube_flicker', { pos: [11.9, 2.8, 16.5], vol, dur });
+    flick(0.55, 0.45);
+    set(false);
+    await G.wait(0.75);
+    place(4.0);
+    flick(0.4, 0.3);
+    set(true);
+    G.sfx('creak', { pos: [rep.position.x, 0.9, rep.position.z], vol: 0.25, dur: 0.6 });
+    await G.until(() => !Player.pos || Math.hypot(Player.pos.x - rep.position.x, Player.pos.z - rep.position.z) < 2.6, { timeout: 2.2 });
+    flick(0.55, 0.4);
+    set(false); hide();
+    await G.wait(0.45);
+    place(1.35);
+    set(true);
+    await G.scare({ id: 'c5:reps', kind: 'screech', vol: 0.9, shake: 0.4, flash: 0.3 });
+    await G.wait(0.35);
+    flick(0.55, 0.35);
+    set(false); hide();
+    await G.wait(0.4);
+    for (const h of lights) { try { h.on(true); if (h.kind === 'fluoro') h.flicker(true); } catch (e) { /* room */ } }
   }
 
 
@@ -2566,9 +2701,9 @@
     P.spawnT -= dt;
     if (P.spawnT <= 0) { P.spawnT = (C5_detach() ? 7.5 : 2.5) * (typeof DIFF !== 'undefined' && DIFF.name === 'easy' ? 1.4 : 1); }
     P.crawl = P.crawl.filter((e) => !e.removed);
-    // the PA: "Welcome in! [beat] Welcome in!"
+    // the PA: "Welcome in! [beat] Welcome in!" (playtest: the chime was too often and too loud — every 15–20 s, softer)
     P.paT -= dt;
-    if (P.paT <= 0) { P.paT = 9 + Math.random() * 4; P.pa2T = 1.9; sfx('pa_ding', { vol: 0.8 }); try { Enemies.say('Welcome in!', 'muffled', 1.5); } catch (e) { /* voice */ } }
+    if (P.paT <= 0) { P.paT = 15 + Math.random() * 5; P.pa2T = 1.9; sfx('pa_ding', { vol: 0.55 }); try { Enemies.say('Welcome in!', 'muffled', 1.5); } catch (e) { /* voice */ } }
     if (P.pa2T > 0) { P.pa2T -= dt; if (P.pa2T <= 0) { try { Enemies.say('Welcome in!', 'muffled', 1.5); } catch (e) { /* voice */ } } }
   }
   defineBoss('pedestal', {

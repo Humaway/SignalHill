@@ -142,6 +142,12 @@ They don't fail a run.
   built file, then lists every request from a fresh load through a room load. Only the import map's three.js modules
   may appear. It also checks that every walkable room has at least five examine lines in each world, and that nothing
   hangs within 1.5 m of an overturned chair.
+* **`reach.mjs`**: can a *walking* player reach every exit and door? The chapter tests teleport into exit boxes, which
+  hides an exit that a collider in front of it makes unreachable on foot (the Plaza store's entrance was one). Every
+  room, in both worlds where it has an Outage, gets a flood fill of its walkable area on a 0.2 m grid from its entries,
+  using the player's radius and step limits. Every open exit box and every door with a `to` must be reached. A closed
+  gate (`when()` false) is a wall on purpose and is skipped. `ROOMS=a,b` limits the rooms, and
+  `STATE='{"chapter":4,"flags":{"c3_bossDone":true}}'` opens story gates. It takes about 6 minutes.
 * **`lineup.mjs`**: every person and monster photographed head-and-shoulders (front, side and back) into
   `.build/lineup/`. Every mesh crossing a neck is listed, and only lanyards pass.
 

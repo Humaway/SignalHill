@@ -1158,7 +1158,8 @@
       K.wall(0, 12, 0, -1, H, 'plaster_stained', { openings: [{ at: 6, w: 3.6, h: 2.6 }], thick: 0.3 });
       K.wall(60, -1, 60, 12, H, 'plaster_stained', { thick: 0.3 });
       // ---- the north side: the food court's mouth, shuttered shops, the store ---------------------------------------
-      K.collider(0, -3.2, 60, -1, { h: 5 });
+      // (the row's collider stops either side of the store's doorway — the store's own colliders close the rest)
+      K.collider(0, -3.2, 49.4, -1, { h: 5 }); K.collider(52.6, -3.2, 60, -1, { h: 5 });
       K.box(1.5, 0, -1.2, 3, 4.4, 0.4, 'plaster_stained', { collide: true });
       K.box(11.25, 0, -1.2, 0.5, 4.4, 0.4, 'plaster_stained', { collide: true });
       K.box(7, 3.4, -1.2, 8.2, 1.0, 0.4, 'plaster_stained');
@@ -1190,8 +1191,12 @@
       K.box(51, 3.35, -2.6, 13.4, 0.05, 3.0, { color: '#e8eceb', roughness: 0.8 });
       for (const x of [46.8, 55.2]) K.prop('demo_table', x, -2.5, 0, { len: 1.6, n: 4 });
       K.box(51, 2.9, -3.9, 6, 0.3, 0.2, { color: '#e8f4ef', emissive: '#dff2ec', emissiveIntensity: 1.2 });
-      K.collider(44, -4.2, 58, -1.05, { h: 3.6 });
-      K.floor(49.4, -1.6, 52.6, -1, { tex: 'vinyl_retail', color: '#d8d6ce' });
+      // the store backdrop is solid either side of the doorway; the doorway itself is open as far as the exit box, so
+      // walking in reaches it (the old single collider across the whole front stopped Aidan 0.1 m short of the box)
+      K.collider(44, -4.2, 49.4, -1.05, { h: 3.6 });
+      K.collider(52.6, -4.2, 58, -1.05, { h: 3.6 });
+      K.collider(49.4, -4.2, 52.6, -1.8, { h: 3.6 });
+      K.floor(49.4, -1.8, 52.6, -1, { tex: 'vinyl_retail', color: '#d8d6ce' });
       const toStore = K.exit({ id: 'c1_concourse:store', box: [49.5, -1.6, 52.5, -1.15], to: 'c1_store', entry: 'door', sound: 'none', when: () => !S.outage, blockedMsg: 'Paper. Stacked to the ceiling.' });
       void toStore;
       K.fogOnly(() => {

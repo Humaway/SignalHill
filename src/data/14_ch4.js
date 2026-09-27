@@ -682,10 +682,10 @@
       K.prop('gum_tree', 64, 6, 200, { seed: 47 });
       // CALL 4 rings on entering the business park
       K.trigger([35.3, 27.5, 42.7, 36.5], (G) => G.call('luka4'), { id: 'c4_park:call4', when: (s) => s.chapter === 4 && !(s.calls && s.calls.luka4) });
-      // a jump scare (the Fog world, after CALL 4, on his first walk up to the doors): for a moment somebody is standing
-      // inside the Care Centre's glass, smiling out at him
-      K.trigger([23.8, 5.8, 37.2, 13.9], (G) => C4_greeter(G), { id: 'c4_park:greeter', once: false, world: 'fog',
-        when: (s) => s.chapter === 4 && !!(s.calls && s.calls.luka4) && !(s.flags && s.flags.c4_metChase) && !(s.done && s.done['c4:greeter']) });
+      // a jump scare (the Fog world, after CALL 4, on his first walk up to the doors): for a moment there's a queue on the
+      // path to the doors, every one of them on hold and looking at him
+      K.trigger([23.8, 5.8, 37.2, 13.9], (G) => C4_queue(G), { id: 'c4_park:queue', once: false, world: 'fog',
+        when: (s) => s.chapter === 4 && !!(s.calls && s.calls.luka4) && !(s.flags && s.flags.c4_metChase) && !(s.done && s.done['c4:queue']) });
 
       // ---- examine lines (Aidan) ---------------------------------------------------------------------------------------------
       K.examine(26.4, 1.8, 5.0, ['Customer Care Centre.', 'Every call I ever put on hold ended up somewhere like this.'], { id: 'c4pk:sign', r: 1.5 });
@@ -2464,7 +2464,7 @@
 
   // =================================================================================================================
   // Jump scares (ENGINE_NOTES "Jump scares"): three, spaced through the chapter, each once per save — Wire Lane (the
-  // despatch door), the business park (someone inside the glass), the Outage maze (the man from the counter). Background
+  // despatch door), the business park (the queue on the path), the Outage maze (the man from the counter). Background
   // trigger scripts: they never take control (at most the scare's short flinch), never damage, never touch a scene or the
   // Escalation, and each waits — and stays armed — while a call rings, an aware monster is near or the 20 s cooldown runs.
   // =================================================================================================================
@@ -2536,42 +2536,50 @@
     if (lamp) { lamp.flicker(false); lamp.on(true); }
   }
 
-  // the business park: the canopy lamp stutters out; when it comes back somebody is standing on the path between him and
-  // the doors, right under it — a rep in the teal polo, lanyard on the chest, waiting to greet him, smiling with their
-  // whole face; it stutters again: nobody. (Never hidden behind him from the low entrance camera.)
-  async function C4_greeter(G) {
-    if (done('c4:greeter') || S.outage || S.chapter !== 4 || flag('c4_metChase') || C4.greeting) return;
+  // the business park: the canopy lamp stutters out; when it comes back there's a queue on the path to the doors — four
+  // customers in a line, phones to their ears, on hold, every one of them turned to look at him; it stutters again and
+  // the path is empty. (Four thousand one hundred and twelve calls waiting. Never hidden behind him from the low
+  // entrance camera.)
+  async function C4_queue(G) {
+    if (done('c4:queue') || S.outage || S.chapter !== 4 || flag('c4_metChase') || C4.queueing) return;
     const inBox = () => !!Player.pos && Player.pos.x > 23.4 && Player.pos.x < 37.6 && Player.pos.z > 5.4 && Player.pos.z < 14.3;
-    const ready = () => { const c = Cam.current; return !!c && c.id === 'c4_park:entrance' && G.scareReady && C4_calm() && Player.pos.z > 7.6; };
+    const ready = () => { const c = Cam.current; return !!c && c.id === 'c4_park:entrance' && G.scareReady && C4_calm() && Player.pos.z > 8.4; };
     if (!(await G.until(() => ready() || !inBox(), { timeout: 12 })) || !ready()) return;
-    C4.greeting = true;
-    // on the entrance path toward the doors, 4.5 m ahead of him (not past the canopy columns, not inside them)
-    const P = Player.pos, dx = 30.2 - P.x, dz = 4.8 - P.z, dl = Math.hypot(dx, dz) || 1, k = Math.min(4.5, Math.max(0, dl - 0.2));
-    let fx = clamp(P.x + (dx / dl) * k, 28.1, 32.3), fz = clamp(P.z + (dz / dl) * k, 4.8, 9.6);
-    // (from the camera, never straight behind him: push it sideways out of his line)
-    {
-      const cx = 30.2, cz = 19.2, a1 = Math.atan2(P.x - cx, P.z - cz), a2 = Math.atan2(fx - cx, fz - cz);
-      if (Math.abs(U.angleDiff(a1, a2)) < 0.09) fx = clamp(fx + (P.x >= 30.2 ? -1.4 : 1.4), 28.1, 32.3);
+    C4.queueing = true;
+    // the line: from the doors' apron toward him, a metre apart, the last one a couple of metres short of him
+    const P = Player.pos, D = [30.2, 5.0], dx = P.x - D[0], dz = P.z - D[1], dl = Math.hypot(dx, dz) || 1, ux = dx / dl, uz = dz / dl;
+    let side = 0;
+    { // (from the camera, never straight behind him: shift the line sideways out of his line)
+      const cx = 30.2, cz = 19.2, a1 = Math.atan2(P.x - cx, P.z - cz), a2 = Math.atan2(D[0] + ux * 1.5 - cx, D[1] + uz * 1.5 - cz);
+      if (Math.abs(U.angleDiff(a1, a2)) < 0.1) side = P.x >= 30.2 ? -1.3 : 1.3;
+    }
+    const spots = [];
+    for (let i = 0; i < 4 && i * 1.05 < dl - 2.3; i++) {
+      const j = ((i * 37) % 5 - 2) * 0.06;
+      spots.push([clamp(D[0] + ux * i * 1.05 + side + j, 28.1, 32.3), clamp(D[1] + uz * i * 1.05, 4.9, 13)]);
     }
     const lamp = G.light('c4park:canopy');
-    let gl = null, key = null;
-    G.finally(() => { C4.greeting = false; if (gl) gl.remove(); if (lamp) { try { lamp.on(true); } catch (e) { /* room */ } } });
+    let gls = [], key = null;
+    const clear = () => { for (const g of gls) g.remove(); gls = []; if (key) { key.free(); key = null; } };
+    G.finally(() => { C4.queueing = false; clear(); if (lamp) { try { lamp.on(true); } catch (e) { /* room */ } } });
     G.sfx('tube_flicker', { pos: [30.2, 2.85, 5.0], vol: 0.5, dur: 0.35 });
     if (lamp) lamp.on(false);
     await G.wait(0.45);
-    gl = G.glimpse({ kind: 'rep', pos: [fx, fz], lookAt: 'player', dur: 1.6, expr: 'smile_huge', rig: { seed: 3 }, onlyIfOnScreen: true, wait: 1.0 });
-    key = G.addLight('point', { pos: [fx + dx / dl * -0.9, 1.75, fz + dz / dl * -0.9], color: '#dcefe9', intensity: 2.4, distance: 2.6 });
+    const seeds = [21, 34, 47, 58];
+    gls = spots.map(([x, z], i) => G.glimpse({ kind: 'customer', pos: [x, z], lookAt: 'player', dur: 1.7, expr: 'flat', onlyIfOnScreen: true, wait: 1.0,
+      rig: { seed: seeds[i], hold: { R: ['phone', { pose: 'phone_ear', screen: false }] } } }));
+    { const m = spots[Math.min(spots.length - 1, 1)] || D; key = G.addLight('point', { pos: [m[0] + ux * 0.9, 1.8, m[1] + uz * 0.9], color: '#dcefe9', intensity: 2.2, distance: 4.2 }); }
     if (lamp) lamp.on(true);
     await G.frame();
-    if (!gl.shown) await G.until(() => gl.shown || gl.done, { timeout: 1.1 });
-    if (!gl.shown) { gl.remove(); gl = null; if (key) key.free(); return; }      // (not seen: it stays armed)
-    S.done['c4:greeter'] = true;
-    await G.scare({ id: 'c4:greeter', kind: 'stab', vol: 0.9, shake: 0.3, flash: 0.25 });
+    const seen = () => gls.some((g) => g.shown);
+    if (!seen()) await G.until(() => seen() || gls.every((g) => g.done), { timeout: 1.1 });
+    if (!seen()) { clear(); return; }                                          // (not seen: it stays armed)
+    S.done['c4:queue'] = true;
+    await G.scare({ id: 'c4:queue', kind: 'stab', vol: 0.9, shake: 0.3, flash: 0.25 });
     await G.wait(0.8);
     G.sfx('tube_flicker', { pos: [30.2, 2.85, 5.0], vol: 0.5, dur: 0.3 });
     if (lamp) lamp.on(false);
-    if (gl) { gl.remove(); gl = null; }
-    if (key) { key.free(); key = null; }
+    clear();
     await G.wait(0.35);
     if (lamp) lamp.on(true);
   }

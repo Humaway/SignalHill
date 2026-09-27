@@ -350,6 +350,73 @@ name); `switchboard/lamp_panel.setLamp`;
   scribble and set `S.maps`), doc (Menus reading view; the doc's `track` once; `DOCUMENTS[id].after(G, first)`),
   payphone (§2A exactly; Wai's `DIALOGUE.wai_payphone` lines when `waiSaved` and chapter > 3), breakTable (once per
   chapter), door (World.useDoor), useItem, sticker (also written to `META.stickers` for NG+).
+* **Jump scares (CONTRACT+).** Two calls, usable from any script (a cutscene, a trigger, an `onEnter`, a boss);
+  engine code and tests have `Script.scare(o)` / `Script.glimpse(o)` (no script context). `tools/tests/scare.mjs`.
+  * `await G.scare(o)` → `true` about 0.6 s later, or `false` at once when nothing happened. It plays the stinger
+    (`Snd 'scare'`), jolts the camera (`Cam.shake`, respects the Options switch), pulses the picture (`Render.flash`),
+    kicks the pad, makes Aidan flinch (the `flinch` gesture, his face goes `scared` for 2.6 s, a sharp breath — `'gasp'`)
+    and leaves his heart racing. `o = { id, kind, pos, vol, shake, flash, rumble, flinch, heart, lock }`:
+    `id` — once per save (`S.done['scare:'+id]`); `kind` — `'stab'` (default: a dissonant orchestral hit, ~1.5 s with
+    the room's reverb), `'screech'` (a rising metallic, voice-like shriek, ~1.2 s), `'slam'` (a huge door / metal slam,
+    the frame rattling), `'swell'` (a ~1.2 s reversed swell that lands on a stab — for a slow reveal: start it 1.2 s
+    before the thing is seen); `pos` `[x,y,z]|[x,z]` — the stinger in 3D (quieter with distance: full at 2 m, about
+    a third at 6 m; omit it for a full-level hit); `vol` (1); `shake` (0.45; 0 = none); `flash` (0..1, 0.3; 0 = none);
+    `rumble` (true); `flinch` (true — pass false when a scene has Aidan mid-gesture it wants kept); `heart` (seconds
+    of heartbeat after, 4; 0 = none); `lock` (seconds of control freeze, 0, at most 0.6).
+    **Rules:** a no-op (`false`, nothing plays, nothing is recorded) while this script — or any scene — is being
+    skipped, once Aidan is dead, or within **20 s of game time** of the last scare (`Script.SCARE.cooldown`; a load or
+    new game resets it). The `id` is **spent by the call however it ends** (played, skipped, swallowed by the
+    cooldown), so a skipped scene leaves `S` exactly as the played one does (skipall) — and a scare that lands inside
+    another's cooldown is gone for good: space them out, or test `G.scareReady` (no skip, Aidan alive, the cooldown
+    passed) before a scare you'd rather not lose. It never damages Aidan and never throws; without audio (a locked
+    browser) it still shakes, flashes and flinches. Each played scare is pushed to `SH.scares` (`{id, kind, t}`) and
+    emits Bus `'scare'(id, kind)`.
+  * `G.glimpse(o)` → `{ remove(), shown, done, actor }`: a figure that is there for a moment and then gone, by itself.
+    It never collides, never attacks, never reads on the phone, can't be locked on or hit, and is removed on a room
+    change. `o = { kind, pos, yaw, dur, anim|pose, expr, fadeOut, lookAt, onlyIfOnScreen, wait, rig, def }`:
+    `kind` — any Rig preset (`aidan aidan_perfect wai chase chloe luka luke nan nan_gown man_counter old_man customer
+    rep`, + `Rig.definePreset` ones) or a monster look: `tethered` (the watching variant: hunched, head turning after
+    Aidan within 16 m, silent), `reach` (breathing loop), `standard` (keys jingling; the clipboard over its face),
+    `borrowed` (`def:{disguise:'wai'|'chloe'|'luka'}`, the disguise), `smile` (the Ch 7 Smile, humming — its type is
+    registered by `data/17_ch7.js`), `closer` (the Ch 8 Closer's body, `data/18_ch8.js`) — each built by its own
+    Enemies type with AI, collider, threat and hits switched off (the Unread swarm is not a figure: spawn it). `pos`
+    `[x,z]` (on the floor) or `[x,y,z]`; `yaw` degrees (default: facing Aidan when `lookAt:'player'`, else 0); `dur`
+    seconds on screen (0.7); `anim`/`pose` a Rig loop (`stand_still`, `idle_hunched`, `crouch` …); `expr`; `fadeOut`
+    seconds (0 = it pops out; a monster's props — a Tethered's box and tether — pop out at the end); `lookAt:'player'`
+    (the head follows Aidan); `onlyIfOnScreen:true` — the figure waits hidden until it is inside the camera's view and
+    not lost in the fog, then its `dur` starts; it gives up after `wait` seconds (6) if it never comes into view (good
+    for a figure at the end of a corridor the fixed camera may or may not show); `rig` (Rig.create opts), `def` (extra
+    `Enemies.spawn` fields). A dummy handle (`done` true, nothing shown) while skipping or once Aidan is dead.
+    `Script.glimpses` counts the live ones.
+  * Examples:
+    ```js
+    // a trigger: the lights stutter, and for a moment someone stands at the end of the aisle
+    K.trigger([4, 10, 8, 14], async (G) => {
+      if (!G.scareReady) return;                                        // (keep it for a later pass instead of losing it)
+      G.glimpse({ kind: 'tethered', pos: [6, 22], lookAt: 'player', dur: 0.6, onlyIfOnScreen: true, wait: 3 });
+      await G.scare({ id: 'c3:aisle', kind: 'stab', pos: [6, 1.4, 22], flash: 0.2 });
+    }, { id: 'c3_hall:aisle', once: true });
+    // a slow reveal inside a cutscene: the swell starts, the camera turns, the hit lands on the face
+    G.scare({ id: 'c5:reveal', kind: 'swell', shake: 0.3, heart: 5 });
+    await G.wait(1.1);
+    G.cam({ pos: [2, 1.6, 4], target: 'c5:std_face', fov: 30 });
+    // a knock on the door he just closed behind him, then a whisper at his shoulder (plain sounds, no cooldown)
+    G.sfx('knock', { pos: [0, 1.4, -3.2] }); await G.wait(1.6); G.sfx('whisper', { pos: [0.4, 1.6, 0.3] });
+    ```
+  * The sounds alone (`G.sfx` / `Snd.play`): `'scare'` `{kind}` (the loudest one-shots in the game, peak ≈ 0.8 after
+    the limiter), `'whisper'` (close, breathy and wordless, ~1.5 s, `{dur}`; give it a `pos` right beside Aidan),
+    `'knock'` (three hard knocks on a door, `{n, gap, soft}`), `'gasp'` (a sharp breath in). They need no cooldown.
+  * Use them where the dread has been built and nothing has happened for a while; one per room at most, and never
+    two within a minute of each other (the cooldown only stops the worst).
+* **Music (CONTRACT+).** A motif is never chopped: `G.stopMusic(fade)` / `Snd.stopMusic(fade)` (and a motif handle's
+  `stop(fade)`) stretch a fade under 1.5 s to 2.5 s so the phrase lets go; pass `{hard:true}` for a deliberate cut
+  (`G.stopMusic(0, {hard:true})` — a CUT TO BLACK, silence). A new motif takes over from a playing one with a 2.5 s
+  crossfade (`{xfade}`). A skip still stops a scene's music after 1 s. `Snd.duck` never takes music below −6 dB (and a
+  2.4 kHz lowpass), so a motif under a ducked line of dialogue is never swallowed. Motif lengths (the last note's
+  release; the hall rings ~3.5 s past it): `tomorrow` 8.5 s, `{clipped:true}` 6 s (the chord and two notes — ≈ 3.7 s
+  of notes, then the ring-out: it stops unresolved, never mid-note), `{full:true}` 20 s; `nan` 18.5 s, `{full}` 45 s;
+  `line` 16.6 s, `{full}` 23.4 s; `{loop:true}` until stopped. Game's teardown (a load, a new game, the title) lets a
+  playing motif go over 3 s.
 
 ---
 
@@ -561,6 +628,24 @@ other dead enemies aren't spawned again.
   to read the same typed digits twice — a doubled digit made a correct code fail (the Ch 4 rotary flake).
 * Sound: `Snd.define(name, build(ctx, dest, o, t, own) → seconds|Infinity, {vol, bus, loops})` registers a content
   voice played like any other (`G.sfx`, `Snd.loop`, positional, ducked with the rest); wrap every node in `own(node)`.
+* **Sound levels (CONTRACT+, playtest feedback).** The phone ring and the shop-door chime were the most-heard sounds and
+  too loud: `ring` is −10 dB from its first calibration (LEVEL 0.45), `ringback` −4 dB, `chime` −9.6 dB, `pa_ding`
+  −4.4 dB. A call site's `vol` multiplies the level — keep a ring at `vol` ≤ 0.9 (a phone right beside Aidan at 0.9 is
+  now about as loud as a door closing), a chime at ≤ 0.9. The beds' own events are rarer and softer: a far ring in the
+  office bed every 90–180 s, in the Outage bed every 22–48 s (one or two cycles), the Outage's EFTPOS beeps every 9–20 s,
+  and the two-tone chime from nowhere every 90–180 s in the Fog world (ARCHITECTURE §7 says 40–90 s: the code wins) —
+  never over a scene (it waits for the scene to end).
+* **The scene duck (CONTRACT+).** While a letterboxed scene plays (`Script.cutscene`, not while it's being skipped)
+  the Outage bed — the stepping-switch pulse, the EFTPOS beeps, the far rings, the printer, the hold music — drains to
+  22 % over 0.7 s and the ordinary bed to 70 %; they come back over 2 s, 1 s after the scene ends. While a subtitle is up
+  in play (`UI.subtitleShown`: an examine thought, a background line) the Outage bed sits at 50 % (held 1.4 s past the
+  line, so it doesn't pump between lines). Nothing in content has to ask. A content loop that belongs to the
+  soundscape can join it: `Snd.play(name, {…, duck:'outage'|'bed'})` (a room's decor ring loops in the Outage, printer
+  chatter); a story sound (the phone that rings for Aidan) should not. `Snd.stats().sceneDuck` → `{out, bed}` (the
+  targets now), `Snd.stats().playing` → the names of up to 16 live voices (tests).
+* **`Render.flash(amount 0..1 = 0.5, dur = 0.3)` (CONTRACT+)** — the jump-scare pulse on top of `Render.post` (it never
+  writes it, so a scene's post restore is untouched): a bright frame (a lift toward white, exposure and a chromatic
+  split) that dies over `dur`, and a vignette that clamps in and lets go over 4 × `dur`; game time. `Render.flashLevel`.
 * Phone: `Phone.ring(id, {until, cancelOnLeave})`, `Phone.cancel(id?)`, `Phone.bars(override)`, `Phone.note(text, {id, done})`, `Phone.display({title, big, lines,
   button})` for inserts (e.g. "CASE 118-2231 … CALL").
 * **The signal: UNRELIABLE (default) or CLASSIC** — `META.options.signal` (Options → SIGNAL; a missing key reads as

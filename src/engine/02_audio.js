@@ -1930,11 +1930,15 @@ const Snd = (() => {
   // =============================================================================================================
   // Public API
   // =============================================================================================================
+  // CONTRACT+ opts.duck: 'outage' | 'bed' — the voice joins that bed's scene duck (an Outage room's decor ring loops,
+  // printer chatter: they drain with the Outage bed under a cutscene and a line)
   function busFor(name, o, d) {
+    if (o.duck === 'outage' && B.outDuck) return B.outDuck;
+    if (o.duck === 'bed' && B.bedDuck) return B.bedDuck;
     const b = o.bus || d.bus || (UI_ISH.has(name) && worldDimmed() ? 'ui' : 'fx');
     return b === 'ui' ? B.ui : b === 'amb' ? B.amb : b === 'music' ? B.music : B.fx;
   }
-  // Snd.play(name, {vol, pos, rate, loop, delay, pan, lp, hp, verb, phone, far, bus, …sound-specific}) → handle
+  // Snd.play(name, {vol, pos, rate, loop, delay, pan, lp, hp, verb, phone, far, bus, duck, …sound-specific}) → handle
   function play(name, o) {
     if (!ok()) return DUMMY;
     const fn = SFX[name];

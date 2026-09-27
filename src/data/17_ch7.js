@@ -2144,11 +2144,15 @@
     if (!(await G.until(() => beside() || gone(), { timeout: 20 })) || gone()) return;
     if (!G.scareReady || !C7_calm()) return;
     g = G.glimpse({ kind: 'tethered', pos: CH, yaw: -90, anim: 'sit', lookAt: 'player', dur: 1.3, onlyIfOnScreen: true, wait: 0.6 });
+    // (the tube over Room 12 catches it: a little cold light on its face and shoulders, off the wall behind it)
+    const key = G.addLight('point', { pos: [CH[0] - 0.9, 2.1, CH[1] + 0.6], color: '#cfe0da', intensity: 1.8, distance: 2.8 });
+    G.finally(() => { if (key) key.free(); });
     await G.until(() => g.shown || g.done, { timeout: 0.8 });
     if (!g.shown || gone()) return;
     await G.scare({ id: 'c7:chair', kind: 'stab', pos: [CH[0], 1.0, CH[1]], shake: 0.4, flash: 0.26, heart: 2.5 });
     await G.until(() => g.done, { timeout: 1.5 });
     g = null;
+    if (key) key.free();
     await G.wait(0.5);
     if (!gone()) G.sfx('creak', { pos: [CH[0], 0.5, CH[1]], vol: 0.35, metal: false, dur: 0.6 });
   }

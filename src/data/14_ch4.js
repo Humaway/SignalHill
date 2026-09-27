@@ -1653,14 +1653,16 @@
   // or Aidan's — pushes it up a level: L1 2 m, reddening; L2 3 m, the skin split to more shouting faces, a second pair
   // of arms torn free; L3 4 m, filling the store, fists like engine blocks, still holding up the phone. It can't be hurt.
   // Its attacks (jab → four-armed sweep → the slam and the roar) make standing and fighting a losing plan.
+  // (only what it can touch hurts: the jab and the sweep within arm's length, the slam where its fists come down — the
+  // floor lifts there first. The roar is a shout across the store: it shakes the room and hurts nobody.)
   // ---------------------------------------------------------------------------------------------------------------
   const ESC = {
-    lv: [{ s: 1.0, tint: 0.0, speed: 0.7, cd: 1.9 }, { s: 1.11, tint: 0.32, speed: 0.85, cd: 1.6 }, { s: 1.67, tint: 0.52, speed: 1.0, cd: 1.3 }, { s: 2.22, tint: 0.7, speed: 1.15, cd: 1.1 }],
+    lv: [{ s: 1.0, tint: 0.0, speed: 0.7, cd: 1.9 }, { s: 1.11, tint: 0.32, speed: 0.85, cd: 1.7 }, { s: 1.67, tint: 0.52, speed: 0.95, cd: 1.5 }, { s: 2.22, tint: 0.7, speed: 1.05, cd: 1.4 }],
     atk: {
-      jab: { reach: 1.55, wind: 0.55, rec: 0.6, dmg: 12, arc: 80, push: 0.8 },
-      sweep: { reach: 2.7, wind: 0.8, rec: 0.8, dmg: 18, arc: 150, push: 1.3 },
-      slam: { reach: 3.0, wind: 1.1, rec: 1.2, dmg: 28, radius: 2.2, knock: true },
-      roar: { reach: 7.0, wind: 0.65, rec: 0.9, dmg: 6, arc: 60, push: 2.2 },
+      jab: { reach: 1.5, wind: 0.6, rec: 0.6, dmg: 12, arc: 80, push: 0.8 },
+      sweep: { reach: 2.2, wind: 0.85, rec: 0.8, dmg: 16, arc: 140, push: 1.0 },
+      slam: { reach: 2.6, wind: 1.2, rec: 1.3, dmg: 24, radius: 1.5, knock: true },
+      roar: { reach: 7.0, wind: 0.65, rec: 0.9, dmg: 0 },
     },
     lines: ['I just need a new SIM.', 'I don\'t have ID.', 'Do it anyway.', 'I just need it.', 'Do it anyway.'],
   };
@@ -1750,6 +1752,7 @@
   function C4_escUpdate(e, dt, ai) {
     const D = e.data, a = e.actor;
     C4_escVisual(e, dt);
+    if (D.tele && !(D.state === 'windup' && D.atk === 'slam' && D.fight)) C4_escTele(e, null);
     if (!D.fight || !ai || D.grabbed) { if (!D.grab && D.state !== 'idle' && !D.fight) { D.state = 'idle'; a.setAnim('idle', { blend: 0.4 }); } return; }
     const lv = ESC.lv[D.level], t = now();
     // the grab: once, when Chase has hit it four times, Level 3 takes hold of him
@@ -1801,6 +1804,7 @@
         turn(D.atk === 'slam' ? 1.2 : 2.0);
         D.t += dt;
         const A = ESC.atk[D.atk];
+        if (D.atk === 'slam') C4_escTele(e, Math.min(1, D.t / A.wind));
         if (D.t >= A.wind) C4_escStrike(e, D.atk, tgt, tp);
         break;
       }
@@ -1808,28 +1812,45 @@
       default: D.state = 'move';
     }
   }
+  // where the slam's fists come down (in front of it, further as it grows)
+  const C4_slamAt = (e) => { const k = 1.5 * (e.data.s || 1) * 0.6; return [e.pos.x + Math.sin(e.yaw) * k, e.pos.z + Math.cos(e.yaw) * k]; };
+  // the slam's wind-up tell: the floor it will hit lifts in a faint disc of dust (k 0..1; null removes)
+  function C4_escTele(e, k) {
+    const D = e.data;
+    if (k === null) { if (D.tele) { D.tele.removeFromParent(); D.tele.geometry.dispose(); D.tele.material.dispose(); D.tele = null; } return; }
+    if (!D.tele) {
+      const m = new THREE.Mesh(new THREE.RingGeometry(0.15, ESC.atk.slam.radius, 40), new THREE.MeshBasicMaterial({ color: '#b39a78', transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+      m.rotation.x = -Math.PI / 2; m.userData.ownedGeo = true; m.renderOrder = 1; e.fx.add(m); D.tele = m;
+    }
+    const [x, z] = C4_slamAt(e);
+    D.tele.position.set(x, 0.035, z);
+    D.tele.material.opacity = 0.06 + 0.26 * k * (0.75 + 0.25 * Math.sin(now() * 14));
+  }
   function C4_escStrike(e, atk, tgt, tp) {
     const D = e.data, A = ESC.atk[atk], s = D.s || 1, a = e.actor;
     D.state = 'recover'; D.t = 0;
-    const P = Player.pos, fw = [Math.sin(e.yaw), Math.cos(e.yaw)];
+    C4_escTele(e, null);
+    const P = Player.pos;
     const inArc = (px, pz, reach, arc) => { const dx = px - e.pos.x, dz = pz - e.pos.z, d = Math.hypot(dx, dz); if (d > reach) return false; const ang = Math.abs(U.angleDiff(e.yaw, Math.atan2(dx, dz))) / D2R; return d < 0.9 || ang <= arc / 2; };
     let hitA = false, hitC = false;
     const F = C4.fight, chRaw = F && F.ch && F.ch.raw;
     if (atk === 'slam') {
       q(a.gesture('swing', { hand: 'L', dur: 0.45 }));
-      const ix = e.pos.x + fw[0] * 1.5 * s * 0.6, iz = e.pos.z + fw[1] * 1.5 * s * 0.6;
+      const [ix, iz] = C4_slamAt(e);
       try { Snd.play('slam', { pos: [ix, 0.2, iz] }); Snd.play('thud', { pos: [ix, 0.2, iz], vol: 1 }); Cam.shake(0.6, 0.7); } catch (err) { /* fx */ }
       hitA = Math.hypot(P.x - ix, P.z - iz) <= A.radius;
       if (chRaw) hitC = Math.hypot(chRaw.root.position.x - ix, chRaw.root.position.z - iz) <= A.radius;
+    } else if (atk === 'roar') {
+      // (a shout: the room shakes, nobody is touched)
+      try { Snd.play('murmur_reach', { pos: [e.pos.x, 2, e.pos.z], vol: 1.0 }); Cam.shake(0.3, 0.8); } catch (err) { /* fx */ }
     } else {
       q(a.gesture('swing', { hand: 'L', dur: 0.5 }));
       try { Snd.play('swing', { pos: [e.pos.x, 1.4, e.pos.z], heavy: true }); } catch (err) { /* audio */ }
       const reach = atk === 'jab' ? A.reach * s : A.reach;
       hitA = inArc(P.x, P.z, reach, A.arc);
       if (chRaw) hitC = inArc(chRaw.root.position.x, chRaw.root.position.z, reach, A.arc);
-      if (atk === 'roar') { try { Cam.shake(0.3, 0.8); } catch (err) { /* cam */ } }
     }
-    if (hitA && !Player.dead) Player.damage(A.dmg, e, { push: A.push || 1.4, from: e.pos, knock: !!A.knock, force: true });
+    if (hitA && A.dmg > 0 && !Player.dead) Player.damage(A.dmg, e, { push: A.push || 1.4, from: e.pos, knock: !!A.knock, force: true });
     if (hitC && F) C4_chaseKnocked(F, e);
   }
   // Level 3 takes hold of Chase: lifts him, shakes him, throws him against the counter (he's hurt in the next scene)
@@ -1886,17 +1907,22 @@
       const D = e.data, a = e.actor, k = clamp((D.vis || 0) - 2, 0, 1);
       if (k > 0 && a.bones.spine) { a.bones.spine.rotation.x += 0.28 * k; a.bones.neck.rotation.x -= 0.2 * k; }
     },
-    remove: (e) => { if (C4.esc === e) C4.esc = null; },
+    remove: (e) => { C4_escTele(e, null); if (C4.esc === e) C4.esc = null; },
   });
 
   // ---------------------------------------------------------------------------------------------------------------
   // Chase in the fight: he goes at it and swings every 4 s — unless Aidan is within 2 m holding E ("Hold him back"),
   // which pulls him toward Aidan. Every hit that lands counts in S.chaseHits (and pushes it up a level).
+  // (forgiving on purpose: the grab reaches a little past 2 m, once caught he stays caught while E is held — through a
+  // knock, a stumble, Aidan breaking into a run — and a let-go of E for a second (to press the duress button) keeps him.
+  // His first swing waits long enough for Aidan to cross the store. Aidan at the back office door with Chase beside him
+  // after the duress button is the win: they're in.)
   // ---------------------------------------------------------------------------------------------------------------
+  const HOLD = { grab: 2.4, keep: 3.4, lose: 4.5, grace: 1.5, firstSwing: 6.5, door: [19.45, OS.office[1]], doorR: 1.6, withR: 3.2 };
   function C4_fightStart(G, e) {
     const ch = G.actor('chase', 'chase');
     if (ch.raw) { ch.raw.idleLife = false; ch.hold('R', 'bar', { pose: 'bar_ready' }); ch.expr('angry'); }
-    C4.fight = { e, ch, state: 'attack', held: false, relT: 0, swingT: 2.5, downT: 0, hurt: false, path: null, pathT: 0, said: 0, promptT: 0 };
+    C4.fight = { e, ch, state: 'attack', held: false, relT: 0, swingT: HOLD.firstSwing, downT: 0, hurt: false, path: null, pathT: 0, said: 0, promptT: 0, aloneT: 0 };
     e.data.fight = true; e.data.level = Math.max(1, e.data.level); e.data.cd = 2.0; e.data.state = 'move';
     return C4.fight;
   }
@@ -1928,9 +1954,17 @@
     // objective message — that press is consumed, but the key is still down)
     const holding = !!(Input.held ? Input.held('interact') : Input.down && Input.down('interact'));
     const canHold = F.state !== 'grabbed' && F.state !== 'down';
-    if (canHold && holding && dA < (F.held ? 2.7 : 2.0)) { if (!F.held && F.said < CHASE_HELD.length && Math.random() < 0.6) { const l = CHASE_HELD[F.said++]; G.bg(async (G2) => { await G2.say('CHASE', l); }); } F.held = true; F.relT = 0; }
-    else if (F.held) { F.relT += dt; if (F.relT > 0.8 || dA > 3.4) F.held = false; }
-    try { UI.holdPrompt(dA < 2.3 && canHold ? 'Hold {interact}: Hold him back' : null, F.held ? 1 : 0); } catch (err) { /* ui */ }
+    if (canHold && holding && dA < (F.held ? HOLD.keep : HOLD.grab)) { if (!F.held && F.said < CHASE_HELD.length && Math.random() < 0.6) { const l = CHASE_HELD[F.said++]; G.bg(async (G2) => { await G2.say('CHASE', l); }); } F.held = true; F.relT = 0; }
+    else if (F.held && F.state === 'grabbed') F.held = false;
+    // (knocked down while held, he's still held when he gets up — if Aidan still has hold of him)
+    else if (F.held && F.state !== 'down') { F.relT += dt; if (F.relT > HOLD.grace || dA > HOLD.lose) F.held = false; }
+    try { UI.holdPrompt(canHold && (F.held || dA < HOLD.grab) ? 'Hold {interact}: Hold him back' : null, F.held ? 1 : 0); } catch (err) { /* ui */ }
+    // the back office: once the duress button has released it, Aidan at the door with Chase beside him is enough
+    if (done('c4:duress') && F.state !== 'grabbed' && fdist(P, { x: HOLD.door[0], z: HOLD.door[1] }) < HOLD.doorR) {
+      if (dA < HOLD.withR) { G.set('c4_bossDone', true); return; }
+      F.aloneT -= dt;
+      if (F.aloneT <= 0) { F.aloneT = 8; G.bg(async (G2) => { await G2.think('Not without Chase.'); }); }
+    }
     // (held, he slips past the Escalation's body: its dynamic collider stands between the counter and the back office,
     // and walking straight into it left him stuck behind it — out of Aidan's reach — while Aidan walked on to the door)
     const mo = F.held ? { ignore: (c) => !!c.dynamic } : {};
@@ -1952,7 +1986,8 @@
     if (F.state === 'down') { F.downT -= dt; if (F.downT <= 0) { F.state = 'attack'; raw.setAnim(F.hurt ? 'hurt' : 'idle', { blend: 0.4 }); F.swingT = Math.max(F.swingT, 1.5); } return; }
     if (F.held) {
       F.state = 'held';
-      const sp = F.hurt ? 1.3 : 1.7;
+      // (he keeps up: dragged along at Aidan's side, at a run if Aidan runs)
+      const sp = dA > 1.7 ? (F.hurt ? 3.0 : 3.8) : (F.hurt ? 1.3 : 1.7);
       const moving = moveTo(P.x, P.z, sp, 1.0);
       if (!moving) face(e.pos.x, e.pos.z);
       const an = moving ? 'walk' : (F.hurt ? 'hurt' : 'idle');
@@ -2002,7 +2037,7 @@
       return;
     }
     const F = C4.fight, ch = F && F.ch && F.ch.raw;
-    const near = ch && fdist(ch.root.position, Player.pos) < 2.9 && F.state !== 'grabbed';
+    const near = ch && fdist(ch.root.position, Player.pos) < HOLD.withR && F.state !== 'grabbed';
     if (F && !near) { await G.think('Not without Chase.'); return; }
     G.set('c4_bossDone', true);
   }

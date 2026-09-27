@@ -838,7 +838,8 @@
   defineCutscene('E-FT', async (G) => {
     await G.fade(1, 1.0);
     stopFx(0.3);
-    try { G.stopMusic(1.5); } catch (e) { /* audio */ }
+    // (E-FT0's Tomorrow motif is still on its last, unresolved note: it rings out under the black instead of being cut)
+    try { G.stopMusic(3.5); } catch (e) { /* audio */ }
     fogWorld(G);
     const st = { mode: 'ft', day: 'Monday', num: '31', numK: 1, ask: 0, names: ['AIDAN', 'CHLOE', 'PRIYA', 'JOSH', 'LUKA'] };
     boardDraw(st); lbDraw('ft'); END.lbMode = 'ft'; monDraw('ft'); END.monMode = 'ft';
@@ -908,9 +909,9 @@
     await G.wait(3.6);
     G.sfx('chime', { vol: 0.9 });
     await G.wait(0.9);
+    // cut to black — the picture, not the motif: its last notes ring out on the black (no music follows this ending)
     await G.fade(1, 0);
-    try { G.stopMusic(0.3); } catch (e) { /* audio */ }
-    await G.wait(1.2);
+    await G.wait(2.4);
     // (state: none)
   }, { letterbox: true, skippable: true });
 
@@ -1386,7 +1387,7 @@
     await G.wait(0.35);
     // CUT TO BLACK. Silence. The title: SIGNAL HILL.
     await G.fade(1, 0);
-    G.stopMusic(0);
+    G.stopMusic(0, { hard: true });                                   // (spec: the cut to black is a cut to silence)
     G.ambient('none', 0);
     G.duck(0, 0.1);
     await G.wait(2.2);

@@ -21,14 +21,19 @@
 //                   Phone bars flicker 0–5 at random (G.bars('flicker')). Heavy wind.
 //   c8_transmitter  Inside the 6 × 6 m hut: an impossibly large 30 × 20 m glossy sales floor (the Closer's arena):
 //                   white plinths, spotlights, a gleaming counter, windows full of fog and the town's faint lights.
-// Cutscenes: 8-1 "The Mirror" (→ the Yes check at the hut door → G.ending('yes') | 8-2), 8-2 "The Pitch" → BOSS
-//   'closer' (Phase 1 The Pitch: DIALOGUE.closer_pitch every 8 s, [Hold E] Lower your hands → 8-2A "Signed" →
-//   acceptedDeal → G.ending('tomorrow'); attacking → Phase 2 The Close: HP 300, pen slashes, the lunge, the sweeping
-//   spotlight, signatures (UI.stamp), DIALOGUE.closer_barks) → at 30 % 8-3 "The Callback" → BOSS 'closer_call' (crawl to
-//   the phone) → 8-4 "Ringing" → Game.endingFor(S): E-C1 "Connected" | E-OC0 | E-FT0 → G.ending(name).
+// Cutscenes: 8-1 "The Mirror" (→ the Yes check at the hut door → G.ending('yes') | 8-2), 8-2 "The Pitch" → the fight
+//   at once (revised after playtesting; no prompt): BOSS 'closer', the opening exchange (it circles him close, the Pitch
+//   lines in order every 8 s, a slow telegraphed slash now and then; hittable) → after 2 landed hits or 25 s CUTSCENE
+//   8-2B "The Offer" (the knockdown: it strikes him to the floor, stands over him, the Pitch's closing lines, then the
+//   choice Surrender | Fight) → Surrender: 8-2A "Signed" → acceptedDeal → G.ending('tomorrow') · Fight: "...No.",
+//   S.flags.c8_fight + an autosave → BOSS 'closer_close', Phase 2 The Close (HP from 250, pen slashes, the lunge, the
+//   sweeping spotlight, signatures (UI.stamp), DIALOGUE.closer_barks; the numbers: CLK) → at 30 % 8-3 "The Callback" →
+//   BOSS 'closer_call' (crawl to the phone) → 8-4 "Ringing" → Game.endingFor(S): E-C1 "Connected" | E-OC0 | E-FT0 →
+//   G.ending(name).
 // Stickers: sticker11 (under the lookout bench on the second hairpin), sticker12 (mast platform 2, the kick plate).
 // State: S.flags c8_luka (seen him), c8_phone (emergency phone used), c8_gate (padlock open), c8_nest (knocked off once),
-//   c8_std (the Standard started), c8_top (reached P3), acceptedDeal (fate); S.done c8:* keys and cs:* ids.
+//   c8_std (the Standard started), c8_top (reached P3), c8_fight (chose Fight in 8-2B: a reload resumes The Close),
+//   acceptedDeal (fate); S.done c8:* keys and cs:* ids.
 {
   const D2R = Math.PI / 180;
   const clamp = U.clamp, lerp = U.lerp;
@@ -1668,6 +1673,22 @@
   // ---- the Closer: Aidan, perfected (spec §6): 2.5 m, a pressed uniform, flawless hair, a gleaming badge, the smile to
   // the ears with too many perfect teeth; the right hand a long silver pen fused into the bone, the left a tablet with a
   // contract. Damage splits the uniform: layers of signed contracts beneath, ink running from the tears. ----------------
+  // The fight's numbers (spec §6 "The Closer", revised after playtesting — see the note there). Every attack is read
+  // before it lands and leaves it standing open after: "hit it after it swings" works without frame-perfect timing.
+  //   HP 300 (spec). Aidan's weapons do ×1.25 on it (the steel bar's 20 → 25). The opening exchange ends in the knockdown
+  //   (CUTSCENE 8-2B) after 2 landed hits or 25 s; its HP is then set to 250, so The Close runs 250 → 90 (30 %): 7 bar
+  //   hits (6.4), plus ~1–2 for every contract it gets signed. A reload into The Close starts it at 250 too.
+  //   Wind-ups ≥ 0.7 s (the pen raised with a glint on the nib and a pen click): the opening's slow slash 1.1 s, the
+  //   slash 0.85 s, the lunge 1.0 s. After every attack it stands open 1.5 s, smoothing its uniform.
+  //   Its hitbox is 0.8 m round (the bar lands from 1.5 + 0.8 m) and its slash reaches 2.3 m: whenever it can reach him
+  //   he can reach it. Every 2nd hit that lands staggers it (0.9 s; a wind-up it was in is lost).
+  //   To Aidan (× DIFF.dmg: Easy ½, Hard 1½): pen slash 13, lunge 13 (knocks him down), the spotlight 8. Every hit that
+  //   lands on him stamps a signature; the third signs the contract: the stamps clear and it recovers 10 % of its HP.
+  const CLK = {
+    hp: 300, hitMul: 1.25, knockHp: 250, openHits: 2, openMax: 25, openR: 2.0,
+    wind: { open: 1.1, slash: 0.85, lunge: 1.0 }, recover: 1.5, reach: 2.3, arc: 55, hitR: 0.8,
+    dmg: 13, beam: 8, beamCd: 3.0, heal: 0.1, stagger: 0.9,
+  };
   function C8_closerCreate(e, def) {
     const a = Rig.human({
       height: 2.5, build: 'slim', gender: 'm', age: 22, skin: '#e0b699', seed: 22,
@@ -1680,7 +1701,7 @@
     });
     a.idleLife = false;
     e.actor = a; e.obj = a.root; e.pos = a.root.position;
-    e.radius = 0.5; e.height = 2.5; e.hp = e.maxHp = def.hp ?? 300;
+    e.radius = 0.5; e.height = 2.5; e.hp = e.maxHp = def.hp ?? CLK.hp;
     a.expr('smile_huge');
     const chrome = new THREE.MeshStandardMaterial({ color: '#dfe3e4', roughness: 0.14, metalness: 0.95 });
     const skin = new THREE.MeshStandardMaterial({ color: '#e0b699', roughness: 0.55 });
@@ -1698,6 +1719,8 @@
     // silver running up under the skin of the forearm, where it's fused
     if (fore) for (let i = 0; i < 3; i++) { const v = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.2 + i * 0.05, 5), chrome); v.position.set(-0.02 + i * 0.02, -0.16 - i * 0.02, 0.035); v.rotation.z = (i - 1) * 0.12; fore.add(v); }
     e.data.pen = pen;
+    // the glint on the nib: the wind-up's tell (shown only while it winds up)
+    try { const gl = Render.halo([0, -0.74, 0], { parent: pen, color: '#f6fbff', size: 0.5, opacity: 0.9, fog: 0.2, name: 'closer:glint' }); gl.visible = false; e.data.glint = gl; } catch (err) { e.data.glint = null; }
     // the tablet with the contract
     C8_signTablet(0);
     a.hold('L', 'tablet', { tex: C8_tabletTex(), pose: 'tablet_read' });
@@ -1724,42 +1747,102 @@
     const n = frac > 0.9 ? 0 : frac > 0.78 ? 1 : frac > 0.66 ? 2 : frac > 0.54 ? 3 : frac > 0.42 ? 4 : frac > 0.33 ? 5 : 6;
     T.forEach((m, i) => { m.visible = i < n; });
   }
+  // ink on the white floor where it's hit (it runs from the tears): a few dark drops, cleared with the room
+  function C8_ink(e) {
+    try {
+      const grp = World.build && World.build.group;
+      if (!grp) return;
+      const list = C8.ink || (C8.ink = []);
+      if (!C8.inkMat) C8.inkMat = new THREE.MeshBasicMaterial({ color: '#0b1030', transparent: true, opacity: 0.88, depthWrite: false });
+      for (let k = 0; k < 3; k++) {
+        const r = 0.03 + Math.random() * 0.06, m = new THREE.Mesh(new THREE.CircleGeometry(r, 10), C8.inkMat);
+        m.rotation.x = -Math.PI / 2; m.position.set(e.pos.x + (Math.random() - 0.5) * 0.9, 0.004 + list.length * 0.0001, e.pos.z + (Math.random() - 0.5) * 0.9);
+        m.renderOrder = 2; grp.add(m); list.push(m);
+      }
+      while (list.length > 30) { const o = list.shift(); if (o.parent) o.parent.remove(o); o.geometry.dispose(); }
+    } catch (err) { /* cosmetic */ }
+  }
+  function C8_inkClear() { for (const o of C8.ink || []) { if (o.parent) o.parent.remove(o); try { o.geometry.dispose(); } catch (err) { /* gone */ } } C8.ink = []; }
   Enemies.defineType('closer', {
-    hp: 300, radius: 0.5, height: 2.5, downs: false, stompable: false, lockable: true, tell: 'plain', steps: { stride: 1.1, vol: 0.9, heavy: true },
+    hp: CLK.hp, radius: 0.5, height: 2.5, downs: false, stompable: false, lockable: true, tell: 'plain', steps: { stride: 1.1, vol: 0.9, heavy: true },
     threat: (e) => !!(C8.fight && C8.fight.phase >= 1 && C8.fight.phase < 4),
     create: (e, def) => C8_closerCreate(e, def),
-    hitbox: (e) => [{ x: e.pos.x, z: e.pos.z, r: 0.55, y0: e.pos.y, y1: e.pos.y + 2.5 }],
-    stun(e, sec) { e.data.stunT = Math.min(1.2, sec || 1); return false; },
+    // (a 2.5 m figure with a long reach: 0.8 m round, so the steel bar lands wherever its pen can reach him)
+    hitbox: (e) => [{ x: e.pos.x, z: e.pos.z, r: CLK.hitR, y0: e.pos.y, y1: e.pos.y + 2.5 }],
+    stun(e, sec) { C8_stagger(e, Math.min(1.2, sec || 1)); return false; },
     knockdown: () => false,
     onHit(e, dmg, weapon) { C8_closerHit(e, dmg, weapon); return false; },
     update: (e, dt, ai) => C8_closerUpdate(e, dt, ai),
-    remove: (e) => { for (const m of e.data.mats || []) { try { m.dispose(); } catch (err) { /* gone */ } } if (C8.closer === e) C8.closer = null; },
+    remove: (e) => {
+      try { if (e.data.glint && e.data.glint.userData.free) e.data.glint.userData.free(); } catch (err) { /* gone */ }
+      for (const m of e.data.mats || []) { try { m.dispose(); } catch (err) { /* gone */ } }
+      if (C8.closer === e) C8.closer = null;
+    },
   });
   const barks = () => (typeof DIALOGUE !== 'undefined' && Array.isArray(DIALOGUE.closer_barks) && DIALOGUE.closer_barks.length ? DIALOGUE.closer_barks : ['Sign here.', 'Initial there.', "It'll be fine.", 'Any other questions?']);
   const pitchLines = () => (typeof DIALOGUE !== 'undefined' && Array.isArray(DIALOGUE.closer_pitch) && DIALOGUE.closer_pitch.length ? DIALOGUE.closer_pitch : []);
   // lines while the fight runs (never block the loop)
   function C8_bgSay(who, line) { try { Script.run(async (G) => { await G.say(who, line); }, { control: true, name: 'c8:say' }); } catch (e) { /* script */ } try { if (C8.closer && C8.closer.actor) C8.closer.actor.talk(Math.min(3, 0.4 + line.length * 0.05)); } catch (e) { /* rig */ } }
+  function C8_bgHush() { for (let k = 0; k < 6; k++) { let hit = false; try { hit = !!Script.abort('c8:say', 'scene'); } catch (e) { hit = false; } if (!hit) break; } }
+  // the wind-up's tell: the glint on the nib
+  function C8_glintOff(e) { const g = e && e.data && e.data.glint; if (g) g.visible = false; }
+  function C8_glintTick(e) {
+    const D = e.data, g = D.glint;
+    if (!g) return;
+    if (D.st !== 'windup') { if (g.visible) g.visible = false; return; }
+    const k = clamp(D.t / 0.2, 0, 1), p = 0.55 + 0.45 * Math.abs(Math.sin(D.t * 8));
+    g.visible = true; g.userData.opacity = 0.95 * k * p; g.scale.setScalar(0.3 + 0.45 * k * p);
+  }
+  // the slash's swing gesture: raised by 0.34 s and held there, the strike (its key at 0.46 of 1.1 s) landing as the
+  // wind-up ends
+  function C8_swingHold(e, t, W) {
+    let g = null;
+    try { g = e.actor.state.gest.body; } catch (err) { g = null; }
+    if (!g || g.name !== 'swing') return;
+    g.speed = t < W - 0.17 && g.t >= 0.34 ? 0 : 1;
+  }
+  function C8_startAttack(e, atk, W) {
+    const D = e.data, a = e.actor;
+    D.st = 'windup'; D.atk = atk; D.t = 0; D.wind = W; D.smoothed = false;
+    if (a.anim !== 'idle') a.setAnim('idle', { blend: 0.2 });
+    if (atk === 'slash') q(a.gesture('swing', { hand: 'R', dur: 1.1 }));
+    else q(a.gesture('reach', { hand: 'R', target: Player.actor, dur: W + 0.45 }));
+    sfx('penclick', { pos: [e.pos.x, 2.1, e.pos.z], vol: 1.0 });
+    if (atk === 'lunge') { try { Snd.play('murmur_closer', { pos: [e.pos.x, 2.3, e.pos.z], vol: 0.45, dur: 0.9 }); } catch (err) { /* audio */ } }
+  }
+  // a stagger (every 2nd hit that lands, the extinguisher's spray): whatever it was winding up is lost
+  function C8_stagger(e, sec) {
+    const D = e.data;
+    D.stunT = Math.max(D.stunT || 0, sec);
+    D.st = 'move'; D.t = 0; D.cd = Math.max(D.cd || 0, 1.0);
+    C8_glintOff(e);
+    try { e.actor.finishGestures(); e.actor.setAnim('stagger', { blend: 0.12 }); } catch (err) { /* rig */ }
+  }
   function C8_closerHit(e, dmg, weapon) {
-    const F = C8.fight;
-    if (!F || F.phase === 3 || F.phase >= 4) { sfx('thud', { pos: [e.pos.x, 1.4, e.pos.z], vol: 0.4 }); return; }
-    if (F.phase === 1) { F.attacked = true; return; }
-    e.hp = Math.max(0, e.hp - (dmg || 0));
-    e.data.flinchT = 0.25;
-    if (e.data.st === 'windup' && e.data.atk === 'slash') { e.data.st = 'recover'; e.data.t = 0; }
+    const F = C8.fight, D = e.data;
+    if (!F || (F.phase !== 1 && F.phase !== 2)) { sfx('thud', { pos: [e.pos.x, 1.4, e.pos.z], vol: 0.4 }); return; }
+    e.hp = Math.max(0, e.hp - (+dmg || 0) * (weapon === 'unarmed' ? 1 : CLK.hitMul));
+    F.hits = (F.hits | 0) + 1;
+    D.flinchT = 0.3;
     sfx('paper_tear', { pos: [e.pos.x, 1.6, e.pos.z], vol: 0.8 });
     sfx('hit', { pos: [e.pos.x, 1.4, e.pos.z], vol: 0.6 });
     C8_closerTears(e);
-    try { q(e.actor.gesture('flinch')); } catch (err) { /* rig */ }
+    C8_ink(e);
+    if (F.hits % 2 === 0) C8_stagger(e, CLK.stagger);
+    else if (D.st === 'windup' || D.st === 'lunge') { try { q(e.actor.gesture('tremor', { amount: 0.7, dur: 0.5 })); } catch (err) { /* rig */ } }
+    else { try { q(e.actor.gesture('flinch')); } catch (err) { /* rig */ } }
   }
-  // Player hit by the Closer: the damage, and a signature on the lens; three signatures and the contract is signed
+  // Player hit by the Closer: the damage, and a signature on the lens; in The Close the third one signs the contract
   function C8_signHit(e, dmg, o = {}) {
     const F = C8.fight;
     if (!F || Player.dead) return;
+    const h0 = S.health;
     Player.damage(dmg, e, { force: true, push: o.push ?? 1.0, from: e.pos, knock: !!o.knock });
+    F.taken = (F.taken || 0) + Math.max(0, h0 - S.health);
     if (Player.dead) return;
-    F.sigs = (F.sigs | 0) + 1;
+    F.sigs = Math.min(3, (F.sigs | 0) + 1);
     try { UI.stamp('signature', { count: F.sigs }); } catch (err) { /* ui */ }
-    if (F.sigs >= 3 && !F.restartT) F.restartT = 1.8;
+    if (F.phase === 2 && F.sigs >= 3 && !F.restartT) F.restartT = 1.8;
   }
   function C8_closerMove(e, tx, tz, sp, dt, stop = 0.2) {
     const dx = tx - e.pos.x, dz = tz - e.pos.z, d = Math.hypot(dx, dz);
@@ -1773,19 +1856,9 @@
   function C8_closerUpdate(e, dt, ai) {
     const F = C8.fight, a = e.actor, D = e.data;
     if (D.flinchT > 0) D.flinchT -= dt;
-    if (D.stunT > 0) D.stunT -= dt;
-    if (!F || !ai || !Player.pos || Player.dead) { if (a.anim === 'walk') a.setAnim('idle', { blend: 0.4 }); return; }
+    C8_glintTick(e);
+    if (!F || !ai || !Player.pos || Player.dead) { C8_glintOff(e); if (a.anim === 'walk') a.setAnim('idle', { blend: 0.4 }); return; }
     const P = Player.pos, d = Math.hypot(P.x - e.pos.x, P.z - e.pos.z);
-    // ---- Phase 1, The Pitch: it circles him, facing him, talking ----
-    if (F.phase === 1) {
-      F.ang = (F.ang ?? Math.atan2(e.pos.x - P.x, e.pos.z - P.z)) + dt * 0.24;
-      const R = 3.8, tx = P.x + Math.sin(F.ang) * R, tz = P.z + Math.cos(F.ang) * R;
-      const moving = C8_closerMove(e, tx, tz, 1.0, dt, 0.15);
-      C8_face(e, P.x, P.z, 2.5, dt);
-      const an = moving ? 'walk' : 'idle';
-      if (a.anim !== an) a.setAnim(an, { blend: 0.4 });
-      return;
-    }
     // ---- Phase 3, The Callback: it looms over him as he crawls, and swipes ----
     if (F.phase === 3) {
       const [px, pz] = TR.phone, bx = P.x - px, bz = P.z - pz, bl = Math.hypot(bx, bz) || 1;
@@ -1814,47 +1887,79 @@
       if (a.anim !== an && D.st !== 'swipe') a.setAnim(an, { blend: 0.4 });
       return;
     }
-    if (F.phase !== 2) return;
-    // ---- Phase 2, The Close ----
-    if (F.restartT) return;                                      // the contract's signed: it stands back, smoothing its uniform
-    if (D.stunT > 0) { if (a.anim !== 'stagger') a.setAnim('stagger', { blend: 0.2 }); return; }
+    if (F.phase !== 1 && F.phase !== 2) return;
+    // ---- the opening (Phase 1) and The Close (Phase 2) ----
+    if (D.stunT > 0) {
+      D.stunT -= dt;
+      if (a.anim !== 'stagger') a.setAnim('stagger', { blend: 0.12 });
+      if (D.stunT <= 0) { D.stunT = 0; a.setAnim('idle', { blend: 0.3 }); }
+      return;
+    }
+    if (F.phase === 2 && F.restartT) {                           // the contract's signed: it stands back, smoothing its uniform
+      C8_face(e, P.x, P.z, 2, dt);
+      if (a.anim !== 'idle') a.setAnim('idle', { blend: 0.4 });
+      return;
+    }
+    const opening = F.phase === 1;
     D.cd -= dt;
     switch (D.st) {
       case 'windup': {
         D.t += dt;
-        C8_face(e, P.x, P.z, D.atk === 'lunge' ? 1.5 : 3.0, dt);
-        if (D.atk === 'slash' && D.t >= 0.55) {
-          D.st = 'recover'; D.t = 0;
+        const W = D.wind || CLK.wind.slash;
+        C8_face(e, P.x, P.z, D.atk === 'lunge' ? 1.5 : opening ? 1.6 : 2.2, dt);
+        if (D.atk === 'slash') C8_swingHold(e, D.t, W);
+        if (D.atk === 'slash' && D.t >= W) {
+          D.st = 'recover'; D.t = 0; C8_glintOff(e); C8_swingHold(e, 99, 0);
           const ang = Math.abs(U.angleDiff(e.yaw, Math.atan2(P.x - e.pos.x, P.z - e.pos.z)));
           sfx('swing', { pos: [e.pos.x, 1.8, e.pos.z], heavy: true });
-          if (d <= 2.45 && ang < 58 * D2R && Math.abs(P.y - e.pos.y) < 1.3) C8_signHit(e, 20, { push: 1.2 });
-        } else if (D.atk === 'lunge' && D.t >= 0.75) {
-          D.st = 'lunge'; D.t = 0; D.hit = false; D.dir = e.yaw;
+          if (d <= CLK.reach && ang < CLK.arc * D2R && Math.abs(P.y - e.pos.y) < 1.3) C8_signHit(e, CLK.dmg, { push: 1.1 });
+        } else if (D.atk === 'lunge' && D.t >= W) {
+          D.st = 'lunge'; D.t = 0; D.hit = false; D.dir = e.yaw; C8_glintOff(e);
           sfx('whoosh', { pos: [e.pos.x, 1.6, e.pos.z], vol: 0.9 });
         }
         break;
       }
       case 'lunge': {
         D.t += dt;
-        const sp = 7.5 * dt, r = World.move(e.pos, Math.sin(D.dir) * sp, Math.cos(D.dir) * sp, 0.45, { ignore: (c) => !!c.enemy });
+        const sp = 7.0 * dt, r = World.move(e.pos, Math.sin(D.dir) * sp, Math.cos(D.dir) * sp, 0.45, { ignore: (c) => !!c.enemy });
         const blocked = Math.hypot(r.x - e.pos.x, r.z - e.pos.z) < sp * 0.4;
         e.pos.set(r.x, r.y, r.z);
         if (a.anim !== 'run') a.setAnim('run', { blend: 0.15 });
-        if (!D.hit && Math.hypot(P.x - e.pos.x, P.z - e.pos.z) < 1.25) { D.hit = true; C8_signHit(e, 20, { push: 1.8, knock: true }); }
-        if (D.t >= 0.65 || blocked) { D.st = 'recover'; D.t = 0; a.setAnim('idle', { blend: 0.3 }); }
+        if (!D.hit && Math.hypot(P.x - e.pos.x, P.z - e.pos.z) < 1.25) { D.hit = true; C8_signHit(e, CLK.dmg, { push: 1.6, knock: true }); }
+        if (D.t >= 0.55 || blocked) { D.st = 'recover'; D.t = 0; a.setAnim('idle', { blend: 0.3 }); }
         break;
       }
       case 'recover': {
+        // standing open: it straightens itself out (1.5 s) before it does anything else
         D.t += dt;
         if (a.anim !== 'idle') a.setAnim('idle', { blend: 0.3 });
-        if (D.t >= 0.9) { D.st = 'move'; D.cd = 1.1 + Math.random() * 0.9; }
+        if (!D.smoothed && D.t >= 0.6) { D.smoothed = true; q(a.gesture('smooth_uniform', { dur: 1.5 })); }
+        if (D.t >= CLK.recover) { D.st = 'move'; D.cd = opening ? 5.5 + Math.random() * 2 : 1.0 + Math.random() * 0.8; }
         break;
       }
       default: {
+        if (opening) {
+          // the opening: confident and slow — it circles him close, facing him, talking; now and then it steps in and
+          // makes a slow slash
+          C8_face(e, P.x, P.z, 2.5, dt);
+          if (D.cd <= 0 && F.t > 4.5) {
+            if (d <= 2.1) { C8_startAttack(e, 'slash', CLK.wind.open); break; }
+            const moving = C8_closerMove(e, P.x, P.z, 1.0, dt, 1.8);
+            const an = moving ? 'walk' : 'idle';
+            if (a.anim !== an) a.setAnim(an, { blend: 0.35 });
+            break;
+          }
+          F.ang = (F.ang ?? Math.atan2(e.pos.x - P.x, e.pos.z - P.z)) + dt * 0.3;
+          const tx = clamp(P.x + Math.sin(F.ang) * CLK.openR, 1.2, 28.8), tz = clamp(P.z + Math.cos(F.ang) * CLK.openR, 5.0, 18.8);
+          const moving = C8_closerMove(e, tx, tz, 0.8, dt, 0.15);
+          const an = moving ? 'walk' : 'idle';
+          if (a.anim !== an) a.setAnim(an, { blend: 0.4 });
+          break;
+        }
         C8_face(e, P.x, P.z, 3.2, dt);
-        if (D.cd <= 0 && d <= 2.3) { D.st = 'windup'; D.atk = 'slash'; D.t = 0; q(a.gesture('swing', { hand: 'R', dur: 0.95 })); sfx('penclick', { pos: [e.pos.x, 1.9, e.pos.z] }); break; }
-        if (D.cd <= 0 && d > 3.2 && d < 7 && Math.random() < dt * 0.8) { D.st = 'windup'; D.atk = 'lunge'; D.t = 0; q(a.gesture('reach', { hand: 'R', target: Player.actor, dur: 1.2 })); sfx('penclick', { pos: [e.pos.x, 1.9, e.pos.z] }); break; }
-        const moving = d > 1.9 && C8_closerMove(e, P.x, P.z, 1.35, dt, 1.8);
+        if (D.cd <= 0 && d <= 2.15) { C8_startAttack(e, 'slash', CLK.wind.slash); break; }
+        if (D.cd <= 0 && d > 3.2 && d < 7 && Math.random() < dt * 0.8) { C8_startAttack(e, 'lunge', CLK.wind.lunge); break; }
+        const moving = d > 1.8 && C8_closerMove(e, P.x, P.z, 1.35, dt, 1.7);
         const an = moving ? 'walk' : 'idle';
         if (a.anim !== an) a.setAnim(an, { blend: 0.35 });
       }
@@ -1879,7 +1984,7 @@
     B.disc.position.set(x, 0.02, z);
     B.cd = Math.max(0, (B.cd || 0) - dt);
     const P = Player.pos;
-    if (P && !Player.dead && B.cd <= 0 && Math.hypot(P.x - x, P.z - z) < 1.2 && C8.closer) { B.cd = 2.4; sfx('stamp', { vol: 0.5 }); C8_signHit(C8.closer, 15, { push: 0.4 }); }
+    if (P && !Player.dead && B.cd <= 0 && Math.hypot(P.x - x, P.z - z) < 1.2 && C8.closer) { B.cd = CLK.beamCd; sfx('stamp', { vol: 0.5 }); C8_signHit(C8.closer, CLK.beam, { push: 0.4 }); }
   }
   function C8_closerSpawn(o = {}) {
     let e = Enemies.get('c8_transmitter:closer');
@@ -1889,54 +1994,68 @@
     return e;
   }
 
-  // ---- BOSS 'closer': Phase 1 The Pitch (→ 'deal'), Phase 2 The Close (→ 'callback' at 30 %) -------------------------------
+  // ---- BOSS 'closer' — the opening exchange (8-2 hands straight over to it; revised after playtesting) ----------------
+  // It circles him close and slow, speaking the Pitch in order (a line every 8 s; the closing pair is kept for the
+  // knockdown), now and then a slow, telegraphed slash; it's hittable, and every hit that lands tears it. After 2 landed
+  // hits (or 25 s) → 'knockdown' (CUTSCENE 8-2B: it strikes him to the floor, stands over him: Surrender | Fight).
   defineBoss('closer', {
     async run(G) {
       const e = C8_closerSpawn();
-      if (!e) return 'callback';
-      const F = C8.fight = { phase: 1, t: 0, line: 0, hold: 0, sigs: 0, attacked: false, restartT: 0, barkT: 4 };
-      e.ai = true;
+      if (!e) return 'knockdown';
+      const F = C8.fight = { phase: 1, t: 0, line: 0, hits: 0, sigs: 0, restartT: 0, endT: 0, taken: 0 };
+      C8.pitchSaid = 0;
+      e.ai = true; e.data.st = 'move'; e.data.cd = 5.0; e.data.stunT = 0; e.data.t = 0;
       G.control(true);
       try { Player.setTorch(false); } catch (err) { /* torch */ }
-      const lines = pitchLines();
-      let result = null;
+      const lines = pitchLines(), open = Math.min(4, lines.length);
       try {
-        // Phase 1: it circles him and talks, a line every 8 s; "[Hold E] Lower your hands" the whole time
+        G.camRelease();
         await G.loop((dt) => {
           F.t += dt;
-          if (F.t >= 1.2 + F.line * 8 && F.line < lines.length) { C8_bgSay('THE CLOSER', lines[F.line]); F.line++; }
-          const down = !!(Input.down && Input.down('interact'));
-          F.hold = down ? F.hold + dt : Math.max(0, F.hold - dt * 1.5);
-          try { UI.holdPrompt('[Hold {interact}] Lower your hands', F.hold / 3); } catch (err) { /* ui */ }
-          // the slow orbit: the camera circles the two of them
-          const P = Player.pos;
-          C8.orbitT += dt * 0.09;
-          const mx = (P.x + e.pos.x) / 2, mz = (P.z + e.pos.z) / 2;
-          const cx = clamp(mx + Math.sin(C8.orbitT) * 7.5, 1.2, 28.8), cz = clamp(mz + Math.cos(C8.orbitT) * 7.5, 1.2, 18.8);
-          G.cam({ pos: [cx, 3.3, cz], target: [mx, 1.35, mz], fov: 46 });
-          if (F.hold >= 3) { result = 'deal'; return true; }
-          if (F.attacked || Player.attackState) return true;
-          if (F.t >= 60) return true;
-          return false;
+          if (F.line < open && F.t >= 1.2 + F.line * 8) { C8_bgSay('THE CLOSER', lines[F.line]); F.line++; C8.pitchSaid = F.line; }
+          // (fought under the room's own cameras, as The Close is: the Hold-E phase's slow orbit went with it — a camera
+          // turning under the player's feet made the movement keys drift while he fought)
+          // two hits landed: a beat for the second one's stagger, then the knockdown; or it has waited long enough
+          if (F.hits >= CLK.openHits) { F.endT += dt; return F.endT >= 0.8; }
+          return F.t >= CLK.openMax && e.data.st !== 'lunge';
         });
-        try { UI.holdPrompt(null); } catch (err) { /* ui */ }
-        G.camRelease();
-        if (result === 'deal') return 'deal';
-        // Phase 2: The Close
-        F.phase = 2; F.t = 0;
-        C8_bgSay('THE CLOSER', barks()[0]);
+      } finally {
+        C8_glintOff(e);
+        try { UI.stamp(null); } catch (err) { /* ui */ }
+      }
+      return 'knockdown';
+    },
+  });
+  // ---- BOSS 'closer_close': Phase 2 "The Close" (after 8-2B → Fight, or a reload after it) → 'callback' at 30 % ------
+  defineBoss('closer_close', {
+    async run(G) {
+      const e = C8.closer || C8_closerSpawn();
+      if (!e) return 'callback';
+      const F = C8.fight = { phase: 2, t: 0, hits: 0, sigs: 0, restartT: 0, barkT: 6, taken: 0, healed: 0 };
+      if (e.hp > CLK.knockHp) e.hp = CLK.knockHp;
+      C8_closerTears(e);
+      e.ai = true; e.data.st = 'move'; e.data.cd = 1.6; e.data.stunT = 0; e.data.t = 0;
+      G.control(true);
+      try { Player.setTorch(false); } catch (err) { /* torch */ }
+      try { UI.stamp(null); } catch (err) { /* ui */ }
+      C8_bgSay('THE CLOSER', barks()[0]);
+      try {
         await G.loop((dt) => {
           F.t += dt;
           C8_beamTick(dt);
           if (F.restartT) {
             F.restartT -= dt;
             if (F.restartT <= 0) {
-              // the contract is signed: the phase restarts. The uniform smooths itself whole again.
-              F.restartT = 0; F.sigs = 0; e.hp = e.maxHp; C8_closerTears(e);
+              // the contract is signed: the stamps clear, the uniform smooths itself — and it's a little more whole again
+              F.restartT = 0; F.sigs = 0;
+              const h0 = e.hp;
+              e.hp = Math.min(e.maxHp, e.hp + Math.round(e.maxHp * CLK.heal));
+              F.healed += e.hp - h0;
+              C8_closerTears(e);
               try { UI.stamp(null); } catch (err) { /* ui */ }
               q(e.actor.gesture('smooth_uniform'));
               C8_bgSay('THE CLOSER', barks()[3] || 'Any other questions?');
-              e.data.st = 'recover'; e.data.t = 0;
+              e.data.st = 'recover'; e.data.t = 0; e.data.smoothed = true;
             }
           }
           F.barkT -= dt;
@@ -1945,7 +2064,7 @@
         });
         return 'callback';
       } finally {
-        try { UI.holdPrompt(null); } catch (err) { /* ui */ }
+        C8_glintOff(e);
         if (C8.beam) { C8.beam.cone.visible = false; C8.beam.disc.visible = false; }
         try { const L = World.light('c8t:beam'); if (L) L.on(false); } catch (err) { /* world */ }
       }
@@ -1987,20 +2106,32 @@
       return called ? 'called' : 'aborted';
     },
   });
-  // after the fight: the deal, or the callback and the call (each scene in its own wrapper so a skip of one never
-  // carries into the next)
   // the Closer as a script actor (G.actor takes the enemy itself)
   function C8_clActor(G, e) { return e && e.actor ? G.actor(e) : null; }
   function C8_clRelease() { /* (nothing to undo: no alias is registered any more) */ }
-  async function C8_after(G, r) {
+  // The fight and everything after it (each scene in its own non-skippable wrapper, so a skip of one never carries into
+  // the next; a skip of 8-2B still waits for its choice):
+  //   the opening → 8-2B (knockdown: Surrender | Fight) → Surrender: 8-2A → acceptedDeal → Follow Up Tomorrow
+  //                                                   → Fight: c8_fight (+ autosave) → The Close → 8-3 → the crawl → 8-4 →
+  //                                                     Game.endingFor(S) → E-C1 | E-OC0 | E-FT0 → G.ending(name)
+  // A reload after Fight (S.flags.c8_fight, the autosave 8-2B made) resumes at The Close; before it, at the opening.
+  async function C8_flow(G) {
     const run = (id) => G.run(async (G2) => { await G2.cutscene(id); }, { control: false, skippable: false, inheritSkip: false, name: 'c8:' + id });
-    if (r === 'deal') {
-      await run('8-2A');
-      G.set('acceptedDeal', true);
-      C8_clRelease();
-      await G.ending('tomorrow');
-      return;
+    if (!flag('c8_fight')) {
+      const r0 = await G.boss('closer');
+      if (r0 !== 'knockdown') return;
+      C8.kd = null;
+      await run('8-2B');
+      if (C8.kd === 'surrender') {
+        await run('8-2A');
+        G.set('acceptedDeal', true);
+        C8_clRelease();
+        await G.ending('tomorrow');
+        return;
+      }
     }
+    const r1 = await G.boss('closer_close');
+    if (r1 !== 'callback') return;
     await run('8-3');
     const r2 = await G.boss('closer_call');
     if (r2 !== 'called') return;
@@ -2113,14 +2244,27 @@
       // perfect — the kit's props keep their Fog-world materials here (S.outage stays true; only the dissolve is held off)
       try { if (Tex.outage > 0 && !World.outageBusy) Tex.setOutage(0); } catch (e) { /* tex */ }
     },
-    onLeave() { C8_clRelease(); C8.beam = null; C8.fight = null; C8.closer = null; try { UI.stamp(null); UI.holdPrompt(null); } catch (e) { /* ui */ } },
+    onLeave() { C8_clRelease(); C8_inkClear(); C8.beam = null; C8.fight = null; C8.closer = null; C8.kd = null; try { UI.stamp(null); UI.holdPrompt(null); } catch (e) { /* ui */ } },
     async onEnter(G) {
       G.bars(0);
       if (C8.pitchChain) return;
-      // a reload into the fight (the autosave before it): straight back into the Pitch
+      // a reload into the fight: the autosave 8-2 made (→ the opening again, then the knockdown) or the one 8-2B made when
+      // he chose to fight (S.flags.c8_fight → straight back into The Close: no second knockdown, no second choice)
       if (S.chapter !== 8 || !done('cs:8-2') || flag('acceptedDeal') || flag('c8_rang')) return;
+      const close = !!flag('c8_fight');
       C8_fightStart({
         intro: async (G2) => {
+          if (close) {
+            // it's a few steps off toward the middle of the floor, straightening its uniform
+            const P = Player.pos, [cx, cz] = TR.centre;
+            let dx = cx - P.x, dz = cz - P.z, dl = Math.hypot(dx, dz);
+            if (dl < 0.5) { dx = 0; dz = -1; dl = 1; }
+            const x = clamp(P.x + (dx / dl) * 3.2, 3, 27), z = clamp(P.z + (dz / dl) * 3.2, 6, 17);
+            const e = C8_closerSpawn({ pos: [x, z], rot: Math.atan2(P.x - x, P.z - z) / D2R });
+            if (e) { e.ai = false; e.hp = Math.min(e.hp, CLK.knockHp); C8_closerTears(e); q(e.actor.gesture('smooth_uniform')); }
+            await G2.wait(1.0);
+            return;
+          }
           const e = C8_closerSpawn({ pos: [15, 8.5], rot: 0 });
           if (e) e.ai = false;
           await G2.wait(0.8);
@@ -2313,7 +2457,8 @@
     // the autosave before the fight: a reload lands in the transmitter room and the Pitch starts again (onEnter)
     S.done['cs:8-2'] = true;
     try { G.autosave(); } catch (err) { /* save */ }
-    // 3. Phase 1 begins — as its own script, so the scenes that led here (8-1, the door) let go of the letterbox
+    // 3. the fight begins at once (the opening exchange; no prompt) — as its own script, so the scenes that led here
+    //    (8-1, the door) let go of the letterbox
     C8_fightStart();
   }, { letterbox: true, skippable: true });
   // the fight and everything after it, detached from the scenes that started it
@@ -2322,36 +2467,173 @@
     C8.fightRun = Script.run(async (G) => {
       try {
         if (o.intro) await o.intro(G);
-        const r = await G.boss('closer');
-        await C8_after(G, r);
+        await C8_flow(G);
       } finally { C8.fightRun = null; }
     }, { control: false, name: 'c8:fight', persist: true });
     return C8.fightRun;
   }
 
   // =================================================================================================================
-  // CUTSCENE 8-2A "Signed" (Phase 1 → [Hold E] Lower your hands, 3 s) → Follow Up Tomorrow
+  // CUTSCENE 8-2B "The Offer" (revised after playtesting — spec §12 8-2's note): the opening ends — it strikes him to the
+  // floor and stands over him, leaning in, smiling, and says the Pitch's closing lines. Then the choice: Surrender | Fight
+  // (a skip skips the lines, never the choice; it waits for the player). Surrender → 8-2A (the fight flow plays it);
+  // Fight → "...No.", he gets up, S.flags.c8_fight, the autosave → The Close.
+  // =================================================================================================================
+  defineCutscene('8-2B', async (G) => {
+    const A = G.aidan;
+    const e = C8.closer || C8_closerSpawn(), Cl = e ? C8_clActor(G, e) : null;
+    C8_bgHush();
+    if (C8.fight) C8.fight.phase = 1.5;
+    try { UI.stamp(null); UI.holdPrompt(null); } catch (err) { /* ui */ }
+    if (e) {
+      e.ai = false; e.data.st = 'idle'; e.data.stunT = 0; C8_glintOff(e);
+      try { e.actor.finishGestures(); } catch (err) { /* rig */ }
+      e.actor.setAnim('idle', { blend: 0.2 }); e.actor.expr('smile_huge');
+      if (e.data.pen) e.data.pen.visible = true;
+    }
+    if (A.raw) A.raw.idleLife = false;
+    try { Player.setTorch(false); } catch (err) { /* torch */ }
+    const P0 = Player.pos, p0x = P0.x, p0z = P0.z;
+    // where it is from him (u: his way to it)
+    let ux = (e ? e.pos.x : p0x + 1.6) - p0x, uz = (e ? e.pos.z : p0z) - p0z, ud = Math.hypot(ux, uz);
+    if (ud < 0.3) { ux = TR.centre[0] - p0x || 1; uz = TR.centre[1] - p0z; ud = Math.hypot(ux, uz) || 1; }
+    ux /= ud; uz /= ud;
+    // 1. SHOT — side-on, from the middle of the floor: it's right there. The pen comes round.
+    A.place(p0x, p0z, Math.atan2(ux, uz) / D2R); A.pose('idle');
+    if (e) {
+      const k = Math.min(ud, 1.7);
+      e.pos.set(clamp(p0x + ux * k, 0.8, 29.2), 0, clamp(p0z + uz * k, 0.8, 19.2));
+      e.yaw = Math.atan2(p0x - e.pos.x, p0z - e.pos.z);
+    }
+    {
+      const mx = e ? (p0x + e.pos.x) / 2 : p0x, mz = e ? (p0z + e.pos.z) / 2 : p0z;
+      let nx = -uz, nz = ux;
+      if (nx * (TR.centre[0] - mx) + nz * (TR.centre[1] - mz) < 0) { nx = -nx; nz = -nz; }
+      const c = [clamp(mx + nx * 4.2, 1.0, 29.0), 1.95, clamp(mz + nz * 4.2, 5.2, 19.0)];
+      G.cam({ pos: c, target: [mx, 1.45, mz], fov: 46, to: { pos: [lerp(c[0], mx, 0.06), 1.9, lerp(c[2], mz, 0.06)], fov: 44 }, dur: 3 });
+    }
+    if (A.raw) { A.raw.expr('scared'); if (e) A.raw.eyes('at', e.actor); }
+    if (Cl) { Cl.look(headAt(A)); q(Cl.gesture('swing', { hand: 'R', dur: 0.75 })); }
+    G.sfx('penclick', { pos: e ? [e.pos.x, 2.1, e.pos.z] : [p0x, 2, p0z], vol: 1.0 });
+    await G.wait(0.34);
+    // the blow: he goes down hard, and everything goes out for a moment
+    G.sfx('whoosh', { pos: [p0x, 1.6, p0z], vol: 0.8, dur: 0.3 });
+    G.sfx('hit_heavy', { pos: [p0x, 1.5, p0z], vol: 1.0 });
+    G.sfx('hurt', { pos: [p0x, 1.3, p0z], heavy: true });
+    G.shake(0.7, 0.45);
+    q(A.gesture('flinch'));
+    A.pose('collapse');
+    await G.wait(0.3);
+    await G.fade(1, 0.1);
+    G.sfx('thud', { pos: [p0x, 0.2, p0z], vol: 1.0 });
+    // (on black) he's down on the open floor in the middle of the room, on his back, feet toward it; it stands over him
+    const Lx = clamp(p0x, 7, 23), Lz = clamp(p0z, 8, 15);
+    const fx = ux, fz = uz, yaw = Math.atan2(fx, fz);
+    A.place(Lx, Lz, yaw / D2R); A.pose('lie', { blend: 0 });
+    S.health = Math.max(Math.min(S.health, 25), S.health - 10);
+    const cxp = Lx + fx * 1.3, czp = Lz + fz * 1.3;
+    if (e) {
+      e.pos.set(cxp, 0, czp); e.yaw = Math.atan2(-fx, -fz);
+      e.actor.setAnim('idle', { blend: 0 });
+    }
+    G.post({ ca: 0.55, vignette: 0.75, blur: 0.35 });
+    await G.wait(0.9);
+    // 2. SHOT — low, from the floor at his head: it stands over him, leaning in with the contract, smiling
+    const sx = -fz, sz = fx;
+    // (its dark trousers fill the bottom of the frame, where the choice comes up)
+    const lowCam = (k) => ({ pos: [Lx - fx * (1.15 - k * 0.12) + sx * 0.32, 0.3, Lz - fz * (1.15 - k * 0.12) + sz * 0.32], target: [cxp - fx * 0.3, 1.72 - k * 0.04, czp - fz * 0.3] });
+    const lc0 = lowCam(0), lc1 = lowCam(1);
+    G.cam({ ...lc0, fov: 54, to: { ...lc1, fov: 48 }, dur: 14 });
+    if (Cl) { Cl.look(headAt(A)); Cl.eyes('at', A); q(Cl.gesture('offer', { hand: 'L', target: A, hold: true })); }
+    if (A.raw) { A.raw.expr('pain'); if (e) A.raw.eyes('at', e.actor); }
+    G.fade(0, 0.8);
+    q(G.post({ ca: 0.2, vignette: 0.5, blur: 0, dur: 2.5 }));
+    G.sfx('breath', { vol: 0.5 });
+    await G.wait(1.6);
+    // the Pitch's lines it hasn't said yet (the closing pair at least; three when the opening was cut short)
+    const lines = pitchLines(), said = C8.pitchSaid | 0;
+    for (const l of lines.slice(Math.max(said, 3))) {
+      talk(e, Math.min(4, 0.6 + l.length * 0.055));
+      await G.say('THE CLOSER', l);
+      await G.wait(0.5);
+    }
+    await G.wait(0.4);
+    // 3. the choice (the cursor starts on Fight: a mashed key never gives in)
+    const i = await G.choice(['Surrender', 'Fight'], { start: 1 });
+    if (i === 0) {
+      // Surrender: he stays down (8-2A carries on from here)
+      C8.kd = 'surrender';
+      if (A.raw) { A.raw.expr('tired'); A.raw.eyes('down'); }
+      await G.wait(0.6);
+      // state (plain statements)
+      A.place(Lx, Lz, yaw / D2R); A.pose('lie', { blend: 0 });
+      return;
+    }
+    // Fight: "...No." — he gets up
+    C8.kd = 'fight';
+    {
+      const H = headAt(A);
+      G.cam({ pos: [H.x + fx * 0.55 + sx * 0.25, H.y + 0.75, H.z + fz * 0.55 + sz * 0.25], target: [H.x, H.y, H.z], fov: 34 });
+    }
+    if (A.raw) { A.raw.expr('angry', { k: 0.5 }); if (e) A.raw.eyes('at', e.actor); }
+    await G.wait(0.5);
+    await G.say('AIDAN', '...No.');
+    // wide: he gets up; it straightens and steps back, still smiling
+    {
+      const c = [clamp(Lx + sx * 4.4 + fx * 0.6, 1.2, 28.8), 1.6, clamp(Lz + sz * 4.4 + fz * 0.6, 5.2, 18.8)];
+      G.cam({ pos: c, target: [Lx + fx * 1.0, 1.1, Lz + fz * 1.0], fov: 46 });
+    }
+    if (e) { try { e.actor.finishGestures(); } catch (err) { /* rig */ } }
+    A.pose('sit_floor');
+    G.sfx('breath', { vol: 0.5 });
+    await G.wait(0.6);
+    A.pose('kneel_one');
+    if (Cl) q(Cl.walkTo(Lx + fx * 2.9, Lz + fz * 2.9, { speed: 0.9, face: Math.atan2(-fx, -fz) / D2R }));
+    await G.wait(0.6);
+    A.pose('idle');
+    if (A.raw) { A.raw.expr('neutral'); A.raw.eyes('ahead'); }
+    if (Cl) q(Cl.gesture('smooth_uniform'));
+    await G.wait(1.3);
+    // state (plain statements)
+    A.place(Lx, Lz, yaw / D2R); A.pose('idle'); A.look(null);
+    if (e) { e.pos.set(Lx + fx * 2.9, 0, Lz + fz * 2.9); e.yaw = Math.atan2(-fx, -fz); e.actor.setAnim('idle', { blend: 0.2 }); }
+    if (A.raw) A.raw.idleLife = true;
+    G.set('c8_fight', true);
+    G.camRelease();
+    // the autosave: a reload (a death in The Close) comes back to The Close, not to the knockdown
+    try { G.autosave(); } catch (err) { /* save */ }
+  }, { letterbox: true, skippable: true });
+
+  // =================================================================================================================
+  // CUTSCENE 8-2A "Signed" (8-2B → Surrender) → Follow Up Tomorrow. It carries on from the knockdown: Aidan down on the
+  // floor, the Closer over him. He lowers his hands. The Closer kneels and places the pen in his hand. He signs. In the
+  // last shot, Aidan looks up, and the Closer's smile is on his face.
   // =================================================================================================================
   defineCutscene('8-2A', async (G) => {
     const A = G.aidan, e = C8.closer || C8_closerSpawn(), Cl = e ? C8_clActor(G, e) : null;
-    if (e) e.ai = false;
+    C8_bgHush();
+    if (e) { e.ai = false; e.data.st = 'idle'; C8_glintOff(e); try { e.actor.finishGestures(); } catch (err) { /* rig */ } }
     if (C8.fight) C8.fight.phase = 5;
+    try { UI.stamp(null); UI.holdPrompt(null); } catch (err) { /* ui */ }
     if (A.raw) A.raw.idleLife = false;
     const P = Player.pos, yaw = Player.yaw;
-    const fx = Math.sin(yaw), fz = Math.cos(yaw);
-    if (e) { e.pos.set(P.x + fx * 1.7, 0, P.z + fz * 1.7); e.yaw = Math.atan2(-fx, -fz); e.actor.setAnim('idle', { blend: 0.2 }); }
-    // 1. SHOT — side-on: Aidan lowers his hands
-    G.cam({ pos: [P.x + fz * 3.6 + fx * 0.9, 1.55, P.z - fx * 3.6 + fz * 0.9], target: [P.x + fx * 0.85, 1.4, P.z + fz * 0.85], fov: 42 });
+    const px = P.x, pz = P.z, fx = Math.sin(yaw), fz = Math.cos(yaw), sx = -fz, sz = fx;
+    // on the floor, up on one hand, facing it; it stands over his feet
+    A.place(px, pz, yaw / D2R); A.pose('sit_floor', { blend: 0.35 });
+    if (e) { e.pos.set(px + fx * 1.3, 0, pz + fz * 1.3); e.yaw = Math.atan2(-fx, -fz); e.actor.setAnim('idle', { blend: 0.2 }); e.actor.expr('smile_huge'); if (e.data.pen) e.data.pen.visible = true; }
+    // 1. SHOT — side-on and low, across the floor: Aidan, hands up in front of his face, lowers them
+    G.cam({ pos: [px + sx * 3.7 + fx * 0.5, 1.0, pz + sz * 3.7 + fz * 0.5], target: [px + fx * 0.65, 1.22, pz + fz * 0.65], fov: 50 });
     if (A.raw) { A.raw.expr('tired'); A.raw.eyes('down'); }
+    if (Cl) { Cl.look(headAt(A)); }
     q(A.gesture('hands_up', { hold: true }));
-    await G.wait(1.3);
+    await G.wait(1.4);
     if (A.raw) A.raw.finishGestures();
     G.sfx('breath', { vol: 0.4 });
     await G.wait(1.4);
     // 2. The Closer kneels and places the pen in his hand.
     if (Cl) { Cl.pose('kneel_one'); q(Cl.gesture('offer', { hand: 'R', target: A })); }
     await G.wait(1.4);
-    q(A.gesture('reach', { hand: 'L', target: e ? [e.pos.x - fx * 0.9, 1.0, e.pos.z - fz * 0.9] : [P.x, 1, P.z] }));
+    q(A.gesture('reach', { hand: 'L', target: e ? [e.pos.x - fx * 0.75, 0.75, e.pos.z - fz * 0.75] : [px, 0.7, pz] }));
     await G.wait(0.8);
     if (e && e.data.pen) e.data.pen.visible = false;
     A.hold('L', 'pen');
@@ -2361,10 +2643,10 @@
     if (e) { e.actor.hold('L', 'tablet', { tex: C8_tabletTex(), pose: 'offer' }); }
     await G.wait(0.5);
     {
-      const tb = e && e.actor.held && e.actor.held.L ? e.actor.held.L.getWorldPosition(V3()) : V3(P.x + fx, 1.1, P.z + fz);
-      G.cam({ pos: [tb.x - fx * 0.5 + fz * 0.15, tb.y + 0.55, tb.z - fz * 0.5 - fx * 0.15], target: [tb.x, tb.y, tb.z], fov: 34 });
+      const tb = e && e.actor.held && e.actor.held.L ? e.actor.held.L.getWorldPosition(V3()) : V3(px + fx, 0.9, pz + fz);
+      G.cam({ pos: [tb.x - fx * 0.5 + sx * 0.15, tb.y + 0.55, tb.z - fz * 0.5 + sz * 0.15], target: [tb.x, tb.y, tb.z], fov: 34 });
     }
-    q(A.gesture('reach', { hand: 'L', target: e ? [e.pos.x - fx * 0.6, 1.05, e.pos.z - fz * 0.6] : [P.x, 1, P.z], dur: 2.6 }));
+    q(A.gesture('reach', { hand: 'L', target: e ? [e.pos.x - fx * 0.55, 0.85, e.pos.z - fz * 0.55] : [px, 0.8, pz], dur: 2.6 }));
     G.sfx('scribble', { dur: 2.2 });
     {
       let t = 0;
@@ -2374,13 +2656,14 @@
     G.music('tomorrow', { clipped: true });
     await G.wait(0.8);
     // 4. The last shot: Aidan looks up, and the Closer's smile is on his face.
-    G.cam({ pos: rel(A, 0.72, 0.05, 0.0), target: headAt(A).toArray(), fov: 30, to: { pos: rel(A, 0.6, 0.04, 0.0), fov: 27 }, dur: 6 });
+    G.cam({ pos: rel(A, 0.72, 0.05, 0.02), target: headAt(A).toArray(), fov: 30, to: { pos: rel(A, 0.6, 0.04, 0.02), fov: 27 }, dur: 6 });
     if (A.raw) { A.raw.eyes('ahead'); A.raw.expr('neutral'); }
-    A.look(rel(A, 2, 0, 0.25));
+    A.look(e ? headAt(e.actor) : rel(A, 2, 0, 0.4));
     await G.wait(1.4);
     if (A.raw) A.raw.expr('smile_huge');
-    await G.wait(2.6);
-    await G.fade(1, 1.4);
+    // (the motif's last notes ring out before the black comes down)
+    await G.wait(3.0);
+    await G.fade(1, 1.6);
     // state (plain statements)
     G.set('acceptedDeal', true);
     C8_signTablet(1);

@@ -1177,11 +1177,12 @@
   }
 
   // JUMP SCARE c7:doors (the Fog world, the car park, the first walk up to the main entrance): in the shot from out over
-  // the drop-off, the one canopy light stutters and goes; when it comes back someone is standing a few steps ahead of him,
-  // off to the side of his way in, like the greeter at a store's door, facing him — a salesperson in a spotless teal polo,
-  // the smile ear to ear, a flare of light where the eyes should be, the pen held out. The stab. The light stutters again,
-  // and when it steadies there's nobody there. (The store is waiting inside; these aren't his. Harmless — a glimpse that
-  // never moves, never touches. Turning back before the shot keeps the id.)
+  // the drop-off — the car park's own camera — the one canopy light stutters and goes; when it comes back there is
+  // someone standing right behind him, between him and the lens: a salesperson in a spotless teal polo, the smile ear to
+  // ear, a flare of light where the eyes should be, not looking at him at all — looking up, into the camera. Smile, you're
+  // on camera. The stab. The light stutters again, and when it steadies there's nobody there, and he never turned round.
+  // (The store is waiting inside; these aren't his. Harmless — a glimpse that never moves, never touches. Turning back
+  // before the shot keeps the id.)
   async function C7_doorsScare(G) {
     if (done('scare:c7:doors') || flag('c7_arrived') || S.outage || World.room !== 'c7_carpark' || !G.scareReady) return;
     const inShot = () => { const c = Cam.current; return !!(c && c.id === 'c7_carpark:entrance'); };
@@ -1197,17 +1198,18 @@
     G.sfx('tube_flicker', { pos: [19.4, 3.2, 3.2], vol: 0.55, dur: 0.9 });
     for (const [on, t] of [[false, 0.12], [true, 0.08], [false, 0.3], [true, 0.06], [false, 0.4]]) { cano(on); await G.wait(t); }
     if (gone() || !G.scareReady || !C7_calm()) { cano(true); return; }
-    // it comes back on him: someone standing a few steps ahead, off to the side of his way to the doors (off his line:
-    // the shot looks over his shoulder), facing him — like the greeter at a store's door
-    const P = Player.pos, side = P.x > 19.4 ? -1 : 1;
-    const GP = [clamp(P.x + side * 1.25, 15.2, 23.6), Math.max(1.0, P.z - 3.3)];
-    g = G.glimpse({ kind: 'smile', pos: GP, lookAt: 'player', dur: 1.6, onlyIfOnScreen: true, wait: 0.8, def: { seed: 74 } });
-    lit = G.addLight('point', { pos: [GP[0] - side * 0.2, 2.7, GP[1] + 1.2], color: '#dbe8e2', intensity: 3.0, distance: 4.2 });
+    // it comes back: someone right behind him (toward the lens, a little off his line so he stays in the shot), facing
+    // the camera rather than him
+    const P = Player.pos, cam = Cam.current && Cam.current.pos ? Cam.current.pos : [19.4, 2.8, 15.8];
+    const side = P.x > 19.4 ? -1 : 1, GP = [clamp(P.x + side * 0.85, 15.2, 23.6), Math.min(P.z + 2.4, 12.2)];
+    const yaw = Math.atan2(cam[0] - GP[0], cam[2] - GP[1]) / D2R;
+    g = G.glimpse({ kind: 'smile', pos: GP, yaw, dur: 1.6, onlyIfOnScreen: true, wait: 0.8, def: { seed: 74 } });
+    lit = G.addLight('point', { pos: [GP[0], 2.6, GP[1] + 1.1], color: '#dbe8e2', intensity: 2.6, distance: 3.6 });
     cano(true);
     G.sfx('tube_flicker', { pos: [19.4, 3.2, 3.2], vol: 0.35, dur: 0.25 });
     await G.until(() => g.shown || g.done, { timeout: 1.0 });
     if (!g.shown || gone()) return;
-    try { if (g.actor) q(g.actor.gesture('offer', { hand: 'R', dur: 1.2 })); } catch (e) { /* rig */ }
+    try { if (g.actor) g.actor.lookAt(V3(cam[0], cam[1], cam[2])); } catch (e) { /* rig */ }      // (up, into the lens)
     await G.scare({ id: 'c7:doors', kind: 'stab', pos: [GP[0], 1.5, GP[1]], shake: 0.3, flash: 0.22, heart: 3 });
     await G.wait(0.5);
     // the light stutters — and when it steadies, nobody

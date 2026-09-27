@@ -156,7 +156,7 @@ const META_KEY = 'signalhill.meta';
 function defaultMeta() {
   return {
     endingsSeen: [], results: [], stickers: {}, calibrated: false, completed: false,
-    options: { brightness: 1, noise: true, grain: 1, subs: 'medium', control: 'camera', shake: true, master: 0.9, effects: 0.9, music: 0.8, invertExamine: false, vibration: true },
+    options: { brightness: 1, noise: true, grain: 1, subs: 'medium', control: 'camera', shake: true, master: 0.9, effects: 0.9, music: 0.8, invertExamine: false, vibration: true, signal: 'unreliable' },
   };
 }
 let META = (() => {
@@ -213,12 +213,13 @@ window.addEventListener('unhandledrejection', (e) => {
 // Keyboard (physical key positions, e.code):
 //   WASD / arrows move (and navigate menus: up/down/left/right), Shift run, F torch, E interact+confirm,
 //   Enter confirm, Space or right mouse ready, left click attack, Q quick-turn+decline, Tab inventory, M map,
-//   C phone, Esc pause+cancel (Backspace also cancels), hold Esc 1 s = skip, ` debug.
+//   C phone (a tap opens the phone menu on release, a hold is Player's glance), Esc pause+cancel (Backspace also
+//   cancels), hold Esc 1 s = skip, ` debug.
 //   In menu context the right mouse button means cancel instead of ready.
 // Gamepad (standard mapping):
 //   left stick move (and menu nav), A interact+confirm, B quick-turn+cancel+decline, X attack, Y torch,
 //   LT ready, RT (or L3) run, Start pause (hold 1 s = skip), Select/Back/View map, D-pad navigates menus;
-//   in play the D-pad also gives phone (up) and inventory (down), LB is a second phone button and
+//   in play the D-pad also gives phone (up: tap / hold as C) and inventory (down), LB is a second phone button and
 //   RB / R3 open the inventory. (On most pads "View" *is* Select/Back, so the spec's "Select map / View
 //   inventory" cannot both be honoured on button 8 — map keeps Select, inventory moves to RB, R3 and D-pad down.)
 //   Right stick feeds drag() for examine rotation.
@@ -18127,6 +18128,15 @@ const Cam = (() => {
 //   letterboxed scene owns Aidan, poseSnapshot() / poseRestore(snap) (Script restores his arm poses after each
 //   letterboxed scene), the torch bounce (a fill light that keeps Aidan readable in the dark), crawl-mode interactables
 //   ({crawl:true}), E with a message up goes to the faced target unless it is the thing just used.
+// CONTRACT+ THE GLANCE (the unreliable signal's only on-screen meter): HOLDING the phone key (C / D-pad up / LB) for
+//   Player.GLANCE.tap (0.25 s) or longer raises the phone without pausing — his right arm blends from the 'phone' carry
+//   to 'phone_look' (≈ 0.3 s), his head turns down to the screen, he walks at GLANCE.speed (50 %) and cannot run, and
+//   the torch pitches down to a small pool GLANCE.pool (1.5 m) ahead with its cone narrowed to GLANCE.cone (18°); the
+//   Phone shows the bars HUD while Player.glancing. Release lowers it. A TAP (< 0.25 s) opens the phone menu on release
+//   (Game's shortcuts), so a hold never flashes the menu. No glance while readied, attacking, holding E, climbing,
+//   crawling, grabbed, down, dead or without control (it ends at once when any of them starts). Player.glancing (bool),
+//   Player.glance (the pose blend 0..1). A script that takes the body mid-glance keeps whatever pose it sets; the
+//   glance's own pose never outlives it (poseSnapshot records it as the plain 'phone' carry).
 const Player = (() => {
   const TAU = Math.PI * 2, D2R = Math.PI / 180;
   const WALK = 1.6, RUN = 3.5, BACK = 0.9, CRAWL = 0.8, READY_STEP = 0.75, CLIMB_UP = 0.8, CLIMB_DOWN = 1.0;
@@ -18171,6 +18181,15 @@ const Player = (() => {
   let fx = null; // spray particles
   let footSurfaceOverride = null;
   let phoneGlow = -1;
+  // the glance (hold the phone key): see the header
+  const GLANCE = { tap: 0.25, speed: 0.5, pool: 1.5, cone: 18, rate: 7 };
+  let glanceOn = false, glanceK = 0, torchAngle0 = null;
+  // the right arm's carry while glancing: one object, re-blended in place each frame from Rig's 'phone' to 'phone_look'
+  // (the same numbers as Rig.ARM_POSES; chest space, left side, mirrored for the right hand)
+  const gPose = { w: [0, 0, 0], pole: [0, 0, 0], fing: [0, 0, 0], palm: [0, 0, 0], curl: 0.4, thumb: 0.45 };
+  const G_FROM = { w: [0.07, -0.19, 0.1], pole: [1, -0.7, -0.5], fing: [-0.35, 0.3, 1], palm: [-0.15, 1, -0.45], curl: 0.4, thumb: 0.45 };
+  const G_TO = { w: [0.04, -0.07, 0.16], pole: [1, -1, -0.2], fing: [-0.35, 0.6, 0.75], palm: [-0.15, 0.5, -0.9], curl: 0.12, thumb: 0.3 };
+  const _gl = V();
 
   // ---------------------------------------------------------------------------------------------------------------
   // Actor
@@ -18344,6 +18363,16 @@ const Player = (() => {
       pitch = Math.atan2(readyTarget.pos.y + 1.0 - ty, Math.hypot(dx, dz) || 1);
     }
     if (gaze > 0.01) { ay += swayYaw() * 1.3; pitch += Math.sin(clock * 2.3 + 1) * gaze * 5 * D2R; }
+    // the glance: the phone is raised to read, so its back light points at the ground a step ahead (a small pool)
+    const L = Render.torch.light;
+    if (L) {
+      if (torchAngle0 === null) torchAngle0 = L.angle;
+      if (glanceK > 0.001 && mode === 'normal') {
+        const fwd = (tx - p.x) * Math.sin(ay) + (tz - p.z) * Math.cos(ay);          // the raised phone is ahead of him
+        pitch = U.lerp(pitch, -Math.atan2(Math.max(0.3, ty - p.y), Math.max(0.4, GLANCE.pool - fwd)), glanceK);
+        L.angle = U.lerp(torchAngle0, GLANCE.cone * D2R, glanceK);
+      } else if (L.angle !== torchAngle0) L.angle = torchAngle0;
+    }
     Render.torch.setTransform([tx, ty, tz], [Math.sin(ay) * Math.cos(pitch), Math.sin(pitch), Math.cos(ay) * Math.cos(pitch)]);
     // flicker from the nearest threat
     let lv = 0;
@@ -18383,6 +18412,33 @@ const Player = (() => {
       bounceLv = 0;
       if (bounce) bounce.set({ intensity: 0 });
     }
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // The glance (hold the phone key): raise the phone and read it (see the header)
+  // ---------------------------------------------------------------------------------------------------------------
+  function glanceWanted(ctl) {
+    if (!ctl || deadSt || mode !== 'normal' || readyOn || attack || holdAct || grabSt || ladderSt || typeof Input === 'undefined') return false;
+    return Input.down('phone') && Input.heldTime('phone') >= GLANCE.tap;
+  }
+  // the right arm: 'phone' → 'phone_look' and back, blended; only while the arm carries the phone as the player left it
+  // (a script that sets its own pose mid-glance keeps it)
+  function updateGlance(dt) {
+    const a = actor;
+    if (!a || !a.state || !a.state.carry) { glanceK = 0; return; }
+    const carry = a.state.carry.R, ours = carry === gPose;
+    const phone = !!(a.held && a.held.R && a.held.R.userData.kind === 'phone');
+    const want = glanceOn && phone && (ours || carry === 'phone');
+    glanceK = dt > 0 ? U.damp(glanceK, want ? 1 : 0, GLANCE.rate, dt) : want ? 1 : 0;
+    if (!want) {
+      if (!ours) { glanceK = 0; return; }
+      if (glanceK < 0.01) { glanceK = 0; a.armPose('R', 'phone'); return; }
+    }
+    const k = U.smooth(glanceK), chestD = (a.D && a.D.T && a.D.T.chestD) || 0.1;
+    for (const f of ['w', 'pole', 'fing', 'palm']) for (let i = 0; i < 3; i++) gPose[f][i] = U.lerp(G_FROM[f][i], G_TO[f][i], k);
+    gPose.w[2] += chestD;
+    gPose.curl = U.lerp(G_FROM.curl, G_TO.curl, k); gPose.thumb = U.lerp(G_FROM.thumb, G_TO.thumb, k);
+    if (!ours) a.armPose('R', gPose);
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -18885,6 +18941,7 @@ const Player = (() => {
     let target = null;
     if (readyOn && readyTarget && readyTarget.pos) { enemyLook.copy(readyTarget.pos); enemyLook.y += readyTarget.height ? readyTarget.height * 0.85 : 1.4; target = enemyLook; }
     else if (holdAct && holdAct.e && holdAct.e.pos) { enemyLook.copy(holdAct.e.pos); enemyLook.y += 0.9; target = enemyLook; }
+    else if (glanceK > 0.3 && actor.held && actor.held.R) { actor.held.R.getWorldPosition(_gl); target = _gl; }   // reading the phone
     else if (lookIt && lookIt.look !== false) { lookVec.copy(lookIt.pos); target = lookVec; }
     actor.lookAt(target);
   }
@@ -18960,6 +19017,7 @@ const Player = (() => {
     let moved = 0;
 
     if (typeof Input !== 'undefined' && ctl && Input.pressed('torch') && mode !== 'dead') toggleTorch();
+    glanceOn = glanceWanted(ctl);                            // (re-checked after the actions below: ready / attack end it)
 
     switch (mode) {
       case 'dead': speed = 0; break;
@@ -18984,6 +19042,8 @@ const Player = (() => {
     }
     if (mode !== 'ladder' && mode !== 'dead' && (ctl || mode !== 'normal' || impulseSt)) settleY(dt);
     if (!basisRead) trackInput();
+    if (glanceOn && !glanceWanted(ctl)) glanceOn = false;     // readied, swung, grabbed … this frame
+    updateGlance(dt);
     // the phone's screen lights his face and chest from below (a weak pool light the Rig keeps at the screen)
     const glow = deadSt || !actor.root.visible || !actor.root.parent || !actor.held || !actor.held.R || !actor.held.R.userData.screen ? 0 : PHONE_GLOW;
     if (glow !== phoneGlow || (glow > 0 && (!actor._plight || !actor._plight.isOn))) { phoneGlow = glow; try { actor.setPhoneLight(glow); } catch (e) { /* no rig light */ } }
@@ -19060,7 +19120,8 @@ const Player = (() => {
     const tank = typeof META !== 'undefined' && META.options && META.options.control === 'tank';
     const danger = S.health < 35;
     let target = 0, dirYaw = yaw, strafe = null;
-    const runKey = canRun && ctl && Input.down('run') && !readyOn && !exhausted && stamina > 0;
+    if (glanceOn) walkSpeed *= GLANCE.speed;                  // reading the phone: half speed, no running
+    const runKey = canRun && ctl && Input.down('run') && !readyOn && !glanceOn && !exhausted && stamina > 0;
     if (readyOn) {
       // ready: facing belongs to the lock (or A/D rotate without one); slow steps
       if (readyTarget && readyTarget.pos) {
@@ -19142,7 +19203,8 @@ const Player = (() => {
     deadSt = false; mode = 'normal'; modeOpts = {}; stamina = 1; exhausted = false; gaze = 0; gazeTarget = 0; tremorOn = false;
     speed = 0; control = true; locks.clear(); turnSt = null; attack = null; holdAct = null; ladderSt = null; downSt = null;
     staggerT = 0; impulseSt = null; hold = null; cutFlag = false; entryHold = null; lastLiveBasis = null; prevInput = { x: 0, y: 0 };
-    readyOn = false; readyTarget = null; stillTime = 0; phoneGlow = -1;
+    readyOn = false; readyTarget = null; stillTime = 0; phoneGlow = -1; glanceOn = false; glanceK = 0;
+    try { if (torchAngle0 !== null && Render.torch.light) Render.torch.light.angle = torchAngle0; } catch (e) { /* render */ }
     if (grabSt) grabEnd(null);
     heldFor = undefined; heldKind = null;
     setTorch(false);
@@ -19159,6 +19221,8 @@ const Player = (() => {
     try { a.finishGestures(); a.lookAt(null); a.expr('neutral'); a.eyes('ahead'); a.talk(false); } catch (e) { /* rig */ }
     try { a.hold('L', null); } catch (e) { /* rig */ }
     if (!a.held || !a.held.R || a.held.R.userData.kind !== 'phone') { try { a.hold('R', 'phone'); } catch (e) { /* rig */ } }
+    if (a.state && a.state.carry && a.state.carry.R === gPose) a.armPose('R', 'phone');   // (a glance in progress)
+    glanceOn = false; glanceK = 0;
     if (a.held && a.held.R) a.held.R.visible = true;
     try { a.bones.head.scale.set(1, 1, 1); } catch (e) { /* rig */ }
     try { a.setOpacity(1); if (a.tint && a.tint.amount) a.setTint(null, 0); a.visible(true); } catch (e) { /* rig */ }
@@ -19172,7 +19236,8 @@ const Player = (() => {
   function poseSnapshot() {
     const a = actor;
     if (!a || !a.state || !a.state.carry) return null;
-    return { L: a.state.carry.L, R: a.state.carry.R, hL: a.held ? a.held.L : null, hR: a.held ? a.held.R : null };
+    // (a glance under way is recorded as the plain carry: its pose never comes back after the scene)
+    return { L: a.state.carry.L, R: a.state.carry.R === gPose ? 'phone' : a.state.carry.R, hL: a.held ? a.held.L : null, hR: a.held ? a.held.R : null };
   }
   function poseRestore(snap) {
     const a = actor;
@@ -19232,7 +19297,9 @@ const Player = (() => {
     get surface() { return surface(); },
     set surfaceOverride(v) { footSurfaceOverride = v || null; },
     get directionHeld() { return !!hold; },
-    WEAPONS, WALK, RUN, CRAWL,
+    get glancing() { return glanceOn; },                          // CONTRACT+ the glance (hold the phone key)
+    get glance() { return glanceK; },
+    WEAPONS, WALK, RUN, CRAWL, GLANCE,
   };
   return api;
 })();
@@ -20187,6 +20254,8 @@ const World = (() => {
 // at their definitions (say, sting, mash, grainOverlay, capturing, dismissMessage, skippable, skip, clear, crmHtml …).
 // CONTRACT+ (maintenance): keypads keep digits typed while locked (replayed on unlock), ignore the press that opened
 //   them, and show [beat]-split check messages; UI.bars(n, {letterbox:true}) shows the indicator under a letterbox.
+// CONTRACT+ UI.bars(n, {show: true|false|null}) — the unreliable signal's meter rules (Phone decides: shown while Aidan
+//   glances at his phone, hidden otherwise, the old rule under an override or a call); UI.barsShown (its opacity).
 const UI = (() => {
   const TAU = Math.PI * 2;
   const SERIF = "Georgia, 'Times New Roman', Times, serif";
@@ -21060,13 +21129,20 @@ const UI = (() => {
   // =================================================================================================================
   // Phone signal bars (§4): 0–5, the only image besides item models; modes normal | pulse | none | noservice
   // =================================================================================================================
-  const barsSt = { f: null, n: 0, mode: 'normal', batt: 1, segs: 4, blinkSeg: -1, blinkT: 0, active: -99, battAt: -99, key: '', forceShow: 0, lbUntil: -99 };
+  const barsSt = { f: null, n: 0, mode: 'normal', batt: 1, segs: 4, blinkSeg: -1, blinkT: 0, active: -99, battAt: -99, key: '', forceShow: 0, lbUntil: -99, show: 0 };
   // UI.bars(n, {mode:'normal'|'pulse'|'none'|'noservice', battery 0..1}). Cheap to call every frame. The indicator fades in
   // while bars > 0 (or pulse / NO SERVICE) and out ~2.5 s after it goes idle; losing a battery notch blinks it and
   // shows the indicator for 4 s (the Standard's tell). Hidden while the letterbox is down or the HUD is off —
   // CONTRACT+ o.letterbox:true shows it for 4 s even under the letterbox (5-1: "the battery drops a notch").
+  // CONTRACT+ o.show (the unreliable signal: Phone passes it every frame): true — shown whatever the reading (Aidan
+  // glancing at his phone: empty bars too; still hidden for mode 'none', under the letterbox and with the HUD off);
+  // false — hidden (no always-on meter); omitted / null — the rule above (CLASSIC, and every scripted override or call).
+  // Coming out of `false`, the idle / battery timers start afresh: a reading the player never saw doesn't linger.
   function bars(n, o = {}) {
     ensure();
+    const show = o.show === true ? 1 : o.show === false ? -1 : 0;
+    if (barsSt.show < 0 && show >= 0) { barsSt.active = -99; barsSt.battAt = -99; }
+    barsSt.show = show;
     if (o.letterbox) barsSt.lbUntil = clock + (+o.letterbox > 1 ? +o.letterbox : 4);
     barsSt.n = clamp(Math.round(+n || 0), 0, 5);
     barsSt.mode = ['normal', 'pulse', 'none', 'noservice'].includes(o.mode) ? o.mode : 'normal';
@@ -21080,8 +21156,8 @@ const UI = (() => {
   function tickBars(dt, menu) {
     const b = barsSt;
     if (!menu) b.blinkT = Math.max(0, b.blinkT - dt);
-    const want = hudF.target > 0 && (lbF.v < 0.5 || clock < b.lbUntil) && b.mode !== 'none' &&
-      (b.n > 0 || b.mode === 'pulse' || b.mode === 'noservice' || clock - b.active < 2.5 || clock - b.battAt < 4);
+    const want = hudF.target > 0 && (lbF.v < 0.5 || clock < b.lbUntil) && b.mode !== 'none' && (b.show > 0 || (b.show === 0 &&
+      (b.n > 0 || b.mode === 'pulse' || b.mode === 'noservice' || clock - b.active < 2.5 || clock - b.battAt < 4)));
     if (b.f.target !== (want ? 1 : 0)) b.f.to(want ? 1 : 0, want ? 0.35 : 0.8);
     if (b.f.v <= 0 && !want) return;
     const s = lcdS, lit = b.mode === 'pulse' ? Math.round(heartPulse(clock) * 5) : b.n;
@@ -22317,6 +22393,7 @@ const UI = (() => {
       return top;
     },
     get hud() { return hudOn; },                                     // CONTRACT+
+    get barsShown() { return barsSt.f ? barsSt.f.v : 0; },           // CONTRACT+: the bars indicator's opacity 0..1
   };
   return api;
 })();
@@ -22562,8 +22639,8 @@ const Menus = (() => {
 #ui .ph-lcd{image-rendering:pixelated;image-rendering:crisp-edges;}
 /* options */
 #ui .op-head{position:absolute;left:0;right:0;top:9vh;text-align:center;}
-#ui .op-rows{position:absolute;left:24vw;right:24vw;top:17vh;}
-#ui .op-row{display:flex;justify-content:space-between;align-items:baseline;}
+#ui .op-rows{position:absolute;left:24vw;right:24vw;top:14.5vh;}
+#ui .op-row{display:flex;justify-content:space-between;align-items:baseline;padding:.26em 0;}
 #ui .op-v{letter-spacing:.12em;}
 /* save / load */
 #ui .sv-head{position:absolute;left:0;right:0;top:12vh;text-align:center;}
@@ -25181,6 +25258,9 @@ const Menus = (() => {
     { k: 'music', label: 'MUSIC VOLUME', type: 'range', min: 0, max: 1, step: 0.1, vol: true },
     { k: 'invertExamine', label: 'INVERT EXAMINE ROTATION', type: 'bool' },
     { k: 'vibration', label: 'VIBRATION', type: 'bool' },
+    // CONTRACT+ the phone's signal: UNRELIABLE (only what has found Aidan transmits; lag, wobble, phantoms) or CLASSIC
+    // (every threat in range, mapped at once) — Phone reads META.options.signal every frame
+    { k: 'signal', label: 'SIGNAL', type: 'enum', values: ['unreliable', 'classic'], names: ['UNRELIABLE', 'CLASSIC'] },
   ];
   function optValue(o) {
     const v = META.options[o.k];
@@ -27091,6 +27171,9 @@ const Script = (() => {
 //   ('low'), Standard def.puppet / e.puppet / e.scripted, e.clipboard / e.straighten on any Standard-bodied enemy,
 //   doors opened only on the walker's way through them (e.data.noOpen), moveToward arrival slack (1 mm) + o.ignore,
 //   freed Tethered reach their seat, unread vertical / ceiling, borrowed autoRange / interactR.
+// CONTRACT+ (the unreliable signal): Enemies.aware(e) — has it found Aidan (per type: T.aware(e); a def.aware bool | fn
+//   overrides; custom types / bosses without one are aware), warm for Enemies.AWARE.warm (4) s after it lost him;
+//   nearestThreat(pos, {aware:true}) → only aware threats (the Phone's UNRELIABLE source). See "Queries".
 const Enemies = (() => {
   const D2R = Math.PI / 180, TAU = Math.PI * 2, HALF = Math.PI / 2;
   const clamp = U.clamp, lerp = U.lerp;
@@ -28460,6 +28543,7 @@ const Enemies = (() => {
       }
     }
   }
+  const TETH_AWARE = new Set(['turn', 'offer', 'lash', 'hold', 'stun']);
   defineType('tethered', {
     hp: 30, radius: 0.3, height: 1.35, tell: 'eftpos', downs: true, rebuildDead: true, idleAnim: 'idle_hunched',
     create: tetheredCreate, update: tetheredUpdate, post: tethPost,
@@ -28471,6 +28555,9 @@ const Enemies = (() => {
     knockdown(e) { tethLashEnd(e, true); later(e, 0.85, () => { if (e.knocked && !e.resolved) e.actor.setAnim('lie_side', { blend: 0.5 }); }); return true; },
     onFreed: tetheredFreed, onDie: tetheredDie,
     threat: (e) => !e.resolved,
+    // (Enemies.aware) once it has noticed him: turning, offering, whipping, holding, fighting, getting up — never idle
+    // facing away, seated, watching or freed
+    aware: (e) => !e.resolved && !e.data.watching && e.state !== 'watch' && (e.aware === true || e.downed || e.knocked || TETH_AWARE.has(e.state)),
   });
 
   // per-enemy timers (game time)
@@ -28659,6 +28746,7 @@ const Enemies = (() => {
     const hit = hasWorld() && World.raycast ? World.raycast(e.pos.x, e.pos.z, p.x - e.pos.x, p.z - e.pos.z, d, { minH: 1.5, ignore: isEnemyCol }) : null;
     if (!hit || !hit.collider || hit.dist > 1.8) return;
     sfx('glass_knock', { pos: [hit.x, e.pos.y + 1.4, hit.z], n: 3 + Math.floor(Math.random() * 3), hard: D.rage > 60 });
+    D.knockAt = clock;
     e.actor.gesture('swing', { hand: 'L', dur: 0.7 });
     if (D.rage > 40 && Math.random() < 0.5) reachShout(e);
   }
@@ -28720,6 +28808,8 @@ const Enemies = (() => {
     knockdown(e) { if (e.state === 'lunge' || e.state === 'windup') e.state = 'rage'; later(e, 0.85, () => { if (e.knocked && !e.resolved) e.actor.setAnim('lie', { blend: 0.5 }); }); return true; },
     onDie(e, o) { e.actor.setTint('#7a2a20', 0.1, { skin: true }); defaultDeath(e, o); },
     threat: (e) => !e.resolved,
+    // (Enemies.aware) while it sees him, any rage left, winding up / lunging / recovering, fists on a door
+    aware: (e) => { const D = e.data; return D.rage > 0 || e.state === 'windup' || e.state === 'lunge' || e.state === 'recover' || clock - (D.seenT ?? -99) < 0.3 || clock - (D.knockAt ?? -99) < 2.5; },
   });
 
   // =================================================================================================================
@@ -28980,6 +29070,15 @@ const Enemies = (() => {
     onHit(e) { sfx('thud', { pos: P3(e.pos, 1.4), vol: 0.4 }); if (Math.random() < 0.4) e.actor.gesture('pen_click', { hand: 'L' }); return false; },
     stun() { return false; }, knockdown() { return false; },
     threat: (e) => !e.data.vanished && !e.hidden,
+    // (Enemies.aware) once it has seen him: the gaze and the 8 s it follows what it saw, hunt / follow mode, "Got a
+    // sec?" — never a plain patrol. A puppet (a script walks it at him) counts as aware.
+    aware: (e) => {
+      const D = e.data;
+      if (D.vanished || e.hidden) return false;
+      if (D._stdContact || e.puppet || e.def.puppet) return true;
+      if (D.seenT && clock - D.seenT < 8) return true;
+      return ctlOwns(e) ? ctl.mode === 'hunt' || ctl.mode === 'follow' : D.mode === 'hunt';
+    },
     remove(e) { const M = e.data.mirror; if (M && M.rt) { M.rt.dispose(); M.rt = null; } if (e.data.form) e.data.form.tex.dispose(); if (hasPlayer() && e.data._stdContact) Player.lock('standard', false); if (ctl && ctl.e === e) ctl.e = null; },
   });
   // e.clipboard(false): lowers the clipboard from the face (8-1 "The Mirror"); true raises it again
@@ -29410,6 +29509,7 @@ const Enemies = (() => {
       if (c && c.parent && hasWorld()) { c.parent.remove(c); World.build.group.add(c); e.data.keepCard = null; }
     },
     threat: (e) => !e.disguised && !e.resolved,
+    aware: (e) => !e.disguised,                              // (its tell is 'none' either way)
   });
 
   // =================================================================================================================
@@ -29673,6 +29773,7 @@ const Enemies = (() => {
     },
     stun() { return false; }, knockdown() { return false; },
     threat: () => true,
+    aware: (e) => e.data.swarm === 'swarm' || e.data.swarm === 'scatter',   // stirred, never resting on its wall
     threatDist(e, pos) { return unreadNearest(e, pos).d; },
     hitbox(e) { return e.data.M.filter((m, i) => i % 3 === 0).map((m) => ({ x: m.p.x, z: m.p.z, r: 0.15, y0: m.p.y - 0.3, y1: m.p.y + 0.3 })); },
   });
@@ -29704,6 +29805,7 @@ const Enemies = (() => {
       if (e.data.straight) stepStraight(e, dt);
       try { if (e.T.update) e.T.update(e, dt, ai); } catch (err) { console.error(`[Enemies] update ${e.id}`, err); }
       if (e.removed) continue;
+      if (!e.resolved) noteAware(e);
       stepFade(e, dt);
       if (e.removed) continue;
       if (e.actor && on) { e.actor.update(dt); }
@@ -29726,11 +29828,32 @@ const Enemies = (() => {
     const base = typeof t === 'function' ? !!t(e) : t !== false;
     return base && e.threat !== false;
   }
-  function nearestThreat(pos) {
+  // CONTRACT+ awareness — the Phone's unreliable signal (only what has found Aidan transmits). Enemies.aware(e) → true
+  //   while the enemy has noticed him and for AWARE.warm (4) s after it lost him. Each type decides through T.aware(e)
+  //   (the five above: see their defineType); a spawn def's `aware` (bool | fn(e)) overrides its type's; a type without
+  //   one (custom enemies, bosses) is aware whenever it is a threat. Enemies.AWARE = {warm} (tests may tune it).
+  const AWARE = { warm: 4 };
+  function rawAware(e) {
+    const f = e.def && e.def.aware !== undefined && e.def.aware !== null ? e.def.aware : e.T.aware;
+    if (f === undefined || f === null) return true;
+    if (typeof f !== 'function') return !!f;
+    try { return !!f(e); } catch (err) { console.error('[Enemies] aware', err); return false; }
+  }
+  function noteAware(e) { if (rawAware(e)) e.awareAt = clock; }
+  function aware(e) {
+    if (!e || e.removed || e.resolved || !active(e) || e.hidden) return false;
+    if (rawAware(e)) { e.awareAt = clock; return true; }
+    return clock - (e.awareAt ?? -Infinity) < AWARE.warm;
+  }
+  // nearestThreat(pos, {aware}) → {e, dist, tell} | null; CONTRACT+ o.aware: only enemies that are aware (above). Without
+  //   it every threat counts (the Player's torch flicker within 6 m; the CLASSIC signal).
+  function nearestThreat(pos, o) {
     if (!pos) return null;
+    const onlyAware = !!(o && o.aware);
     let best = null, bd = Infinity;
     for (const e of list) {
       if (!threatOf(e)) continue;
+      if (onlyAware && !aware(e)) continue;
       let d;
       if (e.T.threatDist) d = e.T.threatDist(e, pos);
       else d = Math.hypot(e.pos.x - pos.x, e.pos.z - pos.z) + Math.max(0, Math.abs(e.pos.y - pos.y) - 1.5);
@@ -29815,7 +29938,7 @@ const Enemies = (() => {
   Bus.on('chapter', () => { standard.stop(); lastTethVoice = -Infinity; });
 
   const api = {
-    spawn, update, clear, get: (id) => byId.get(id) || null, byType, nearestThreat, hitTest, lockTarget, defineType,
+    spawn, update, clear, get: (id) => byId.get(id) || null, byType, nearestThreat, aware, AWARE, hitTest, lockTarget, defineType,
     cutFree: (e) => (e && e.canCutFree ? cutFreeEnemy(e) : false), kill: (e, how = 'dead') => (e ? resolve(e, how) : false),
     freedRow, visible, standard,
     path: (ax, az, bx, bz, o) => Nav.path(ax, az, bx, bz, o || {}),
@@ -29865,6 +29988,33 @@ const Enemies = (() => {
 //   scripted voicemails.
 // CONTRACT+: Phone.answer() / Phone.decline() (tests, SH), ringing (call id | null), inCall, reading (bars, mode,
 //   battery, static, tell, dist), callLog(), voicemails(), voicemailText(i), reset(), tellOf(threat), unplayed.
+// CONTRACT+ THE UNRELIABLE SIGNAL (META.options.signal: 'unreliable' — the default, also for a missing key — or
+//   'classic'; read every frame, so a change in Options applies at once). CLASSIC is the radar above, unchanged: every
+//   threat, the bars mapped from its distance at once. UNRELIABLE:
+//   * only what has found Aidan transmits — the source is Enemies.nearestThreat(pos, {aware:true}) (Enemies.aware:
+//     a Tethered that has noticed him, a Reach that sees him / still rages / pounds a door, a stirred Unread, a
+//     Standard that has seen him or hunts; dormant ones read nothing; awareness stays warm 4 s);
+//   * the shown strength trails the true reading (rise τ 1.2 s, fall τ 2.5 s) with a slow random walk of about ±0.6
+//     bar on top (the bars only); 5 bars only within 3 m; the static and every tell (the EFTPOS beep per bar shown, the
+//     pulse, the battery drain, the vibration) follow the lagged reading, and a tell keeps sounding while it fades; a
+//     skipped scene resolves the lag at once (the reading it leaves is the played scene's — tools/tests/skipall.mjs);
+//   * phantoms: with no aware threat within 20 m and nothing else owning the phone or the player (override, call,
+//     Phone.display insert, cutscene or blocking script, menu, keypad, Outage transition, death, no control), after a
+//     quiet 50–140 s (Fog world) / 35–90 s (Outage) the reading climbs to 1–3 bars (rarely 4) over 1–2 s, holds 2–6 s
+//     under rising static — ~40 % of them with one subtle fake tell (an EFTPOS beep, a buzz, distant keys) — then
+//     fades. Only from Chapter 1 on, once S.done['signal:real'] is set (the first second of play with an aware threat
+//     reading in range — set in either mode; Bus 'signal:real'). Bus 'signal:phantom'({peak, tell}) as one starts.
+//   Game time (Phone.update's dt) and a seeded RNG (U.rng, reseeded from S at the first update after reset()); every
+//   number is in Phone.TUNE (PHONE_TUNE — tests may change it). Overrides (G.bars …) still show exactly as authored and
+//   fn overrides get this reading as `auto`. reading adds {signal, source, aware, target, lag, jitter, phantom,
+//   phantoms}. Phone.signalMode → 'unreliable' | 'classic'.
+//   * no always-on meter: the bars HUD (UI.bars {show}) is hidden unless Aidan GLANCES at the phone (Player.glancing:
+//     the phone key held ≥ 0.25 s — shown whatever the reading, empty bars too), an override supplies the bars, a call
+//     rings / is live, or a Phone.display insert is up (those three by the old rule: authored beats look as authored);
+//     the phone menu's status row and the screen in his hand (drawScreen) always show the lagged / phantom reading.
+//     CLASSIC keeps the old always-on rule (the glance shows it too).
+//   * the first real reading (S.done['signal:real']) or the first phantom in UNRELIABLE shows UI.prompt(TUNE.teach =
+//     'Hold {phone}: check your phone.', {id:'signal_glance'}) — once per save (S.done['prompt:signal_glance']).
 const Phone = (() => {
   const LCD_ON = '#38d2c6', LCD_MID = '#1f9d94', LCD_DIM = '#0f5a55', LCD_OFF = '#07201e', LCD_BG = '#010504';
   const clamp = U.clamp;
@@ -29883,6 +30033,24 @@ const Phone = (() => {
     scrKey: '', scrT: 0,
   };
   let clock = 0;
+  // ---- the unreliable signal: tuning (Phone.TUNE) and state ----
+  const PHONE_TUNE = {
+    range: 20, full: 3,                        // m: nothing beyond `range`; 5 bars only within `full`
+    riseTau: 1.2, fallTau: 2.5,                // s: the shown strength trails the true one (time constants up / down)
+    minRate: 0.2,                              // bars/s: … and always arrives (an exponential alone never reaches a bar)
+    jitter: 0.6, jitterTau: 2.2,               // bars: the random walk's limit (σ ≈ 0.55 × that); s: its pace
+    hyst: 0.08,                                // bars: hysteresis on the bar count
+    realAfter: 1.0,                            // s of play reading an aware threat before S.done['signal:real']
+    quiet: { fog: [50, 140], outage: [35, 90] },   // s of quiet before a phantom (drawn once per interval)
+    minChapter: 1,                             // phantoms from this chapter on (and after a real reading)
+    phantomBars: [1, 3], phantomFour: 0.1,     // the peak: 1–3 bars, 4 with this chance
+    phantomRise: [1, 2], phantomHold: [2, 6], phantomFall: [1.5, 3],   // s
+    phantomStatic: [0.12, 0.4],                // the static through the hold: from → to (× peak / 3, at least half)
+    phantomTell: 0.4,                          // the chance of one fake tell: an EFTPOS beep, a buzz or distant keys
+    seed: 0x51c4a1,
+    teach: 'Hold {phone}: check your phone.',  // the one-time prompt (first real reading / first phantom, UNRELIABLE)
+  };
+  const un = { mode: null, L: 0, J: 0, n: 0, kind: null, src: null, target: 0, dist: Infinity, quietT: 0, quietU: null, ph: null, realT: 0, rng: null, jrng: null, phantoms: 0, fromPh: false };
 
   // ---------------------------------------------------------------------------------------------------------------
   // Tells
@@ -29965,6 +30133,186 @@ const Phone = (() => {
   }
 
   // ---------------------------------------------------------------------------------------------------------------
+  // The unreliable signal (the default; see the header)
+  // ---------------------------------------------------------------------------------------------------------------
+  const signalMode = () => { try { return META && META.options && META.options.signal === 'classic' ? 'classic' : 'unreliable'; } catch (e) { return 'unreliable'; } };
+  const hasEnemies = () => typeof Enemies !== 'undefined' && !!Enemies && typeof Enemies.nearestThreat === 'function';
+  const hasPlayer = () => typeof Player !== 'undefined' && !!Player && !!Player.actor;
+  function awareNear() {
+    try { if (hasEnemies() && hasPlayer()) return Enemies.nearestThreat(Player.pos, { aware: true }); } catch (e) { /* not ready */ }
+    return null;
+  }
+  const scriptBusy = () => { try { return typeof Script !== 'undefined' && !!Script && (!!Script.busy || !!Script.cutscene); } catch (e) { return false; } };
+  // the player is playing: control, no blocking script, no menu
+  const playerFree = () => { try { return hasPlayer() && !Player.dead && !!Player.canControl && !scriptBusy() && !menusOpen(); } catch (e) { return false; } };
+  // anything that owns the phone or the player rules a phantom out (and ends one under way)
+  function phantomBlocked() {
+    if (st.ov || st.ring || st.inCall || st.display) return true;
+    if (!playerFree()) return true;
+    try { if (typeof UI !== 'undefined' && UI && UI.capturing && UI.capturing()) return true; } catch (e) { /* ui */ }
+    try { if (typeof World !== 'undefined' && World && (World.outageBusy || World.transitioning)) return true; } catch (e) { /* world */ }
+    return false;
+  }
+  const phantomGate = () => !!S && (S.chapter || 0) >= PHONE_TUNE.minChapter && !!(S.done && S.done['signal:real']);
+  const glancing = () => { try { return hasPlayer() && !!Player.glancing; } catch (e) { return false; } };
+  // the first real reading (or the first phantom) in UNRELIABLE teaches the glance, once per save (UI.prompt's id)
+  function teachGlance() { if (signalMode() === 'unreliable') ui('prompt', PHONE_TUNE.teach, { id: 'signal_glance' }); }
+  function seedSignal() {
+    const base = ((PHONE_TUNE.seed >>> 0) ^ U.hash(`${(S && S.chapter) || 0}|${Math.floor((S && S.stats && S.stats.time) || 0)}|${(S && S.playthrough) || 1}`)) >>> 0;
+    un.rng = U.rng(base);
+    un.jrng = U.rng((base ^ 0x9e3779b9) >>> 0);
+  }
+  const between = (r, a) => a[0] + r() * (a[1] - a[0]);
+  function gauss(r) { const a = Math.max(1e-9, r()), b = r(); return Math.sqrt(-2 * Math.log(a)) * Math.cos(2 * Math.PI * b); }
+  // S.done['signal:real']: the first second of play with an aware threat reading in range (either mode)
+  function markReal(real, dt, shown) {
+    if (!real || !playerFree()) { un.realT = 0; return; }
+    un.realT += dt;
+    if (un.realT < PHONE_TUNE.realAfter || !shown || !S || (S.done && S.done['signal:real'])) return;
+    S.done = S.done || {};
+    S.done['signal:real'] = true;
+    try { Bus.emit('signal:real'); } catch (e) { console.error('[Phone] signal:real', e); }
+    teachGlance();
+  }
+  function startPhantom() {
+    const T = PHONE_TUNE, r = un.rng;
+    const lo = Math.round(T.phantomBars[0]), hi = Math.round(T.phantomBars[1]);
+    const peak = r() < T.phantomFour ? 4 : clamp(lo + Math.floor(r() * (hi - lo + 1)), 1, 4);
+    const rise = between(r, T.phantomRise), hold = between(r, T.phantomHold), fall = between(r, T.phantomFall);
+    const tell = r() < T.phantomTell ? ['eftpos', 'vibrate', 'keys'][Math.floor(r() * 3) % 3] : null;
+    un.ph = { t: 0, peak, rise, hold, fall, tell, tellAt: rise + r() * Math.min(1.5, hold * 0.5), told: false, top: 0 };
+    un.phantoms++;
+    try { Bus.emit('signal:phantom', { peak, tell }); } catch (e) { console.error('[Phone] signal:phantom', e); }
+    teachGlance();
+  }
+  function endPhantom() { un.ph = null; un.quietT = 0; un.quietU = null; }
+  // the phantom's own envelope → {v (bars, continuous), stat}
+  function phantomStep(dt) {
+    const P = un.ph, T = PHONE_TUNE;
+    P.t += dt;
+    const top = P.peak + 0.5, t = P.t;
+    let k;
+    if (t < P.rise) k = U.ease.inOut(t / P.rise);
+    else if (t < P.rise + P.hold) k = 1;
+    else if (t < P.rise + P.hold + P.fall) k = 1 - U.ease.inOut((t - P.rise - P.hold) / P.fall);
+    else { endPhantom(); return null; }
+    if (P.tell && !P.told && t >= P.tellAt) {
+      P.told = true;
+      if (P.tell === 'eftpos') sfx('eftpos', { vol: 0.24, lp: 3600 });
+      else if (P.tell === 'vibrate') sfx('vibrate', { short: true, vol: 0.28 });
+      else sfx('keys_far', { vol: 0.38, pan: (un.rng() - 0.5) * 1.2 });
+    }
+    const hk = clamp((t - P.rise) / Math.max(0.01, P.hold));
+    const stat = k * U.lerp(T.phantomStatic[0], T.phantomStatic[1], hk) * Math.max(0.5, P.peak / 3);
+    return { v: top * k, stat };
+  }
+  function unreliableReading(dt) {
+    const T = PHONE_TUNE;
+    if (!un.rng) seedSignal();
+    const near = awareNear();
+    const d = near && isFinite(+near.dist) ? +near.dist : Infinity;
+    const kind = near && d < T.range ? tellOf(near) : null;
+    const silent = kind === 'none' || kind === 'nobars';
+    const target = !kind || silent ? 0 : d <= T.full ? 5 : 1 + ((T.range - d) / (T.range - T.full)) * 4;
+    un.src = kind ? near.e : null; un.dist = d; un.target = target;
+    // the lag: exponential toward the true strength (rise faster than fall), never slower than minRate. A skipped scene
+    // resolves it at once (as it does waits and fades): the reading it leaves is the one the played scene leaves.
+    const diff = target - un.L;
+    let skipping = false;
+    try { skipping = typeof Script !== 'undefined' && !!Script && !!Script.skipping; } catch (e) { /* no script */ }
+    if (skipping) un.L = target;
+    else if (diff !== 0 && dt > 0) {
+      let step = diff * (1 - Math.exp(-dt / (diff > 0 ? T.riseTau : T.fallTau)));
+      const minStep = T.minRate * dt;
+      if (Math.abs(step) < minStep) step = Math.sign(diff) * Math.min(minStep, Math.abs(diff));
+      un.L = clamp(un.L + step, 0, 5);
+    }
+    // the tell follows the reading: a silent source takes over at once; any other keeps its tell while its reading fades
+    if (kind && (silent || target > 0)) un.kind = kind;
+    else if (un.L <= 1e-3) un.kind = null;
+    // the slow random walk (Ornstein–Uhlenbeck, σ ≈ 0.55 × jitter, clamped at ±jitter)
+    if (dt > 0) {
+      const tau = Math.max(0.05, T.jitterTau), sd = T.jitter * 0.55;
+      un.J = clamp(un.J - (un.J * dt) / tau + sd * Math.sqrt((2 * dt) / tau) * gauss(un.jrng), -T.jitter, T.jitter);
+    }
+    // phantoms
+    const quiet = !(near && d < T.range);
+    const blocked = phantomBlocked(), gate = phantomGate();
+    if (!quiet) { un.quietT = 0; un.quietU = null; if (un.ph) endPhantom(); }
+    else if (un.ph && (blocked || !gate)) endPhantom();
+    else if (!un.ph && gate && !blocked && dt > 0) {
+      if (un.quietU === null) un.quietU = un.rng();
+      un.quietT += dt;
+      const q = S.outage ? T.quiet.outage : T.quiet.fog;
+      if (un.quietT >= U.lerp(q[0], q[1], un.quietU)) startPhantom();
+    }
+    const ph = un.ph ? phantomStep(dt) : null;
+    // what shows
+    let eff = un.L + un.J * clamp(un.L), fromPh = false, phStat = 0;
+    if (ph) { const e2 = ph.v + un.J * clamp(ph.v) * 0.7; phStat = ph.stat; if (e2 > eff) { eff = e2; fromPh = true; } }
+    eff = Math.max(0, eff);
+    let n = un.n;
+    const f = Math.min(5, Math.floor(eff));
+    if (f > n) n = eff >= f + T.hyst || f === 5 ? f : Math.max(n, f - 1);
+    else if (f < n && eff < n - T.hyst) n = f;
+    if (fromPh) n = Math.min(n, 4, un.ph ? un.ph.peak + 1 : 4);
+    else if (!(kind && d <= T.full)) n = Math.min(n, 4);
+    un.n = n; un.fromPh = fromPh;
+    // the static and the tells follow the lagged strength (the wobble moves only the bars)
+    const prox = clamp((un.L - 1) / 4);
+    const tk = fromPh ? 'phantom' : un.kind;
+    st.tell = fromPh ? null : un.kind; st.dist = d; st.prox = prox;
+    markReal(!!kind && !silent, dt, un.L >= 1 || kind === 'battery');
+    // the Standard drains the battery instead; everything else lets it creep back
+    if (tk === 'battery') {
+      const tgt = 1 - prox * 0.999;
+      st.batt = st.batt > tgt ? Math.max(tgt, st.batt - 0.3 * dt) : Math.min(1, st.batt + 0.04 * dt);
+    } else st.batt = Math.min(1, st.batt + 0.05 * dt);
+    let shown = n, mode = 'normal', stat = prox * 0.85;
+    const live = un.L >= 0.5;                    // a tell sounds while there is a reading at all
+    switch (tk) {
+      case 'phantom': stat = Math.max(stat, phStat); break;
+      case 'none': shown = 0; n = 0; stat = 0; break;
+      case 'nobars': shown = 0; n = 0; mode = 'none'; stat = 0; break;
+      case 'battery': shown = 0; stat = prox * 0.55; break;
+      case 'pulse': {
+        const period = U.lerp(0.8, 0.42, prox);
+        const before = st.pulse;
+        st.pulse = (st.pulse + dt / period) % 1;
+        if (live && st.pulse < before) sfx('heartbeat', { vol: 0.12 + 0.4 * prox });
+        shown = Math.round(heart(st.pulse) * n);
+        break;
+      }
+      case 'vibrate': {
+        st.vibT -= dt;
+        if (live && st.vibT <= 0) {
+          st.vibT = U.lerp(1.0, 0.45, prox);
+          const h = sfx('vibrate', { short: true, vol: 0.25 + 0.45 * prox });
+          if (!h || !h.dur) inp('rumble', 0.05, 0.3 + 0.4 * prox, 300);
+        }
+        break;
+      }
+      case 'eftpos':
+        if (n > st.beepN) sfx('eftpos', { vol: 0.3 + 0.4 * prox, lp: 5000 });
+        break;
+      default: break;
+    }
+    st.autoN = n;
+    st.beepN = n;
+    return { n: shown, mode, battery: st.batt, static: stat };
+  }
+  // a switch of META.options.signal mid-game: the new mode starts from what the phone shows
+  function switchSignal(to) {
+    const from = un.mode;
+    un.mode = to;
+    if (from === null) return;
+    endPhantom();
+    un.J = 0; un.realT = 0;
+    if (to === 'unreliable') { un.L = st.n; un.n = st.n; un.kind = st.tell; }
+    else st.autoN = st.n;
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
   // Overrides
   // ---------------------------------------------------------------------------------------------------------------
   function flickerFn() {
@@ -30009,7 +30357,17 @@ const Phone = (() => {
     if (dt === undefined) dt = (typeof Time !== 'undefined' && Time.dt) || 0;
     dt = Math.max(0, +dt || 0);
     clock += dt;
-    const auto = autoReading(dt);
+    const sm = signalMode();
+    if (sm !== un.mode) switchSignal(sm);
+    let auto;
+    if (sm === 'classic') {
+      auto = autoReading(dt);
+      // (the classic radar reads every threat; the gate for phantoms still notes a first real, aware reading)
+      if (!(S && S.done && S.done['signal:real'])) {
+        const a = awareNear(), ad = a && isFinite(+a.dist) ? +a.dist : Infinity, ak = a && ad < PHONE_TUNE.range ? tellOf(a) : null;
+        markReal(!!ak && ak !== 'none' && ak !== 'nobars', dt, true);
+      }
+    } else auto = unreliableReading(dt);
     let r = auto, fromOv = false;
     if (st.ov) {
       let v = null;
@@ -30033,7 +30391,14 @@ const Phone = (() => {
     st.staticV = dt > 0 ? U.damp(st.staticV, clamp(stat), 5, dt) : clamp(stat);
     st.n = n; st.mode = mode; st.battery = battery;
     try { if (typeof Snd !== 'undefined' && Snd.staticLevel) Snd.staticLevel(st.staticV < 0.01 ? 0 : st.staticV); } catch (e) { /* audio */ }
-    ui('bars', n, { mode, battery, letterbox: !!(fromOv && r.letterbox) });   // {letterbox:true}: shown under the letterbox too
+    // the meter on screen: shown while Aidan glances at the phone (hold C) in either mode. Otherwise CLASSIC keeps the
+    // old rule (it comes with bars); UNRELIABLE has no always-on meter: the old rule while a scripted override supplies
+    // the bars, a call rings or is live, or an insert is up (authored beats show as authored), else hidden — the static,
+    // the tells and the phone's own screen in his hand carry it
+    let show = null;
+    if (glancing()) show = true;
+    else if (sm !== 'classic') show = fromOv || (st.ring && st.ring.live) || st.inCall || st.display ? null : false;
+    ui('bars', n, { mode, battery, letterbox: !!(fromOv && r.letterbox), show });   // {letterbox:true}: shown under the letterbox too
     refreshScreen(dt);
   }
 
@@ -30409,11 +30774,17 @@ const Phone = (() => {
     if (st.ring) { st.ring.force = 'declined'; }
     st.ring = null; st.inCall = null; st.ov = null; st.display = null;
     st.batt = 1; st.battSeg = 4; st.autoN = 0; st.beepN = 0; st.n = 0; st.staticV = 0; st.scrKey = '';
+    resetSignal();
     ui('callPrompt', null);
     ui('bars', 0, { mode: 'normal', battery: 1 });
     try { if (typeof Snd !== 'undefined' && Snd.staticLevel) Snd.staticLevel(0); } catch (e) { /* audio */ }
   }
-  Bus.on('room:leave', () => { if (st.ov && st.ov.room) st.ov = null; st.autoN = 0; st.beepN = 0; });
+  // the unreliable signal starts clean (and reseeds from S at the next update: a load replays the same phantoms)
+  function resetSignal() {
+    un.L = 0; un.J = 0; un.n = 0; un.kind = null; un.src = null; un.target = 0; un.dist = Infinity; un.realT = 0; un.fromPh = false;
+    un.ph = null; un.quietT = 0; un.quietU = null; un.rng = null; un.jrng = null;
+  }
+  Bus.on('room:leave', () => { if (st.ov && st.ov.room) st.ov = null; st.autoN = 0; st.beepN = 0; un.L = 0; un.J = 0; un.n = 0; un.kind = null; if (un.ph) endPhantom(); });
   Bus.on('death', () => { st.ring = null; st.inCall = null; ui('callPrompt', null); });
 
   return {
@@ -30423,7 +30794,18 @@ const Phone = (() => {
     get ringing() { return st.ring ? st.ring.id : null; },
     get inCall() { return st.inCall ? st.inCall.id : null; },
     get unplayed() { return (S.voicemails || []).filter((v) => !v.played).length; },
-    get reading() { return { bars: st.n, mode: st.mode, battery: st.battery ?? st.batt, static: st.staticV, tell: st.tell, dist: st.dist, override: !!st.ov }; },
+    get reading() {
+      const unrel = un.mode !== 'classic';
+      return {
+        bars: st.n, mode: st.mode, battery: st.battery ?? st.batt, static: st.staticV, tell: st.tell, dist: st.dist, override: !!st.ov,
+        signal: un.mode || signalMode(), source: unrel && un.src ? un.src.id : null, aware: unrel ? !!un.src : null,
+        target: unrel ? un.target : null, lag: unrel ? un.L : null, jitter: unrel ? un.J : null,
+        phantom: unrel && !!un.ph, phantomPeak: un.ph ? un.ph.peak : null, phantomTell: un.ph ? un.ph.tell : null, phantoms: un.phantoms,
+        quiet: unrel ? un.quietT : null,
+      };
+    },
+    get signalMode() { return signalMode(); },
+    TUNE: PHONE_TUNE,
   };
 })();
 // ======== src/engine/14_save.js ========
@@ -31318,13 +31700,22 @@ const Game = (() => {
 
   // Esc → pause; Tab / M / C → items / map / phone (spec §3). Nothing opens over a capture (choice, keypad, in-world
   // screen), a room transition or death; Tab / M / C also wait while a blocking script owns the input.
+  // CONTRACT+ the phone key is a TAP or a HOLD: a tap (released within Player.GLANCE.tap, 0.25 s) opens the phone menu
+  // as it is RELEASED; holding it is Player's glance (the phone raised in the world, no menu), so a hold never flashes
+  // the menu. A press that came while nothing could open never opens it later.
+  let phoneTap = false;
   function shortcuts() {
-    if (Menus.isOpen() || UI.capturing() || World.transitioning || Player.dead || flow) return;
-    if (Input.pressed('pause')) { Input.consume('pause'); openMenu('pause'); return; }
-    if (Script.busy) return;
-    if (Input.pressed('inventory')) { Input.consume('inventory'); openMenu('items'); }
-    else if (Input.pressed('map')) { Input.consume('map'); openMenu('map'); }
-    else if (Input.pressed('phone')) { Input.consume('phone'); openMenu('phone'); }
+    if (Menus.isOpen() || UI.capturing() || World.transitioning || Player.dead || flow) { phoneTap = false; return; }
+    if (Input.pressed('pause')) { Input.consume('pause'); phoneTap = false; openMenu('pause'); return; }
+    if (Script.busy) { phoneTap = false; return; }
+    if (Input.pressed('inventory')) { Input.consume('inventory'); phoneTap = false; openMenu('items'); return; }
+    if (Input.pressed('map')) { Input.consume('map'); phoneTap = false; openMenu('map'); return; }
+    const tap = (Player.GLANCE && Player.GLANCE.tap) || 0.25;
+    if (Input.pressed('phone')) phoneTap = true;
+    else if (phoneTap && Input.released('phone')) {
+      phoneTap = false;
+      if (Input.releasedAfter('phone') < tap) { Input.consume('phone'); openMenu('phone'); }
+    } else if (phoneTap && (!Input.down('phone') || Input.heldTime('phone') >= tap)) phoneTap = false;   // a hold: the glance
   }
   function openMenu(name, o = {}) {
     return quiet(Promise.resolve(Menus.open(name, o)).then((r) => { if (r === 'title') goTitle(); return r; }));
@@ -34173,22 +34564,25 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       quad(tq, [34.9, -0.75, -5.9], [41.7, -0.75, -5.9], [41.7, -2.4, -16], [34.9, -2.4, -16], 1 / Tex.size('bitumen'), [0, 1, 0]);
       // the valley falls away beyond the rails (grass, then dirt, into white)
       const vq = bags.g('grass', { tex: 'grass', color: '#7c8470' }), vd = bags.g('dirt', 'dirt');
-      quad(vq, [0, -0.02, 0.95], [34.7, -0.02, 0.95], [34.7, -4.8, -3.6], [0, -4.8, -3.6], 0.5, [0, 1, 0]);
-      quad(vd, [0, -4.8, -3.6], [34.7, -4.8, -3.6], [34.7, -12, -9], [0, -12, -9], 0.5, [0, 1, 0]);
-      quad(vq, [41.9, -0.02, 1.0], [48, -0.02, 1.0], [48, -4.6, -4.6], [41.9, -4.6, -4.6], 0.5, [0, 1, 0]);
+      // (both run on well past the fog walls: the hillside fades into the fog, it never ends at a cut)
+      quad(vq, [-30, -0.02, 0.95], [34.7, -0.02, 0.95], [34.7, -4.8, -3.6], [-30, -4.8, -3.6], 0.5, [0, 1, 0]);
+      quad(vd, [-30, -4.8, -3.6], [34.7, -4.8, -3.6], [34.7, -12, -9], [-30, -12, -9], 0.5, [0, 1, 0]);
+      quad(vq, [41.9, -0.02, 1.0], [74, -0.02, 1.0], [74, -4.6, -4.6], [41.9, -4.6, -4.6], 0.5, [0, 1, 0]);
+      quad(vd, [41.9, -4.6, -4.6], [74, -4.6, -4.6], [74, -12, -9], [45.5, -12, -9], 0.5, [0, 1, 0]);
       quad(vq, [34.7, -0.8, -5.9], [34.7, -0.02, 0.95], [31, -5, 0.95], [31, -5.5, -5.9], 0.5, [-1, 1, 0]);
       quad(vq, [41.9, -0.02, 1.0], [41.9, -0.8, -5.9], [45.5, -5.2, -5.9], [45.5, -4.6, 1.0], 0.5, [1, 1, 0]);
       // the cutting on the south side, above the verge
       const cq = bags.g('cut', { tex: 'dirt', color: '#8a7a64' });
-      quad(cq, [-2, 0, 16.9], [46, 0, 16.9], [46, 3.6, 19.2], [-2, 3.6, 19.2], 0.5, [0, 0.5, -1]);
-      quad(bags.g('grasstop', { tex: 'grass', color: '#6f7a62' }), [-2, 3.6, 19.2], [46, 3.6, 19.2], [46, 4.4, 26], [-2, 4.4, 26], 0.5, [0, 1, 0]);
+      quad(cq, [-30, 0, 16.9], [74, 0, 16.9], [74, 3.6, 19.2], [-30, 3.6, 19.2], 0.5, [0, 0.5, -1]);
+      quad(bags.g('grasstop', { tex: 'grass', color: '#6f7a62' }), [-30, 3.6, 19.2], [74, 3.6, 19.2], [74, 4.4, 26], [-30, 4.4, 26], 0.5, [0, 1, 0]);
+      quad(bags.g('grasstop', { tex: 'grass', color: '#6f7a62' }), [-30, 4.4, 26], [74, 4.4, 26], [74, 6.5, 40], [-30, 6.5, 40], 0.5, [0, 1, 0]);
       bags.flush(K);
 
       // ---- guardrails: along the valley, both sides of the turn-off; the wire fence on the south verge ----------------
       for (let x = 1.6; x < 34.7; x += 8.3) railSeg(K, [Math.min(x + 8.3, 34.8), 0, 1.08], [x, 0, 1.08], { ends: x === 1.6 });
       railSeg(K, [34.75, -0.75, -5.9], [34.75, 0, 1.08], { ends: true });
       railSeg(K, [41.85, 0, 1.08], [41.85, -0.75, -5.9], { ends: true });
-      for (let x = 3; x < 44; x += 6) K.prop('fence', x, 16.45, 180, { variant: 'wire', len: 6 });
+      for (let x = -27; x < 72; x += 6) K.prop('fence', x, 16.45, 180, { variant: 'wire', len: 6 });
       K.collider(-1, 16.45, 45, 17.6, { h: 3 });
       K.examine(27.5, 0.7, 1.35, 'Can\'t see the valley. Can\'t see anything.', { id: 'p2:guardrail' });
       K.examine(38.3, 0.7, -5.2, ['The road drops away into the fog. Hill Road. [beat] Town\'s down there somewhere.', 'Somewhere.'], { id: 'p2:turnoff', r: 1.6 });
@@ -34290,7 +34684,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
   // the south. The fire-trail gate at 60 m (the figure crosses there), a driveway and letterbox at 90 m.
   // =================================================================================================================
   const XS = []; for (let x = -3; x <= 123.001; x += 1) XS.push(+x.toFixed(3));
-  const XW = []; for (let x = -16; x <= 134.001; x += 1) XW.push(+x.toFixed(3));        // terrain + road run on past the ends into the fog
+  const XW = []; for (let x = -16; x <= 172.001; x += 1) XW.push(+x.toFixed(3));        // terrain + road run on past the ends into the fog
   const bumpy = (x) => 1 + 0.13 * Math.sin(x * 0.83) + 0.08 * Math.sin(x * 2.1 + 1.3) + 0.05 * Math.sin(x * 4.7);
   const bankY = { toe: 0, mid: (x) => 2.9 * bumpy(x) * (1 - 0.72 * gully(x) - 0.6 * drive(x)), lip: (x) => 3.3 * bumpy(x + 3) * (1 - 0.7 * gully(x) - 0.55 * drive(x)), top: (x) => 4.3 * (1 - 0.4 * gully(x) - 0.4 * drive(x)), far: (x) => 9.5 + 1.5 * Math.sin(x * 0.21) };
   defineRoom({
@@ -34373,7 +34767,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       bags.flush(K);
 
       // ---- guardrail along the valley side (2 m segments following the curve and the grade), the fire-trail gate ----
-      for (let x = -15; x < 133; x += 2) {
+      for (let x = -15; x < 171; x += 2) {
         const xb = x + 2;
         if (x + 1 > 58.2 && x + 1 < 61.8) continue;
         const [ax, az] = hrPt(x, HR.rail), [bx, bz] = hrPt(xb, HR.rail);
@@ -34553,8 +34947,8 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.plane(9.9, 0.006, 3.2, 3.6, 0.3, lineTex(), { rot: [-90, 0, 90], transparent: true });
       // Hill Road runs on west into the fog (visual), Relay Street north (visual beyond the exit)
       K.box(-9, -0.05, 6.7, 15, 0.05, 6.4, 'bitumen', { shadow: false });
-      K.box(10.2, -0.05, -14, 4.6, 0.05, 13, 'bitumen', { shadow: false });
-      K.box(7.2, 0, -14, 1.5, 0.14, 13, 'footpath', { shadow: false });
+      K.box(10.2, -0.05, -26.3, 4.6, 0.05, 37.6, 'bitumen', { shadow: false });
+      K.box(7.2, 0, -26.3, 1.5, 0.14, 37.6, 'footpath', { shadow: false });
       // the drop to the south: the road ends
       K.drop(-1.6, 9.9, 12.5, 12.2, { side: 'n', msg: 'The road ends here.' });
       K.examine(3.6, 1.2, 9.35, ['ROAD CLOSED — WORKS IN PROGRESS. [beat] There\'s nothing left to work on.', 'The road just stops. Like someone forgot the rest of it.'], { id: 'p4:drop', r: 1.6 });
@@ -34572,6 +34966,18 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.prop('shrub', 13.8, -3.2, 0, { w: 1.6, h: 1.3 }); K.prop('shrub', 13.9, 8.6, 0, { w: 1.3, h: 1.1, dead: true });
       K.prop('gum_tree', 16.5, 2.5, 0, {}); K.prop('gum_tree_small', -1.5, -1.8, 0, {});
       K.prop('power_pole', 13.6, -6.8, 0, { span: 0 });
+      // the bush all round the clearing (seen over the fences and through the wire, from the high shots): scrub ground
+      // west of the footpath and behind the paling fences, the paddock past the wire fence, both fences running on
+      // north beside Relay Street into the fog — never the fog's floor
+      { const SCRUB = { tex: 'grass', color: '#6c745f' }, DRY = { tex: 'grass', color: '#77765e' };
+        K.box(-9.3, 0, -4.25, 15.4, 0.08, 15.5, SCRUB, { shadow: false });                         // x −17 … −1.6, z −12 … 3.5
+        K.box(2.35, 0, -23.3, 7.9, 0.08, 43.4, SCRUB, { shadow: false });                           // behind the paling fences (… z −1.6)
+        K.box(22.2, 0, -17.5, 15.6, 0.05, 54, DRY, { shadow: false });                              // past the wire fence (x 14.4 … 30)
+        K.box(13.45, 0.06, -26.3, 1.9, 0.01, 37.4, { tex: 'grass', color: '#77806a' }, { shadow: false });   // the verge on north
+        for (let z = -9.1; z > -44; z -= 3) K.prop('fence', 6.3, z, -90, { variant: 'paling', len: 3 });
+        for (let z = -10; z > -44; z -= 4) K.prop('fence', 14.35, z, -90, { variant: 'wire', len: 4 });
+        for (const [x, z, w, h, d] of [[-4.2, -3.5, 1.8, 1.4, 0], [-7.5, 1.2, 1.5, 1.2, 1], [-3.0, -7.8, 1.6, 1.3, 0], [1.8, -4.4, 1.4, 1.1, 1], [4.6, -9.5, 1.5, 1.2, 0], [17.5, -2.5, 1.6, 1.0, 1], [19.8, 6.2, 1.3, 0.9, 0], [16.4, 9.2, 1.2, 1.0, 1]]) K.prop('shrub', x, z, 0, { y: 0.08, w, h, dead: !!d, collide: false });
+        K.prop('gum_tree', -8.5, -6.5, 120, { y: 0.08, collide: false }); K.prop('gum_tree_small', 2.8, -8.2, 40, { y: 0.08, collide: false }); K.prop('gum_tree', 23.5, -8.5, 210, { y: 0.05, collide: false }); }
       bags.flush(K);
 
       // ---- the Route 44 shelter and the only working streetlight -----------------------------------------------------
@@ -35422,6 +35828,19 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.door({ id: 'c1_carpark:fireexit', x: 14, z: -0.15, rot: 0, w: 0.95, style: 'fire', locked: true, lockMsg: 'It won\'t open from this side.', window: false });
       K.door({ id: 'c1_carpark:goods', x: 28, z: -0.15, rot: 0, w: 3.2, h: 2.9, style: 'roller', locked: true, lockMsg: 'It\'s locked.' });
       for (let x = 2; x < 41; x += 8.5) K.box(x, 0, 0.02, 0.25, 6.5, 0.12, { tex: 'concrete', color: '#857e70' });
+      // the Plaza itself behind that wall: one block of building (its west face turns the corner onto Relay Street, it
+      // runs on east past the retaining wall), a parapet cap, a plant room and a roof sign frame set back on the roof —
+      // never a free-standing wall with the fog behind it
+      K.box(28.2, 0, -14.3, 59.7, 6.5, 28, FAC, { shadow: false });
+      K.box(28.2, 6.5, -0.28, 59.9, 0.16, 0.56, { tex: 'concrete', color: '#6c6860' }, { shadow: false });
+      K.box(-1.52, 6.5, -14.3, 0.56, 0.16, 28, { tex: 'concrete', color: '#6c6860' }, { shadow: false });
+      K.box(24, 6.5, -9.5, 9, 2.4, 6, { tex: 'concrete', color: '#7a7468' }, { shadow: false });
+      K.box(24, 8.9, -9.5, 9.2, 0.12, 6.2, { tex: 'concrete', color: '#6c6860' }, { shadow: false });
+      for (const x of [34, 38]) K.box(x, 6.5, -2.2, 0.14, 2.6, 0.14, { tex: 'metal', color: '#4a4f4c' }, { shadow: false });
+      K.box(36, 8.3, -2.2, 4.6, 0.9, 0.1, { tex: 'metal', color: '#4a4f4c' }, { shadow: false });
+      // the far side of Relay Street through the driveway: the shops across the road, grey in the fog
+      K.box(-21.5, 0, 5, 3, 5.6, 30, { tex: 'render_cracked', color: '#8a8276' }, { shadow: false });
+      K.box(-19.9, 3.05, 5, 0.3, 0.35, 30, { color: '#2b2f2d' }, { shadow: false });
       K.sign('STAFF PARKING ONLY', 6.5, 2.4, 0.03, 2.6, 0.5, { style: 'council', bg: '#e8e2cc', fg: '#8a1f1a' });
       K.sign('FIRE EXIT\nDO NOT OBSTRUCT', 14, 2.55, 0.03, 0.9, 0.36, { style: 'council', bg: '#1f6b3c', fg: '#f2f4ee' });
       K.writing('WHO ARE YOU TRYING TO REACH', 21.5, 1.6, 0.03, 2.8, { world: 'fog' });
@@ -35535,6 +35954,19 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.box(5, py, -0.9, 3.4, 0.02, 1.4, { tex: 'concrete', color: '#4a4842' });
       K.door({ id: 'c1_dock:door', x: 15.5, z: -0.15, y: py, rot: 0, w: 0.95, style: 'metal', to: 'c1_corridor', entry: 'dock', open: 0.72, sign: 'GOODS IN' });
       K.box(15.5, py, -0.7, 1.2, 2.1, 0.05, { color: '#0a0b0b', roughness: 1 });
+      // the Plaza behind the back wall: one block of building running on past both ends of the dock (its front 1.9 m
+      // back behind the two doorways, so the dark behind the roller door and the goods-in door stays dark), a roof slab
+      // over it all at the parapet, a plant room set back on the roof
+      {
+        const MB_ = { tex: 'concrete', color: '#7e776a' }, CAP = { tex: 'concrete', color: '#6c6860' };
+        K.box(10, 0, -11.25, 44, 5.8, 18.1, MB_, { shadow: false });
+        for (const [a, b] of [[-1.2, 3.3], [6.7, 14.85], [16.15, 20.5]]) K.box((a + b) / 2, 0, -1.25, b - a, 5.8, 1.9, MB_, { shadow: false });
+        for (const [a, b] of [[-12, -1.2], [20.5, 32]]) K.box((a + b) / 2, 0, -1.1, b - a, 5.8, 2.2, MB_, { shadow: false });
+        K.box(10, 5.8, -10.18, 44.2, 0.16, 20.46, CAP, { shadow: false });
+        K.box(9, 5.96, -9, 7, 2.2, 5, { tex: 'concrete', color: '#77726a' }, { shadow: false });
+        // the lane back to the car park: the brick boundary wall runs on west along it
+        K.box(-6.7, 0, 12.8, 10.6, 2.6, 0.3, 'brick', { shadow: false });
+      }
       K.box(15.05, py, 0.42, 0.14, 0.06, 0.1, { tex: 'wood', color: '#7a6040' }, { rot: 20 });            // the wedge
       K.box(8.8, 4.3, 2.4, 20.6, 0.14, 5.4, { tex: 'metal', color: '#6a6f6c' });                  // canopy
       for (const x of [-0.8, 8.8, 18.6]) K.box(x, 0, 5.05, 0.18, 4.3, 0.18, { tex: 'metal', color: '#5d625f' }, { collide: true });
@@ -35614,7 +36046,17 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.wall(0, -0.075, 0, 3.075, H, WM);
       K.wall(40, 3.075, 40, -0.075, H, WM, { openings: [{ at: 1.575, w: 1.0, h: 2.15 }] });
       // the void past the cutaway wall (visual only): a dark slab so the rail never sees nothing
-      K.plane(20, -0.01, 5.2, 42, 4.4, { color: '#141615', roughness: 1 }, { rot: [-90, 0, 0] });
+      K.plane(20, -0.01, 6.0, 56, 6, { color: '#141615', roughness: 1 }, { rot: [-90, 0, 0] });
+      // the building cut through along the cutaway (the gap sweep): the slab over the ceiling and the rooms either end of
+      // the corridor as dark section faces flush with the cut, so the rail frames a corridor inside a building instead of
+      // a lit box in grey fog; a dark lobby behind the fire door
+      {
+        const CUT = { tex: 'concrete', color: '#262927', roughness: 1 };
+        K.box(20, H + 0.01, 1.475, 54, 1.8, 3.35, CUT, { shadow: false });
+        K.box(-3.54, -0.3, 1.475, 6.92, H + 0.32, 3.35, CUT, { shadow: false });
+        K.box(43.54, -0.3, 1.475, 6.92, H + 0.32, 3.35, CUT, { shadow: false });
+        K.box(5, 0, -2.2, 2.4, 2.4, 1.8, { color: '#161a19', roughness: 1 }, { shadow: false });
+      }
       // doors
       K.door({ id: 'c1_corridor:dock', x: 40, z: 1.5, rot: 90, w: 0.95, style: 'metal', to: 'c1_dock', entry: 'corridor', sign: 'LOADING DOCK', signBack: 'GOODS IN' });
       K.door({ id: 'c1_corridor:security', x: 31, z: 3.075, rot: 0, w: 0.9, style: 'wood', to: 'c1_security', entry: 'door', sign: 'SECURITY', color: '#d8d0bc' });
@@ -36117,6 +36559,48 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.plane(-3, 1.6, 6, 6, 3.6, { color: '#b7c0bd', emissive: '#8e9996', emissiveIntensity: 0.6, roughness: 1 }, { rotY: 90, emissive: true });
       K.box(-1.5, 0, 6, 3, 0.02, 3.6, { tex: 'tile', color: '#6a6a62' });
       K.sign('SIGNAL HILL PLAZA', 0.18, 3.4, 6, 3.2, 0.4, { rotY: 90, style: 'shop', bg: '#1d3d4a', fg: '#e6dfc9' });
+      // ---- the Plaza's body round the concourse (the gap sweep): party walls in the joints between the shopfronts,
+      // flush with their faces; the bulkhead over them up to the balconies; one back wall behind every shop interior (the
+      // store's lit floor included, so the view through the glass stays); the end walls the full depth of the balconies;
+      // a ceiling over the first floor's walkways — never a slot onto the dark
+      {
+        const PL = 'plaster_stained', SI = { tex: 'plaster', color: '#e2e0d8' }, DK = { color: '#161a19', roughness: 1 };
+        const SW = (x0, x1, z0, z1, y0, y1, mat = PL) => K.box((x0 + x1) / 2, y0, (z0 + z1) / 2, x1 - x0, y1 - y0, z1 - z0, mat, { shadow: false });
+        // north: the joints, the bulkhead, the store's own side walls, the corner past it, the back wall
+        for (const [a, b] of [[11.5, 11.75], [17.75, 18], [24, 24.25], [30.25, 30.5], [36.5, 36.75], [42.75, 43.9]]) SW(a, b, -4.3, -0.9, 0, 4.4);
+        SW(11.5, 43.9, -4.3, -0.92, 3.6, 4.4);
+        for (const [a, b] of [[43.9, 44.3], [57.7, 58.1]]) SW(a, b, -4.3, -1.3, 0, 4.4, SI);
+        SW(58.1, 59.85, -4.3, -0.85, 0, 4.4);
+        SW(11.5, 60.15, -4.6, -4.3, 0, 4.4);
+        // south: the corner at the west end, the joints, the fire door's other jamb (and the dark stair lobby behind it),
+        // the bulkhead, the back wall
+        SW(0.15, 3, 12.0, 15.3, 0, 4.4);
+        for (const [a, b] of [[9, 9.25], [15.25, 15.5], [21.5, 21.7], [50.25, 50.5]]) SW(a, b, 12.28, 15.3, 0, 4.4);
+        SW(43.53, 44.25, 12.0, 12.5, 0, 2.2);
+        SW(42.3, 43.75, 13.3, 15.3, 0, 2.4, DK);
+        SW(3, 21.7, 12.3, 15.3, 3.6, 4.4); SW(44.25, 55.8, 12.3, 15.3, 3.6, 4.4);
+        SW(-0.15, 60.15, 15.3, 15.6, 0, 4.4);
+        // the end walls on past the balconies, the walkways' ceiling
+        for (const x of [0, 60]) SW(x - 0.15, x + 0.15, 12, 15.6, 0, H);
+        SW(59.85, 60.15, -4.6, -1, 0, H); SW(-0.15, 0.15, -2.8, -1, 4.4, H);
+        K.ceiling(0, -4.6, 60, 2.6, H, 'ceiling_tile'); K.ceiling(0, 9.4, 60, 15.6, H, 'ceiling_tile');
+        // the food court through its mouth (the room itself is c1_foodcourt, x − 8, z − 22.2 from here): the jambs of the
+        // short passage, the carpet running back under its tables, the stalls shuttered along its far walls, its ceiling
+        SW(0, 3.1, -2.3, -1.4, 0, 4.4); SW(10.9, 11.5, -2.3, -1.4, 0, 4.4); SW(2.9, 11.1, -2.3, -1.4, 3.4, 4.4);
+        SW(-8, 22, -22.2, -2.2, -0.02, 0, { tex: 'carpet', color: '#6b5e52' });
+        K.ceiling(-8, -22.2, 22, -2.3, 4.6, 'ceiling_tile');
+        SW(-8.3, -8, -22.5, -2.3, 0, 4.6); SW(22, 22.3, -22.5, -2.3, 0, 4.6); SW(-8.3, 22.3, -22.5, -22.2, 0, 4.6);
+        for (const [x0, x1, c] of [[-7.7, -1.1, '#7a2a1a'], [-0.9, 5.7, '#c9a822'], [5.9, 12.5, '#1f3f5c'], [12.7, 18.1, '#2e4a2e']]) {
+          SW(x0, x1, -22.2, -21.95, 0, 2.72, { tex: 'metal', color: '#5d625f' }); SW(x0, x1, -22.2, -21.9, 2.9, 3.6, { color: c, roughness: 0.6 });
+        }
+        for (const [z0, z1, c] of [[-18.4, -12, '#3a2418'], [-11.8, -5.4, '#b3261e']]) {
+          SW(21.75, 22, z0, z1, 0, 2.72, { tex: 'metal', color: '#5d625f' }); SW(21.7, 22, z0, z1, 2.9, 3.6, { color: c, roughness: 0.6 });
+        }
+        [[5, 5.5], [10, 6.5], [15.5, 5.2], [22, 5.8], [4.5, 10.5], [9.5, 11.5], [14.5, 10.6], [20, 11.8], [25, 11], [6, 16.5], [12, 16.2], [21.5, 16.8], [26, 17]]
+          .forEach(([x, z], i) => K.prop('cafe_table', x - 8, z - 22.2, i * 37, { chairs: 2 + (i % 3), radius: 0.42, collide: false }));
+        K.fogOnly(() => K.light('fluoro', 7, 4.58, -6.2, { len: 1.2, real: false }));
+        K.outageOnly(() => K.light('fluoro', 7, 4.58, -6.2, { len: 1.2, real: false, color: '#bfe0d4' }));
+      }
       // ---- the middle: the dry fountain (the phone in the leaves), benches, planters, the kiosk, the directory -------
       const [fx, fz] = CN.fountain;
       K.prop('fountain', fx, fz, 0, { radius: 2.2 });
@@ -36263,6 +36747,39 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       stall(29.72, 7, -90, 6.4, 'COFFEE HOUSE', '#3a2418', '#e8d8b8');
       stall(29.72, 13.6, -90, 6.4, 'HOT DONUTS', '#b3261e', '#fff4e0');
       K.collider(0, -1, 30, 0.35, { h: 4 }); K.collider(29.65, 0, 31, 20, { h: 4 });
+      // ---- the concourse through the mouth (the gap sweep; the room itself is c1_concourse, x + 8, z + 22.2 from here):
+      // the jambs of the short passage, the concourse floor, the shops across it shuttered, its west end with the chained
+      // doors' fog, both balconies and the atrium ceiling — a dark centre going on, never a flat grey slot
+      {
+        const PL = 'plaster_stained', CON = { tex: 'concrete', color: '#8e8a80' };
+        const SW = (x0, x1, z0, z1, y0, y1, mat = PL) => K.box((x0 + x1) / 2, y0, (z0 + z1) / 2, x1 - x0, y1 - y0, z1 - z0, mat, { shadow: false });
+        SW(8, 11.1, 20.15, 21.2, 0, H); SW(18.9, 21, 20.15, 21.2, 0, H); SW(10.9, 19.1, 20.15, 21.2, 3.4, H);
+        SW(8, 68, 21.0, 22.6, -0.02, 0, { tex: 'tile', color: '#8a8a80' }); SW(8, 68, 22.6, 34.3, -0.02, 0, { tex: 'carpet', color: '#6a6f68' });
+        SW(19.5, 68, 20.15, 21.25, 0, 4.4, { tex: 'render_cracked', color: '#6f6b62' });
+        // the shops across the concourse, the corner, the walls between them, the bulkhead, the back
+        for (const [x, w, v, o] of [[14, 6, 'shop', { name: 'POST OFFICE', bg: '#b3261e', fg: '#f4efe4', shutter: 1 }], [20.25, 6, 'shop', { name: 'SUNNY\'S BAKERY', bg: '#c9a822', fg: '#2a1a0a', shutter: 0.8 }], [26.5, 6, 'vacant', {}]]) K.prop('shopfront', x, 34.55, 180, { w, variant: v, indoor: true, collide: false, ...o });
+        SW(8.15, 11, 34.2, 37.5, 0, 4.4); SW(17, 17.25, 34.48, 37.5, 0, 4.4); SW(23.25, 23.5, 34.48, 37.5, 0, 4.4); SW(29.5, 68, 34.2, 37.5, 0, 4.4);
+        SW(11, 29.5, 34.5, 37.5, 3.6, 4.4); SW(8, 68, 37.5, 37.8, 0, 4.4);
+        // the west end: the wall, the chained front doors' opening, the fog pressed to the glass; the east end
+        SW(7.85, 8.15, 20.15, 26.4, 0, 8); SW(7.85, 8.15, 30.0, 37.8, 0, 8); SW(7.85, 8.15, 26.4, 30.0, 2.6, 8);
+        K.plane(5, 1.6, 28.2, 6, 3.6, { color: '#b7c0bd', emissive: '#8e9996', emissiveIntensity: 0.6, roughness: 1 }, { rotY: 90, emissive: true });
+        SW(5, 7.85, 25.2, 31.2, -0.02, 0, { tex: 'tile', color: '#6a6a62' });
+        for (const z of [25.2, 31.2]) SW(5, 7.85, z - 0.1, z + 0.1, 0, 3.4);
+        SW(5, 7.85, 25.2, 31.2, 3.4, 3.5);
+        SW(67.85, 68.15, 20.15, 37.8, 0, 8);
+        // both balconies (slab, fascia, rail), the dark shops upstairs on the far side, the atrium ceiling
+        SW(8, 68, 21.2, 24.8, 4.4, 4.75, CON); SW(8, 68, 24.74, 24.86, 4.05, 4.4, { color: '#1d3d4a', roughness: 0.5 });
+        SW(8, 68, 31.6, 36.2, 4.4, 4.75, CON); SW(8, 68, 31.54, 31.66, 4.05, 4.4, { color: '#1d3d4a', roughness: 0.5 });
+        for (const z of [24.8, 31.6]) SW(8, 68, z - 0.04, z + 0.04, 5.68, 5.73, { tex: 'metal', color: '#9aa09e' });
+        SW(8, 68, 35.65, 35.95, 4.75, 8, { tex: 'render_cracked', color: '#8f8a7e' });
+        for (let x = 11; x < 68; x += 7) SW(x - 2.6, x + 2.6, 35.62, 35.65, 5.15, 7.55, { color: '#101313', roughness: 0.2, metalness: 0.3 });
+        K.ceiling(8, 20.15, 68, 37.8, 8, 'ceiling_tile');
+        // on the floor out there: a bench, a bin, a dead planter, the directory stand
+        K.prop('bench', 18.5, 28.2, 90, { len: 1.8, collide: false }); K.prop('bin', 17, 25.6, 0, { variant: 'street', collide: false });
+        K.prop('planter', 22, 30.8, 0, { variant: 'round', dead: true, collide: false });
+        SW(12.16, 12.24, 30.55, 31.85, 0, 1.9, { color: '#1f2a2b', roughness: 0.5 });
+        K.fogOnly(() => K.light('fluoro', 24, 4.38, 24.4, { len: 1.2, real: false }));
+      }
       // the kitchen's staff door (Fog: locked; the Outage: the way on)
       K.door({ id: 'c1_foodcourt:kitchen', x: FC.kitchen[0], z: -0.075, rot: 0, w: 0.95, style: 'metal', sign: 'STAFF ONLY', to: 'c1_kitchen', entry: 'food', locked: () => !S.outage, lockMsg: 'It\'s locked.' });
       // the toilets (west wall): locked
@@ -36633,6 +37150,24 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.door({ id: 'c1_backoffice:store', x: 1.2, z: 5.075, rot: 0, w: 0.9, style: 'wood', to: 'c1_store', entry: 'office', color: '#d8d0bc', sign: 'STAFF ONLY', signBack: 'SALES FLOOR' });
       K.door({ id: 'c1_backoffice:stock', x: 6.075, z: 2.5, rot: 90, w: 0.9, style: 'metal', to: 'c1_stockroom', entry: 'door', locked: () => !S.outage, lockMsg: 'Stock only. It\'s locked.', sign: 'STOCK ONLY', mapMark: true });
       K.door({ id: 'c1_backoffice:kitchen', x: -0.075, z: 3.4, rot: 90, w: 0.9, style: 'metal', to: 'c1_kitchen', entry: 'office', locked: () => !S.outage, lockMsg: 'It\'s locked.', sign: 'SERVICE' });
+      // the building cut through along the cutaway north wall (the gap sweep): the slab over the ceiling, the rooms either
+      // side and the ground outside as dark section faces flush with the cut, so the lenses beyond it frame an office
+      // inside the Plaza instead of a lit box in grey fog; the store's back wall runs on either side of the office's
+      {
+        const CUT = { tex: 'concrete', color: '#262927', roughness: 1 };
+        K.box(3, H + 0.01, 2.425, 24, 1.6, 5.15, CUT, { shadow: false });
+        K.box(-4.575, -0.3, 2.425, 8.85, H + 0.32, 5.15, CUT, { shadow: false });
+        K.box(10.575, -0.3, 2.425, 8.85, H + 0.32, 5.15, CUT, { shadow: false });
+        K.box(3, -0.3, -4.075, 24, 0.29, 7.85, CUT, { shadow: false });
+        for (const x of [-9.15, 15.15]) K.box(x, -0.3, -4.075, 0.3, 4.9, 7.85, CUT, { shadow: false });   // (round the lenses)
+        K.box(3, H + 1.61, -4.075, 24.6, 0.3, 7.85, CUT, { shadow: false });
+        const SWL = { tex: 'plaster', color: '#e2e0d8' };
+        for (const x of [-4.575, 10.575]) K.box(x, 0, 5.075, 8.85, ST.h, 0.15, SWL, { shadow: false });
+        K.box(3, H, 5.075, 6.3, ST.h - H, 0.15, SWL, { shadow: false });
+        // (and the sales floor's own floor and ceiling out past the window, under the lit backdrop)
+        K.box(3, -0.02, 7.6, 24, 0.02, 4.9, { tex: 'vinyl_retail', color: '#d8d6ce' }, { shadow: false });
+        K.ceiling(-9, 5.15, 15, 10.05, ST.h);
+      }
       // beyond the window: the sales floor (lit in the Fog world, dark and ringing in the Outage)
       K.fogOnly(() => { K.plane(4.4, 1.6, 6.3, 3, 2.6, { color: '#dfe8e6', emissive: '#9fbcb8', emissiveIntensity: 0.5 }, { rotY: 180, emissive: true }); K.box(4.4, 0, 5.8, 2.6, 0.9, 0.5, { color: '#0e6f6e' }); });
       K.outageOnly(() => K.plane(4.4, 1.6, 6.3, 3, 2.6, { color: '#06100f', roughness: 1 }, { rotY: 180 }));
@@ -38394,10 +38929,22 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       }
       // the wall's end at the hairpin H1 (x 48), the bank top running on to the top's edge, the scrub falling away east
       // (the wall runs on east past the hairpin into the fog, its foot following the drop; the bank top above it)
-      quad(wa, [48, 3.4, -13.98], [54, -2.1, -13.98], [54, 10.5, -13.98], [48, 10.5, -13.98], 0.5, [0, 0, 1]);
-      quad(wa, [54, -2.1, -13.98], [62, -2.1, -13.98], [62, 10.5, -13.98], [54, 10.5, -13.98], 0.5, [0, 0, 1]);
-      quad(cp, [48, 10.62, -13.92], [62, 10.62, -13.92], [62, 10.62, -14.25], [48, 10.62, -14.25], 1, [0, 1, 0]);
-      quad(vg, [48, 10.5, -14], [62, 10.5, -14], [62, 10.5, -20.05], [48, 10.5, -20.05], 0.5, [0, 1, 0]);
+      // east of the hairpin both levels fall away into the valley: the ground south of the wall follows yE (the drop off
+      // H1), north of it yNE (the drop off G); the wall steps down between the two and dies out where they meet
+      const yE = (xx) => (xx <= 48 ? HR.yA(clamp(xx, 0, 40)) + (xx > 0 && xx < 40 ? 0.15 : 0) : xx <= 54 ? 3.5 - (xx - 48) * 0.9167 : Math.max(-20, -2 - (xx - 54) * 0.69));
+      const yNE = (xx) => (xx <= 52 ? 10.5 : Math.max(-20, 10.4 - (xx - 52) * 1.07));
+      quad(wa, [48, 3.4, -13.98], [52, yE(52) - 0.1, -13.98], [52, 10.5, -13.98], [48, 10.5, -13.98], 0.5, [0, 0, 1]);
+      quad(cp, [48, 10.62, -13.92], [52, 10.62, -13.92], [52, 10.62, -14.25], [48, 10.62, -14.25], 1, [0, 1, 0]);
+      quad(vg, [48, 10.5, -14], [52, 10.5, -14], [52, 10.5, -20.05], [48, 10.5, -20.05], 0.5, [0, 1, 0]);
+      for (let x = 52; x < 96; x += 2) {
+        const x1 = x + 2, a = yE(x) - 0.1, b = yE(x1) - 0.1, c = yNE(x), d = yNE(x1);
+        if (c - a > 0.05 || d - b > 0.05) {
+          quad(wa, [x, a, -13.98], [x1, b, -13.98], [x1, Math.max(b, d), -13.98], [x, Math.max(a, c), -13.98], 0.5, [0, 0, 1]);
+          quad(cp, [x, c + 0.12, -13.92], [x1, d + 0.12, -13.92], [x1, d + 0.12, -14.25], [x, c + 0.12, -14.25], 1, [0, 1, 0]);
+        }
+        quad(x < 60 ? vg : dirt, [x, c, -14], [x1, d, -14], [x1, d, -46], [x, c, -46], 0.5, [0, 1, 0]);
+        if (x >= 54) quad(x < 64 ? dirt : vg, [x, yE(x), 8.05], [x1, yE(x1), 8.05], [x1, yE(x1), -14], [x, yE(x), -14], 0.5, [0, 1, 0]);
+      }
       for (let x = -2; x < 52; x += 2) {
         const x1 = x + 2, y0 = (xx) => (xx <= 8 ? 7.0 : xx >= 44 ? 10.5 : HR.yC(xx)) + (xx > 8 && xx < 44 ? 0.15 : 0);
         if (x >= 44) continue;
@@ -38406,20 +38953,34 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       }
       // the cutting's east end, where the gate's brick fence meets it (closes the slope's open wedge)
       quad(dirt, [44.02, 10.4, -28], [44.02, 10.4, -40], [44.02, 14.5, -40], [44.02, 13.1, -30.5], 0.5, [1, 0, 0]);
-      // the drop below A (south): scrub falling away, the roofs of the houses below
-      for (let x = -3; x < 50; x += 2) {
-        const x1 = x + 2, y0 = (xx) => HR.yA(clamp(xx, 0, 40)) + (xx > 0 && xx < 40 ? 0.15 : 0);
-        quad(dirt, [x, y0(x) - 0.02, 8.05], [x1, y0(x1) - 0.02, 8.05], [x1, y0(x1) - 4.5, 13], [x, y0(x) - 4.5, 13], 0.5, [0, 1, 0.4]);
-        quad(vg, [x, y0(x) - 4.5, 13], [x1, y0(x1) - 4.5, 13], [x1, y0(x1) - 9, 26], [x, y0(x) - 9, 26], 0.4, [0, 1, 0]);
-      }
-      // the drop off H1's east side, H2's west side, G's east side
+      // the drop below A (south): scrub falling away past the roofs of the houses below, on down into the valley; level
+      // with Relay Street at the west end (k0), round the corner under the hairpin at the east end (yE)
+      { const k0 = (xx) => clamp((xx + 3) / 10, 0, 1), rs = [[8.05, 0.02], [13, 4.5], [26, 9], [52, 24]];
+        const ry = (xx, i) => Math.max(-24, yE(xx) - rs[i][1] * k0(xx));
+        for (let x = -3; x < 96; x += 2) {
+          const x1 = x + 2;
+          for (let i = 0; i < 3; i++) quad(i ? vg : dirt, [x, ry(x, i), rs[i][0]], [x1, ry(x1, i), rs[i][0]], [x1, ry(x1, i + 1), rs[i + 1][0]], [x, ry(x, i + 1), rs[i + 1][0]], i ? 0.4 : 0.5, [0, 1, 0.4]);
+        } }
+      // the drop off H1's east side, H2's west side (down onto Relay Street's verge), the cutting's west end over it
       quad(dirt, [48.05, 3.4, -14], [48.05, 3.4, 8], [54, -2, 8], [54, -2, -14], 0.5, [1, 1, 0]);
-      quad(dirt, [-0.05, 6.9, -6], [-0.05, 6.9, -28], [-6, 1, -28], [-6, 1, -6], 0.5, [-1, 1, 0]);
+      quad(dirt, [-0.05, 6.9, -6], [-0.05, 6.9, -28], [-3.05, 0.0, -28], [-3.05, 0.0, -6], 0.5, [-1, 1, 0]);
       quad(dirt, [-3.05, -0.05, 8], [-3.05, -0.05, -6], [-3.05, 7.0, -6], [-3.05, 7.0, 0], 0.5, [-1, 0, 0]);
-      quad(dirt, [52.05, 10.4, -38], [52.05, 10.4, -20], [58, 4, -20], [58, 4, -38], 0.5, [1, 1, 0]);
-      // Relay Street runs north–south below the junction (in the fog), the drop beside the bank
-      K.box(-10, -0.05, 4, 14, 0.05, 50, 'bitumen', { shadow: false });
-      K.box(-3.9, 0, 4, 0.16, 0.15, 50, 'kerb', { shadow: false });
+      K.box(-1.52, 0, -3.0, 3.06, 7.0, 6.0, { tex: 'dirt', color: '#86765e' }, { shadow: false });          // the bank's toe at the junction
+      quad(dirt, [-2.02, 0, -28], [-2.02, 0, -30.5], [-2.02, 9.6, -30.5], [-2.02, 6.9, -28], 0.5, [-1, 0, 0]);
+      quad(dirt, [-2.02, 0, -30.5], [-2.02, 0, -46], [-2.02, 11.0, -46], [-2.02, 9.6, -30.5], 0.5, [-1, 0, 0]);
+      quad(dirt, [-3.05, 0, -28], [-2.02, 0, -28], [-2.02, 0, -46], [-3.05, 0, -46], 0.5, [0, 1, 0]);
+      for (let x = -2; x < 44; x += 2) { const x1 = x + 2, y0 = (xx) => (xx <= 8 ? 7.0 : HR.yC(xx)) + (xx > 8 ? 0.15 : 0); quad(vg, [x, y0(x) + 4.0, -40], [x1, y0(x1) + 4.0, -40], [x1, y0(x1) + 4.6, -46], [x, y0(x) + 4.6, -46], 0.4, [0, 1, 0]); }
+      // Relay Street runs north–south below the junction (in the fog) past its footpaths, and the shops on its far side
+      K.box(-10, -0.05, 4, 14, 0.05, 100, 'bitumen', { shadow: false });
+      K.box(-3.9, 0, 4, 0.16, 0.15, 100, 'kerb', { shadow: false });
+      K.box(-18.3, 0, 4, 2.6, 0.15, 100, 'footpath', { shadow: false });
+      K.box(-40, -0.05, 4, 40, 0.05, 100, { tex: 'concrete', color: '#7e786c' }, { shadow: false });
+      for (const [z0, z1, h, c] of [[-46, -30, 5.8, '#8a8276'], [-30, -17, 4.9, '#7a6c60'], [-17, -4, 6.4, '#948c7e'], [-4, 9, 5.2, '#76665a'], [9, 22, 6.0, '#877f73'], [22, 36, 4.8, '#8a8276'], [36, 54, 5.6, '#7a6c60']]) {
+        K.box(-26.6, 0, (z0 + z1) / 2, 13, h, z1 - z0, { tex: z0 % 2 ? 'render_cracked' : 'brick', color: c }, { shadow: false });
+        K.box(-26.5, h, (z0 + z1) / 2, 13.2, 0.16, z1 - z0 + 0.1, { tex: 'concrete', color: '#6c6860' }, { shadow: false });
+        K.box(-19.92, 0.3, (z0 + z1) / 2, 0.08, 2.4, z1 - z0 - 1.6, { color: '#1c201f', roughness: 0.4 }, { shadow: false });
+        K.box(-19.6, 2.9, (z0 + z1) / 2, 0.8, 0.12, z1 - z0 - 0.4, { tex: 'metal', color: '#5a605c' }, { shadow: false });
+      }
       bags.flush(K);
 
       // ---- guardrails and the edge colliders ----------------------------------------------------------------------------
@@ -38762,6 +39323,74 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
   function setChaseWalls(on) {
     for (const fw of C2.chaseWalls) { if (fw.mesh) fw.mesh.visible = !!on; if (fw.collider) fw.collider.enabled = !!on; }
   }
+  // behind the building lines: the units' side and back yards (grass, colorbond dividing and back fences, sheds, tanks,
+  // gum trees), the garage lane behind units 7–9 with the bay block across it (the NE lane turns into it), the road on
+  // out past the gate, the ground beside Exchange Road. Every gap between two units is a fenced yard, never the fog.
+  // (All visual: the building-line fences keep their colliders; nothing here is walkable.)
+  function crescentBacks(K) {
+    const YARD = { tex: 'grass', color: '#6a755e' }, VERGE = { tex: 'grass', color: '#667058' };
+    const FC = '#5f6b64', Y0 = 0.13;
+    const ground = (x0, z0, x1, z1, mat = YARD, top = Y0) => K.box((x0 + x1) / 2, 0, (z0 + z1) / 2, x1 - x0, top, z1 - z0, mat, { shadow: false });
+    const fx = (x0, x1, z, o = {}) => K.prop('fence', (x0 + x1) / 2, z, 0, { variant: 'colorbond', len: x1 - x0, y: o.y ?? Y0, color: o.color || FC, h: o.h, collide: false });
+    const fz = (z0, z1, x, o = {}) => K.prop('fence', x, (z0 + z1) / 2, 90, { variant: 'colorbond', len: z1 - z0, y: o.y ?? Y0, color: o.color || FC, h: o.h, collide: false });
+    const shed = (x, z, rot, c = '#7d837a') => {
+      K.box(x, Y0, z, 2.3, 1.95, 1.7, { tex: 'metal', color: c }, { rot, shadow: false });
+      K.box(x, Y0 + 1.95, z, 2.5, 0.08, 1.95, { tex: 'metal', color: '#8a8f88' }, { rot, shadow: false });
+      K.box(x + Math.sin(rot * D2R) * 0.86, Y0 + 0.05, z + Math.cos(rot * D2R) * 0.86, 1.3, 1.75, 0.03, { tex: 'metal', color: '#6a706a' }, { rot, shadow: false });
+    };
+    const tank = (x, z, c = '#8f9892') => { K.cyl(x, Y0, z, 0.8, 1.9, { tex: 'metal', color: c }, { seg: 14 }); K.cyl(x, Y0 + 1.9, z, 0.82, 0.08, { tex: 'metal', color: '#7a827c' }, { seg: 14 }); K.cyl(x + 0.6, Y0, z + 0.55, 0.035, 1.7, { tex: 'metal', color: '#b9bcb4' }, { seg: 6 }); };
+    // ---- the lots: grass from the building line back to the back fences (lanes left out) --------------------------
+    const NB = -15.5, EB = 75.5, SB = 55.5, WB = -15.5;                       // back fence lines
+    ground(WB, -12, 0.7, -5.0); ground(WB, NB, -0.15, -12);                    // NW corner lot (the back-gate lane beside it)
+    ground(7.3, -12, 54.7, -5.0); ground(8.15, NB, 54.7, -12);                 // behind units 9, 8, 7
+    ground(61.3, -21.6, EB, -5.0);                                             // NE corner lot
+    ground(65.0, -5.0, EB, 45.0);                                              // behind units 6, 5, 4
+    ground(8.0, 45.0, EB, SB);                                                 // behind units 1–3, the SE corner, beside the parking
+    ground(WB, -5.0, -5.0, 52.1); ground(-5.0, 41.2, -2.2, 52.1);              // behind units 10–12, round the office
+    // back fences (the lots' rear boundaries), the office's side fence, the NE lane's east fence on round the corner
+    fx(WB, -0.15, NB); fx(8.15, 54.7, NB); fx(61.3, EB, NB);
+    fz(NB, SB, EB); fx(8.0, EB, SB); fz(NB, 52.0, WB);
+    fx(WB, -5.2, 41.5);
+    // dividing fences down the middle of every gap between two units, from the building line to the back fence
+    for (const x of [23, 40]) fz(NB, -5.2, x);
+    for (const z of [13.25, 26.75]) fx(65.2, EB, z);
+    for (const x of [26.5, 42.5, 60]) fz(45.2, SB, x);
+    for (const z of [16.25, 29.75]) fx(WB, -5.2, z);
+    fx(65.2, EB, 2.0); fx(WB, -5.2, 5.0);                                      // the corner lots' boundaries with units 6 and 10
+    // what stands in the side yards (it shows over the building-line fences, between the houses)
+    shed(25.3, -9.0, 0); tank(20.1, -7.2);                                     // between 9 and 8
+    tank(42.2, -7.4, '#7e8a84'); shed(37.8, -10.2, 90, '#6f786f');              // between 8 and 7
+    shed(69.5, 14.4, 0, '#7a7f76'); tank(68.8, 25.6);                   // east gaps
+    tank(24.6, 48.0); shed(28.6, 49.5, 180, '#737a72');                          // south gaps
+    shed(44.5, 50.0, 180); tank(57.5, 48.6, '#7e8a84'); shed(62.6, 50.8, 180, '#6f786f');
+    tank(-8.2, 17.4); shed(-9.5, 28.75, 0, '#737a72');                  // west gaps
+    shed(-9.5, 0.2, -90); tank(-3.2, -9.0); tank(69.0, -8.8, '#7e8a84'); shed(71.6, 41.2, -90);   // the corner lots
+    // gum trees in the back yards and past the back fences: the skyline between the roofs
+    for (const [x, z, k] of [[22.2, -13.4, 0], [41.0, -14.2, 1], [-11.5, -11.5, 0], [70.5, -12.5, 1], [72.5, 12.0, 0], [73.5, 28.5, 1], [79.5, 20, 0],
+      [27.5, 54.0, 0], [44.0, 54.2, 1], [61.5, 53.8, 0], [36, 59.5, 0], [-12.5, 15.5, 1], [-13.5, 30.5, 0], [-19.5, 22, 0], [-12.8, 47.5, 1]]) {
+      K.prop(k ? 'gum_tree_small' : 'gum_tree', x, z, (x * 53 + z * 31) % 360, { y: Y0, collide: false });
+    }
+    // the slot between Unit 12 and the office: a shrub against the office's corner
+    K.prop('shrub', -3.6, 41.65, 0, { y: Y0, w: 1.4, h: 1.2, collide: false });
+    // ---- the garage lane behind units 7–9 (the NE lane turns west into it), the bay block across it ---------------------
+    ground(8.15, -21.5, 61.3, NB - 0.1, { tex: 'concrete', color: '#8a867a' }, 0.14);
+    fz(-21.6, -15.6, 61.3); fx(8.15, 24.2, -21.6); fx(45.0, 61.3, -21.6);
+    { const BR = { tex: 'brick', color: '#b8a494' };
+      K.box(34.6, 0, -24.7, 20.8, 2.6, 6.2, BR, { shadow: false });
+      K.box(34.6, 2.6, -24.6, 21.2, 0.12, 6.8, { tex: 'metal', color: '#7a817d' }, { shadow: false });
+      for (let k = 0; k < 6; k++) K.box(24.2 + 1.73 + k * 3.47, 0.05, -21.55, 3.0, 2.3, 0.06, { tex: 'metal', color: ['#c9c4b2', '#8a9a8a', '#b8a888', '#9aa0a8', '#c0b4a0', '#8a8f8a'][k] }, { shadow: false });
+      for (let k = 0; k <= 6; k++) K.box(24.2 + k * 3.47, 0, -21.5, 0.3, 2.62, 0.25, BR, { shadow: false }); }
+    // ---- the hill climbing north behind the lane and beside Exchange Road (behind its paling fences) ---------------------
+    { const g = MB(), exY = (z) => lerp(2.6, 0.15, clamp((z + 33.3) / 21.3, 0, 1)) - 0.08, upY = (z) => lerp(Y0, 2.5, clamp((-21.6 - z) / 12.4, 0, 1));
+      quad(g, [WB, exY(-12), -12], [-0.15, exY(-12), -12], [-0.15, exY(-34), -34], [WB, exY(-34), -34], 0.5, [0, 1, 0]);
+      quad(g, [8.15, Y0, -21.6], [EB, Y0, -21.6], [EB, upY(-34), -34], [8.15, upY(-34), -34], 0.5, [0, 1, 0]);
+      mesh(K, g, VERGE);
+      K.prop('gum_tree', 52.5, -26.5, 40, { y: upY(-26.5) - 0.1, collide: false }); K.prop('gum_tree', 14.0, -25.5, 200, { y: upY(-25.5) - 0.1, collide: false }); }
+    // ---- out past the gate: the drive on down toward Hilltop Road, verges either side ----------------------------------
+    K.fogOnly(() => K.box(4, -0.05, 63.15, 8, 0.05, 17.7, 'bitumen', { shadow: false }));
+    K.outageOnly(() => { K.box(4, -0.6, 63.1, 8, 0.62, 17.8, { color: '#0c0f0f', roughness: 1 }, { shadow: false }); K.dress('cables', [0.2, 54.4, 7.8, 62], 18, { seed: 212 }); });
+    ground(WB, 52.1, 0, 72, VERGE, 0.1); ground(8.0, SB, 42, 72, VERGE, 0.1);
+  }
 
   defineRoom({
     id: 'c2_crescent', name: 'THE CRESCENT', area: 'HILLTOP VILLAGE', chapter: 2, outdoor: true, surface: 'bitumen', ambient: 'wind',
@@ -38850,6 +39479,8 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       flatShape(K, roundedRect(8.18, 8.18, 51.82, 31.82, 4.2), 0.15, { tex: 'grass', color: '#66725a' }, 1 / Tex.size('grass'));
       { const s = roundedRect(8, 8, 52, 32, 4.4); s.holes.push(new THREE.Path(roundedRect(8.18, 8.18, 51.82, 31.82, 4.2).getPoints(24).reverse()));
         flatShape(K, s, 0.16, 'kerb', 1 / Tex.size('kerb')); }
+      // the bitumen under the island (the loop's four floors stop at its square corners; the kerb is rounded)
+      K.box(30, -0.04, 20, 44, 0.04, 24, 'bitumen', { shadow: false });
       K.collider(8, 8, 52, 25.85, { h: 1.0 }); K.collider(8, 25.85, 22.4, 32, { h: 1.0 }); K.collider(37.6, 25.85, 52, 32, { h: 1.0 });
       K.collider(22.4, 28.3, 28.4, 32, { h: 1.0 }); K.collider(31.6, 28.3, 37.6, 32, { h: 1.0 });
       // the hall: weatherboard walls on a brick base, a gable roof, the double glass doors under a porch roof
@@ -38892,6 +39523,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       fenceZ(-12, -5.2, 0.7); fenceZ(-12, -5.2, 7.3);
       K.collider(8.1, 41.2, 8.5, 52, { h: 1.4 });
       for (let z = 42.5; z < 52; z += 1.6) K.prop('shrub', 9.4, z, 0, { y: 0.15, w: 1.5, h: 1.3, collide: false });
+      crescentBacks(K);
 
       // ---- the gate (south), the office (SW), the visitor parking ------------------------------------------------------
       for (const px of [-2.7, 8.7]) { K.box(px, 0, 51.8, 0.72, 2.1, 0.72, 'brick', { collide: true }); K.box(px, 2.1, 51.8, 0.86, 0.14, 0.86, 'concrete'); K.sphere(px, 2.42, 51.8, 0.18, 'concrete'); }
@@ -39190,6 +39822,22 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.wall(10.6, 0, 10.6, 6, H, PW, { skirting: true, both: false, openings: [{ at: 3.8, w: 1.1, h: 2.25 }, { at: 1.3, w: 1.2, h: 1.1, sill: 1.0, glass: true, frame: true }] });   // east (cutaway)
       K.wall(8, 0, 8, 6, H, PW, { skirting: true, openings: [{ at: 3.8, w: 1.8, h: 2.3 }] });            // office | foyer
       K.door({ id: 'c2_office:door', x: 10.6, z: 3.8, rot: 90, w: 1.0, h: 2.2, style: 'glass', to: 'c2_crescent', entry: 'office' });
+      // outside the window (the window camera stands out by the gate): the office's brick face round the glass, the
+      // fascia and the hip roof over it, the path and the drive in the grey daylight — the Crescent's office, not a lit
+      // window floating in the dark
+      { const OB = { tex: 'brick', color: '#c4ae9a' }, zs = 6.14;
+        K.box(0.45, 0, zs, 1.5, 3.05, 0.13, OB, { shadow: false }); K.box(7.3, 0, zs, 7.0, 3.05, 0.13, OB, { shadow: false });
+        K.box(2.5, 0, zs, 2.6, 0.9, 0.13, OB, { shadow: false }); K.box(2.5, 2.2, zs, 2.6, 0.85, 0.13, OB, { shadow: false });
+        K.box(2.5, 0.84, 6.3, 2.8, 0.06, 0.2, { tex: 'concrete', color: '#b3ab96' }, { shadow: false });
+        K.box(5.3, 2.9, 6.62, 11.6, 0.2, 0.08, { color: '#e6e1d4', roughness: 0.7 }, { shadow: false });
+        K.box(5.3, 2.78, 6.72, 11.6, 0.14, 0.14, { tex: 'metal', color: '#b9bcb4' }, { shadow: false });
+        { const rb = MB(); hipRoof(rb, 5.3, 2.95, 3.0, 11.0, 6.4, 1.6, 0, 0.55, 1.1); mesh(K, rb, { tex: 'metal', color: '#5a6360', roughness: 0.6 }); }
+        K.box(5.3, -0.05, 11.2, 14, 0.05, 10, 'footpath', { shadow: false });
+        K.box(-4.5, 0, 12.0, 5, 0.15, 12, { tex: 'grass', color: '#6f7a62' }, { shadow: false });
+        K.prop('bench', 4.6, 6.75, 0, { len: 1.3, collide: false });
+        K.prop('bin', 7.8, 6.6, 0, { variant: 'street', collide: false });
+        K.light('point', 3.2, 3.4, 9.6, { color: '#a4b0ae', intensity: 16, distance: 7.5, world: 'fog', prio: 4 });
+        K.light('point', 2.6, 4.2, 10.8, { color: '#2a7f78', intensity: 4, distance: 9, world: 'outage', prio: 4 }); }
       // the counter (staff behind to the west), the visitor book with its pen on a chain, the bell
       K.prop('counter', 4.6, 2.55, 90, { len: 4.0, variant: 'reception', clutter: false });
       // (on the raised visitors' ledge: top at 1.14 m, x 4.68…4.94)
@@ -39715,8 +40363,10 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       { id: 'c2_kitchen_out:fridge', vol: [10.5, 0, 20, 6.2], pri: 1, type: 'static', pos: [8.2, 3.3, 12.4], target: [15.6, 0.6, 2.2], fov: 'fit' },
     ],
     build(K) {
-      const H = 4.6;
+      // (the walls keep going up into the dark, to a ceiling nobody can see: no wall top against the haze)
+      const H = 9.0;
       K.ambient('#23827a', 0.8);                                      // the Outage's sick teal, just enough to read the room
+      K.ceiling(0, 0, 20, 20, H, { color: '#0c1413', roughness: 1 });
       K.floor(0, 0, 20, 20, { tex: 'lino', color: '#9a8e6a' });
       const WK = { tex: 'plaster', color: '#c3c0a6' };
       K.wall(-0.075, 0, 20.075, 0, H, WK, { skirting: true });
@@ -39760,7 +40410,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.interact(KO.pendant[0], 0.3, KO.pendant[1], (G) => takePendant(G), { id: 'c2_kitchen_out:pendantpick', r: 1.2, when: () => !(S.taken && S.taken['c2_kitchen_out:pendant']) });
       // the Outage dressing, kept to the edges: receipt paper curling down out of the dark, contracts stacked along the
       // walls, receipts drifted across the floor, the writing
-      for (const [x, z, len] of [[3.5, 3.5, 3.0], [16.5, 3.5, 2.6], [3.2, 17, 2.8], [17, 16.5, 3.4], [16.8, 9.8, 2.2], [9.5, 2.6, 2.8]]) K.prop('receipt_strip', x, z, (x * 31) % 180, { ceil: H, len });
+      for (const [x, z, len] of [[3.5, 3.5, 3.0], [16.5, 3.5, 2.6], [3.2, 17, 2.8], [17, 16.5, 3.4], [16.8, 9.8, 2.2], [9.5, 2.6, 2.8]]) K.prop('receipt_strip', x, z, (x * 31) % 180, { ceil: H, len: len + 4.4 });
       for (let i = 0; i < 9; i++) K.prop('contract_stack', 19.4 - (i % 2) * 0.35, 2 + i * 1.9, i * 23, { h: 0.9 + (i % 3) * 0.4 });
       for (let i = 0; i < 6; i++) K.prop('contract_stack', 2.6 + i * 2.7 + (i > 2 ? 1.6 : 0), 19.4, i * 41, { h: 0.7 + (i % 2) * 0.5 });
       K.dress('receipts', [2, 2, 18, 18], 40, { seed: 261 });
@@ -39964,7 +40614,20 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.collider(-0.4, -0.2, 0.05, 6.4, { h: 2.2, blocker: 'Just the fence. Fog on the other side.' });
       K.prop('chainlink', 0.1, 3, 90, { len: 6, h: 2.1 });
       for (const [x, rot] of [[4.5, 0], [14.5, 180], [24.5, 0]]) { const rb = MB(); hipRoof(rb, x, 2.9, 12.5, 9, 8, 1.6, rot); mesh(K, rb, { tex: 'metal', color: '#6f3b30', roughness: 0.7 }); K.box(x, 0, 12.5, 9, 2.9, 8, { tex: 'brick', color: '#c4ae9a' }); }
-      K.cyl(9.5, 0, 9.2, 0.04, 2.2, { tex: 'metal', color: '#9aa39c' }); for (let i = 0; i < 4; i++) K.box(9.5, 2.1, 9.2, 2.6, 0.02, 0.02, '#b9bcb6', { rot: i * 45 });
+      // ...and the rest of the row on past both ends of the lane, the back yards they stand in (grass, dividing fences),
+      // the ground behind the bays and round both ends, the fences on along the lane: never the fog under a house
+      { const YD = { tex: 'grass', color: '#6a755e' }, FC = '#5f6b64';
+        for (const [x, c] of [[-5.5, '#7a4a3a'], [34.5, '#7a4a3a'], [44.5, '#6f3b30'], [54.5, '#7a4a3a'], [64.5, '#6f3b30']]) { const rb = MB(); hipRoof(rb, x, 2.9, 12.5, 9, 8, 1.6, 0); mesh(K, rb, { tex: 'metal', color: c, roughness: 0.7 }); K.box(x, 0, 12.5, 9, 2.9, 8, { tex: 'brick', color: '#bfa894' }, { shadow: false }); }
+        K.box(29, 0, 13.2, 82, 0.02, 13.8, YD, { shadow: false });                                  // the back yards (z 6.3 … 20.1)
+        K.box(29, 0, -10.15, 82, 0.02, 20, YD, { shadow: false });                                  // behind the bays (… z −0.15)
+        K.box(-6, 0, 3.07, 12, 0.02, 6.44, YD, { shadow: false });                                  // past the dead end
+        K.box(56, -0.05, 3, 28, 0.05, 6, { tex: 'concrete', color: '#8a867a' }, { shadow: false });  // the lane on east
+        for (const x of [-0.5, 9.5, 19.5, 29.5, 39.5, 49.5, 59.5]) K.prop('fence', x, 11.4, 90, { variant: 'colorbond', len: 10.2, color: FC, collide: false });
+        K.prop('fence', 1.9, -0.1, 0, { variant: 'colorbond', len: 3.8, color: FC, collide: false });
+        K.prop('fence', 51.0, -0.1, 0, { variant: 'colorbond', len: 38, color: FC, collide: false });
+        K.prop('fence', 52.0, 6.15, 180, { variant: 'colorbond', len: 36, color: FC, collide: false });
+        K.prop('gum_tree_small', 36.5, 17.5, 70, { collide: false }); K.prop('gum_tree', 12.0, -9.5, 150, { collide: false }); }
+      K.cyl(6.0, 0, 18.2, 0.04, 2.2, { tex: 'metal', color: '#9aa39c' }); for (let i = 0; i < 4; i++) K.box(6.0, 2.1, 18.2, 2.6, 0.02, 0.02, '#b9bcb6', { rot: i * 45 });
       K.prop('couch', 18.2, 5.35, 180, { len: 1.8, color: '#5a5040', collide: true });
       K.examine(18.2, 0.8, 5.0, ['Somebody dumped a couch against the fence. It\'s been rained on a hundred times.'], { id: 'c2ga:couch', r: 1.3 });
       for (const [x, z, lid] of [[27.5, 5.5, '#8f2a22'], [28.3, 5.5, '#2a5a2a'], [8.2, 5.5, '#8f2a22']]) K.prop('bin', x, z, 180, { variant: 'wheelie', lid });
@@ -40620,6 +41283,27 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
     K.mesh(m, { static: true, world: o.world });
     return m;
   }
+  // a slab whose top follows yf(x) (linear in x) from x0 to x1, z0 to z1, with its sides and ends h deep: a footpath or a
+  // kerb beside a sloping road, drawn only (no floor)
+  function C3_slab(K, x0, z0, x1, z1, yf, h, mat) {
+    const pos = [], uv = [], idx = [];
+    const s = typeof mat === 'string' ? 1 / Tex.size(mat) : 0.3;
+    const face = (P, U) => { const b = pos.length / 3; for (let i = 0; i < 4; i++) { pos.push(...P[i]); uv.push(U[i][0] * s, U[i][1] * s); } idx.push(b, b + 1, b + 2, b, b + 2, b + 3); };
+    const t0 = yf(x0), t1 = yf(x1);
+    face([[x0, t0, z0], [x0, t0, z1], [x1, t1, z1], [x1, t1, z0]], [[x0, -z0], [x0, -z1], [x1, -z1], [x1, -z0]]);
+    face([[x0, t0, z1], [x0, t0 - h, z1], [x1, t1 - h, z1], [x1, t1, z1]], [[x0, t0], [x0, t0 - h], [x1, t1 - h], [x1, t1]]);
+    face([[x1, t1, z0], [x1, t1 - h, z0], [x0, t0 - h, z0], [x0, t0, z0]], [[x1, t1], [x1, t1 - h], [x0, t0 - h], [x0, t0]]);
+    face([[x1, t1, z1], [x1, t1 - h, z1], [x1, t1 - h, z0], [x1, t1, z0]], [[z1, t1], [z1, t1 - h], [z0, t1 - h], [z0, t1]]);
+    face([[x0, t0, z0], [x0, t0 - h, z0], [x0, t0 - h, z1], [x0, t0, z1]], [[z0, t0], [z0, t0 - h], [z1, t0 - h], [z1, t0]]);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, K.mat(mat)); m.receiveShadow = true; m.castShadow = false;
+    m.userData.ownedGeo = true;
+    K.mesh(m, { static: true });
+    return m;
+  }
   // a sagging wire / cable between points (tube)
   function C3_wire(K, a, b, sag = 0.4, r = 0.012, color = '#1b1c1c', o = {}) {
     const pts = []; for (let i = 0; i <= 10; i++) { const t = i / 10; pts.push(new THREE.Vector3(lerp(a[0], b[0], t), lerp(a[1], b[1], t) - Math.sin(t * Math.PI) * sag, lerp(a[2], b[2], t))); }
@@ -40724,9 +41408,40 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.road(ER.br[0], 7.76, ER.br[1], ER.brEnd, { axis: 'z', markings: 'none', kerb: false, footpath: 0, slope: { y0: erF(77), y1: erF(77) - 1.45 } });
       K.drop(ER.br[0] - 0.4, ER.brEnd, ER.br[1] + 0.4, 24.5, { side: 'n', msg: "I can't go that way." });
       // ---- the ground either side: yards on terraces north, the hillside falling away south --------------------------
-      C3_ground(K, -2, -22, 114, 0.24, (x) => erF(x) - 0.006, 'grass');
-      C3_ground(K, -2, 7.76, ER.br[0] - 0.05, 30, (x, z) => erF(x) - 0.006 - Math.max(0, z - 12) * 0.5, 'grass');
-      C3_ground(K, ER.br[1] + 0.05, 7.76, 114, 30, (x, z) => erF(x) - 0.006 - Math.max(0, z - 12) * 0.5, 'grass');
+      // Planar strips (one quad over the knee at z 12 sagged more than a metre under the south cottages' stumps), running
+      // on past both ends of the street — west into the exchange's grounds, east down the lane to the village — and far
+      // enough north and south that their edges are lost in the fog.
+      const gY = (x) => (x <= 112 ? erY(x) : -Math.min(x - 112, 22) * 0.11);     // the street, then the lane down to the village
+      const GX = [-40, 0, 112, 134, 150];
+      const strips = (x0, x1, z0, z1, yf, mat) => { for (let i = 0; i < GX.length - 1; i++) { const a = Math.max(x0, GX[i]), b = Math.min(x1, GX[i + 1]); if (b - a > 0.01) C3_ground(K, a, z0, b, z1, yf, mat); } };
+      const fall = (z) => Math.max(0, z - 12) * 0.5;
+      strips(-40, 150, -46, 0.24, (x) => gY(x) + 0.144, 'grass');
+      for (const [x0, x1] of [[-40, ER.br[0] - 0.05], [ER.br[1] + 0.05, 150]]) for (const [z0, z1] of [[7.76, 12], [12, 30], [30, 64]]) strips(x0, x1, z0, z1, (x, z) => gY(x) + 0.144 - fall(z), 'grass');
+      // the branch's mouth: a concrete lip under the edge where it leaves the footpath (the footpath falls with the street,
+      // the branch starts level: under its east half the white showed through)
+      K.box(77, erF(ER.br[1]) - 0.4, 8.0, ER.br[1] - ER.br[0], erF(77) - 0.01 - (erF(ER.br[1]) - 0.4), 0.8, { tex: 'concrete', color: '#8a867c' }, { shadow: false });
+      // the branch road's sides down to that ground (the crack between them showed the white under the paling fences)
+      {
+        const pos = [], idx = [], rY = (z) => erF(77) - (z - 7.76) / (ER.brEnd - 7.76) * 1.45;
+        for (const x of [ER.br[0] - 0.03, ER.br[1] + 0.03]) {
+          const N = 10;
+          for (let i = 0; i < N; i++) {
+            const za = lerp(7.76, ER.brEnd, i / N), zb = lerp(7.76, ER.brEnd, (i + 1) / N);
+            const ga = gY(x) + 0.144 - fall(za), gb = gY(x) + 0.144 - fall(zb), ra = rY(za), rb = rY(zb);
+            for (const back of [0, 1]) {                            // both faces (separate vertices: their own normals)
+              const b = pos.length / 3;
+              pos.push(x, Math.min(ga, ra) - 0.3, za, x, Math.min(gb, rb) - 0.3, zb, x, Math.max(gb, rb) + 0.02, zb, x, Math.max(ga, ra) + 0.02, za);
+              if (back) idx.push(b, b + 2, b + 1, b, b + 3, b + 2); else idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+            }
+          }
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        g.setAttribute('uv', new THREE.Float32BufferAttribute(pos.flatMap((v, i) => (i % 3 === 0 ? [] : i % 3 === 1 ? [pos[i + 1] * 0.5, v * 0.5] : [])), 2));
+        g.setIndex(idx); g.computeVertexNormals();
+        const m = new THREE.Mesh(g, K.mat({ tex: 'dirt', color: '#5a5448' })); m.castShadow = false; m.receiveShadow = true; m.userData.ownedGeo = true;
+        K.mesh(m, { static: true });
+      }
       // ---- fences (the street's edges): north picket (gates at each cottage), south picket with the branch gap -------
       const gateGaps = (xs) => xs.map((x) => [x - 0.55, x + 0.55]);
       const run = (x0, x1, z, side, gaps, o) => {
@@ -40839,11 +41554,11 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.prop('streetlight', 44, 7.62, 180, { y: erF(44), bank: 3, flicker: true });
       K.prop('streetlight', 24.5, 0.42, 0, { y: erF(24.5), bank: 4 });
       K.prop('streetlight', 5.5, 7.62, 180, { y: erF(5.5), bank: 5 });
-      const poles = [110, 82, 54.5, 27, 1.5];
-      poles.forEach((x) => K.prop('power_pole', x, -0.55, 0, { y: erF(x), h: 9, span: 0, seed: Math.round(x) }));
+      const poles = [128, 110, 82, 54.5, 27, 1.5], pY = (x) => (x > 112 ? gY(x) + 0.15 : erF(x));
+      poles.forEach((x) => K.prop('power_pole', x, -0.55, 0, { y: pY(x), h: 9, span: 0, seed: Math.round(x) }));
       for (let i = 0; i < poles.length - 1; i++) {
         const a = poles[i], b = poles[i + 1];
-        for (const [dz, dy] of [[-1.05, 8.76], [-0.4, 8.76], [0.4, 8.76], [1.05, 8.76], [-0.62, 7.75], [0.62, 7.75]]) C3_wire(K, [a, erF(a) + dy, -0.55 + dz], [b, erF(b) + dy, -0.55 + dz], 0.55, 0.008);
+        for (const [dz, dy] of [[-1.05, 8.76], [-0.4, 8.76], [0.4, 8.76], [1.05, 8.76], [-0.62, 7.75], [0.62, 7.75]]) C3_wire(K, [a, pY(a) + dy, -0.55 + dz], [b, pY(b) + dy, -0.55 + dz], 0.55, 0.008);
       }
       // ---- the payphone at the top of the road (a save point) --------------------------------------------------------
       K.payphone(7.2, 0.62, 0, { id: 'c3_exchangerd:payphone', y: erF(7.2) });
@@ -40852,6 +41567,31 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.box(-14, erF(0) + 9.3, -8, 22.4, 0.5, 14.4, { tex: 'concrete', color: '#6a6c66' });
       for (let i = 0; i < 6; i++) K.plane(-23 + i * 3.4, erF(0) + 5.2, -0.98, 1.1, 2.3, winTex(i), { rotY: 0 });
       K.box(-3.2, erF(0) + 9.8, -10, 1.6, 4.2, 1.6, 'brick');                 // a stair tower / flue
+      // the road runs on past the top into the forecourt: bitumen and footpaths, a brick boundary wall along the staff car
+      // park (never the street stopping at an edge over the white)
+      K.box(-20, ER.Y - 0.3, 4, 40, 0.3, 4.4, 'bitumen', { shadow: false });
+      for (const z of [1.02, 6.98]) K.box(-20, ER.Y - 0.25, z, 40, 0.4, 1.56, 'footpath', { shadow: false });
+      K.box(-17.2, erF(0) - 0.1, 7.98, 34.6, 1.0, 0.24, { tex: 'brick', color: '#7a6254' }, { shadow: false });
+      K.box(-17.2, erF(0) + 0.9, 7.98, 34.8, 0.08, 0.32, { tex: 'concrete', color: '#6a6c66' }, { shadow: false });
+      K.box(0.2, erF(0) - 0.1, 7.98, 0.4, 1.25, 0.4, 'brick', { shadow: false });
+
+      // ---- past the village back gate: the lane dropping to Hilltop Village between old paling fences (c2_crescent's
+      // back gate at the bottom), the backs of the units beyond it --------------------------------------------------------
+      C3_ground(K, 112, 0.1, 134, 7.9, (x) => gY(x) + 0.012, 'gravel');
+      C3_ground(K, 134, 0.1, 150, 7.9, () => gY(134) + 0.012, 'bitumen');
+      { const tilt = Math.atan(0.11);
+        for (let x = 112; x < 133.9; x += 3.66) {
+          const cx = Math.min(x + 1.83, 134 - 1.83);
+          for (const [z, rot, t] of [[0.05, 0, -tilt], [7.95, 180, tilt]]) {
+            const f = K.prop('fence', cx, z, rot, { variant: 'paling', len: 3.7, y: gY(cx) - 0.02, collide: false, seed: 70 + Math.round(x) });
+            if (f) { f.rotation.order = 'YXZ'; f.rotation.set(0, rot * D2R, t); }
+          }
+        } }
+      for (const z of [0.75, 7.25]) K.cyl(134, gY(134), z, 0.08, 1.6, { tex: 'metal', color: '#7d837d' });
+      K.prop('house', 142.5, -3.2, -90, { y: gY(134) + 0.05, variant: 'brick', seed: 341 });
+      K.prop('house', 142.5, 11.4, -90, { y: gY(134) + 0.05, variant: 'brick', seed: 342 });
+      for (const z of [-8.5, 16.5]) K.prop('fence', 137.2, z, 90, { variant: 'colorbond', len: 5.2, y: gY(134), collide: false });
+      K.prop('gum_tree', 137, 22, 40, { y: gY(134) - 4.5, seed: 17 });
       // ---- writing on a paling fence, fog-faded ----------------------------------------------------------------------------
       K.writing('DID YOU CHECK', 76.9, erF(77) - 0.7, 14.6, 1.6, { rotY: 90 });
       // ---- dressing -------------------------------------------------------------------------------------------------
@@ -40904,12 +41644,21 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
     ],
     build(K) {
       K.floor(0, 0, 37, 20, 'concrete');
-      // the ground round the forecourt (fog beyond), and Exchange Road dropping away east
-      C3_ground(K, -24, 20, 70, 44, () => -0.05, 'grass');
-      C3_ground(K, -24, -12, 0, 20, () => -0.05, 'grass');
-      C3_ground(K, 37, -12, 70, 6.2, (x) => -0.05 - (x - 37) * 0.06, 'grass');
-      C3_ground(K, 37, 15.8, 70, 20, (x) => -0.05 - (x - 37) * 0.06, 'grass');
-      C3_ground(K, 37, 6.2, 70, 15.8, (x) => -(x - 37) * 0.0714, 'bitumen');
+      // the ground round the forecourt (fog beyond), and Exchange Road dropping away east as the street it is: bitumen,
+      // footpaths, picket fences, a street light and the top cottage (its 0.5 m of verge either side of the mouth)
+      const yR = (x) => -Math.max(0, x - 37) * (ER.Y / ER.L);
+      C3_ground(K, -24, 20, 37, 46, () => -0.05, 'grass');
+      C3_ground(K, -24, -40, 0, 20, () => -0.05, 'grass');
+      C3_ground(K, 0, -40, 37, -12, () => -0.05, 'grass');
+      C3_ground(K, 37, -40, 90, 7.24, (x) => yR(x) - 0.05, 'grass');
+      C3_ground(K, 37, 14.76, 90, 46, (x) => yR(x) - 0.05, 'grass');
+      C3_ground(K, 37, 6.2, 90, 15.8, (x) => yR(x), 'bitumen');
+      for (const [z0, z1] of [[6.2, 8.8], [13.2, 15.8]]) C3_slab(K, 37, z0, 90, z1, (x) => yR(x) + 0.15, 0.3, 'footpath');
+      C3_fenceX(K, 37.4, 90, 6.3, 'n', { variant: 'picket', color: '#d9d4c4', yf: (x) => yR(x) + 0.12 });
+      C3_fenceX(K, 37.4, 90, 15.7, 's', { variant: 'picket', color: '#cfc8b4', yf: (x) => yR(x) + 0.12 });
+      K.prop('streetlight', 41.5, 15.5, 180, { y: yR(41.5) + 0.15, lit: true, light: false });
+      K.prop('cottage', 60, -2.2, 0, { y: yR(60) + 0.23, color: '#bfc6cc', number: 5, seed: 303 });
+      K.prop('gum_tree', 48, 22, 120, { y: yR(48) - 0.1, seed: 22 });
       // the car park: bitumen, faded bays, wheel stops, the supervisor's bay
       K.floor(3.5, 7.5, 24, 19.5, 'bitumen');
       for (let i = 0; i <= 7; i++) K.plane(4.2 + i * 2.6, 0.012, 11.2, 0.1, 4.6, { color: '#d8d4c4', roughness: 0.9 }, { rot: [-90, 0, 0] });
@@ -40919,6 +41668,20 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.wall(-2, -0.2, 36, -0.2, 9, { tex: 'brick', color: '#7a6250' }, { openings: [{ at: FC.doorX + 2, w: 1.9, h: 2.25 }], grime: true, thick: 0.4 });
       K.box(17, 9, -0.35, 38.6, 0.5, 0.7, { tex: 'concrete', color: '#76786f' });            // parapet
       K.box(36.1, 0, -9, 0.4, 9, 18, { tex: 'brick', color: '#735c4b' }, { collide: true });  // the east side wall running back
+      // the building behind the facade: one solid block back to the rear yard (the facade is never a card on its own), a
+      // parapet cap round its roof, windows and a downpipe down its west side, a lift-motor room on the roof
+      K.box(16.9, 0, -9.2, 38.2, 9, 17.6, { tex: 'brick', color: '#735c4b' }, { shadow: false });
+      K.box(-2.05, 9, -9.2, 0.5, 0.5, 18, { tex: 'concrete', color: '#76786f' }, { shadow: false });
+      K.box(17, 9, -17.95, 38.6, 0.5, 0.5, { tex: 'concrete', color: '#76786f' }, { shadow: false });
+      K.box(36.05, 9, -9.2, 0.5, 0.5, 18, { tex: 'concrete', color: '#76786f' }, { shadow: false });
+      K.box(8, 9, -11, 5, 2.6, 4, { tex: 'brick', color: '#6d5a4c' }, { shadow: false });
+      K.box(8, 11.6, -11, 5.3, 0.18, 4.3, { tex: 'concrete', color: '#6a6c66' }, { shadow: false });
+      for (let i = 0; i < 5; i++) {
+        const wz = -2.6 - i * 3.3;
+        K.plane(-2.12, 2.3, wz, 1.1, 2.1, winTex(i + 5), { rotY: -90 });
+        K.plane(-2.12, 6.3, wz, 1.1, 2.1, winTex(i + 7), { rotY: -90 });
+      }
+      K.cyl(-2.2, 0, -1.2, 0.06, 9, { tex: 'metal', color: '#4a4f4c' }, { seg: 6 });
       K.box(15, 0, -0.42, 40, 0.5, 0.1, { tex: 'concrete', color: '#6d6f68' });                // plinth course
       K.box(17, 4.55, 0.02, 38, 0.22, 0.16, { tex: 'concrete', color: '#7e8079' });            // string course between the storeys
       for (let i = 0; i <= 13; i++) { const px = -0.3 + i * 2.9; if (Math.abs(px - FC.doorX) < 3.0) continue; K.box(px, 0, 0.06, 0.42, 9, 0.16, { tex: 'brick', color: '#6a5444' }); }
@@ -40936,6 +41699,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.plane(FC.doorX, 4.3, 0.05, 8.2, 1.02, nameTex(), { transparent: true });
       K.door({ id: 'c3_forecourt:doors', x: FC.doorX, z: -0.2, rot: 0, w: 1.8, style: 'glass_double', to: 'c3_foyer', entry: 'doors' });
       K.plane(FC.doorX, 1.2, -0.28, 1.7, 2.2, { color: '#050706', roughness: 1 }, { rotY: 0 });   // the dark foyer behind the glass
+      K.box(FC.doorX, -0.3, -0.5, 2.4, 0.3, 1.0, { tex: 'tile', color: '#4a4740' }, { shadow: false });   // (the floor under the leaves)
       // the brass plaque, right of the doors (DOC Exchange Plaque)
       K.box(FC.doorX + 2.45, 1.25, 0.0, 0.66, 0.48, 0.03, { tex: 'metal', color: '#5a4a30' });
       K.plane(FC.doorX + 2.45, 1.49, 0.036, 0.62, 0.44, plaqueTex(), { roughness: 0.35 });
@@ -41104,6 +41868,11 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.wall(10, 0, 10, 8, H, wall, { skirting: true });
       K.wall(10.075, 8, -0.075, 8, H, { tex: 'brick', color: '#7a6250' }, { openings: [{ at: 10.075 - FY.doorX, w: 1.9, h: 2.25 }, { at: 10.075 - 2.3, w: 2.2, h: 1.5, sill: 0.9, glass: true }] });
       K.door({ id: 'c3_foyer:doors', x: FY.doorX, z: 8, rot: 0, w: 1.8, style: 'glass_double', to: 'c3_forecourt', entry: 'doors' });
+      // outside the cutaway north wall, round the high camera: the floor, the east wall and the ceiling run on (its lens
+      // looked down past the end of the room into nothing)
+      K.box(5, -0.2, -1.1, 10.3, 0.2, 2.2, { tex: 'tile', color: '#8f8a7c' }, { shadow: false });
+      K.box(10.15, 0, -1.1, 0.3, H, 2.2, wall, { shadow: false });
+      K.box(5, H, -1.1, 10.3, 0.2, 2.2, { tex: 'plaster', color: '#b8b3a4' }, { shadow: false });
       K.door({ id: 'c3_foyer:hall', x: FY.hallX, z: 0, rot: 180, w: 0.95, style: 'wood', to: 'c3_hall', entry: 'foyer', sign: "OPERATORS' HALL", color: '#b89a72' });
       // the fog light through the glass, cold; the EXIT sign
       K.light('point', FY.doorX, 2.2, 9.3, { color: '#9fb4b0', intensity: 3.0, distance: 7.5, bank: 1, name: 'c3fy:fog' });
@@ -41131,7 +41900,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.animate(() => { if (S.taken && S.taken['c3_foyer:map']) { const p = World.obj && World.obj('c3fy_plan'); if (p && p.material && p.material.map) { p.material = K.mat({ color: '#c9c2ae', roughness: 1 }); } } });
       K.plane(0.06, 1.75, 2.3, 0.62, 0.97, honourTex(), { rotY: 90 });
       // ---- the north wall: the 1961 staff photo, the letter board, the stopped clock --------------------------------------
-      K.box(6.3, 1.2, 0.09, 1.46, 1.0, 0.05, { tex: 'wood', color: '#3a2a1a' });
+      K.plane(6.3, 1.7, 0.1, 1.46, 1.0, { tex: 'wood', color: '#3a2a1a' }, {});          // (a plane: the high camera sees the cutaway wall from behind)
       K.plane(6.3, 1.7, 0.12, 1.32, 0.87, staffTex(), {});
       K.plane(4.2, 1.55, 0.06, 0.8, 0.64, letterboardTex(), {});
       K.prop('clock', FY.hallX, 0.075, 0, { mount: 2.75, time: [2, 40] });
@@ -42643,6 +43412,23 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       // the building's back wall (south), the side door
       K.wall(-0.2, 10.2, 20.2, 10.2, 7.5, { tex: 'brick', color: '#735c4b' }, { openings: [{ at: YD.door + 0.2, w: 1.0, h: 2.2 }], thick: 0.4, grime: true });
       for (let i = 0; i < 6; i++) K.plane(2 + i * 3.2, 4.6, 9.98, 1.1, 2.1, winTex(i + 5), { rotY: 180 });
+      // the building behind that wall: a solid rear wing (a dark recess behind the side door for its leaf to swing into),
+      // the main block set back and higher, parapet caps — the wall is never a card with the fog behind it
+      {
+        const BR = { tex: 'brick', color: '#735c4b' }, CAP = { tex: 'concrete', color: '#76786f' }, NS = { shadow: false };
+        K.box((-12 + 15.3) / 2, 0, 18.2, 27.3, 7.5, 15.6, BR, NS);
+        K.box((16.7 + 34) / 2, 0, 18.2, 17.3, 7.5, 15.6, BR, NS);
+        K.box(16, 0, 19, 1.4, 7.5, 14, BR, NS);
+        K.box(16, 2.4, 11.2, 1.4, 5.1, 1.6, BR, NS);
+        K.plane(16, 1.2, 11.98, 1.4, 2.4, { color: '#0a0c0b', roughness: 1 }, { rotY: 180 });
+        K.box(-6.1, 0, 10.2, 11.8, 7.5, 0.4, BR, NS);
+        K.box(27.1, 0, 10.2, 13.8, 7.5, 0.4, BR, NS);
+        K.box(11, 7.5, 10.25, 46.2, 0.35, 0.6, CAP, NS);
+        K.box(11, 7.5, 21, 46, 2.4, 10, { tex: 'brick', color: '#6d5a4c' }, NS);
+        K.box(11, 9.9, 21, 46.3, 0.3, 10.3, CAP, NS);
+        for (let i = 0; i < 4; i++) { K.plane(-12.02, 4.6, 12.5 + i * 3.4, 1.1, 2.1, winTex(i + 2), { rotY: -90 }); K.plane(34.02, 4.6, 12.5 + i * 3.4, 1.1, 2.1, winTex(i + 4), { rotY: 90 }); }
+        for (const x of [-11.9, 33.9]) K.cyl(x, 0, 10.1, 0.06, 7.5, { tex: 'metal', color: '#4a4f4c' }, { seg: 6 });
+      }
       K.door({ id: 'c3_yard:frame', x: YD.door, z: 10.2, rot: 0, w: 0.9, style: 'metal', to: 'c3_frame', entry: 'yard', color: '#5a6660', sign: 'EXCHANGE — STAFF ONLY' });
       // chain-link and barbed wire round the yard; the gate in the west fence
       K.prop('chainlink', 10, 0.1, 0, { len: 20, h: 2.4, barbed: true });
@@ -42674,10 +43460,29 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       }, { id: 'c3yd:gate', r: 1.6 });
       // beyond the gate: the lane dropping away west into the fog (walkable a few metres out, so the gate's trigger / the
       // exit to Wire Lane can be reached — without a floor there Aidan stops at the yard's edge, short of the box)
-      K.box(-6, -0.4, YD.gateZ, 12, 0.4, 5.0, 'gravel');
+      K.box(-1.7, -0.4, YD.gateZ, 3.4, 0.4, 5.0, 'gravel');
       K.floor(-3.4, YD.gateZ - 2.0, 0, YD.gateZ + 2.0, 'gravel', { visible: false });
       K.blocker(-3.6, YD.gateZ - 2.2, -3.2, YD.gateZ + 2.2, null);
       K.prop('power_pole', -4, 2.2, 0, { h: 9, span: 0 });
+      // ... and on: Wire Lane's bitumen falling west between the cable depot's chain-link (north) and the substation's
+      // (south); the ground all round the yard (the yard never floats in the white)
+      {
+        const lY = (x) => Math.min(0, x + 3.4) * 0.036, t = Math.atan(0.036);
+        C3_ground(K, -60, 1, -3.4, 9, (x) => lY(x), 'bitumen');
+        C3_ground(K, -60, -40, -3.4, 1, (x) => lY(x) - 0.05, 'grass');
+        C3_ground(K, -60, 9, -3.4, 40, (x) => lY(x) - 0.05, 'grass');
+        C3_ground(K, -3.4, -40, 60, 40, () => -0.05, 'grass');
+        for (let x = -3.6; x > -44; x -= 5) {
+          const cx = x - 2.5;
+          for (const [z, rot, tl] of [[0.9, 0, t], [9.1, 180, -t]]) {
+            const f = K.prop('chainlink', cx, z, rot, { len: 5.02, h: 2.1, barbed: z < 5, y: lY(cx) - 0.02, collide: false });
+            if (f) { f.rotation.order = 'YXZ'; f.rotation.set(0, rot * D2R, tl); }
+          }
+        }
+        for (const [x, z, r] of [[-9, -2.2, 10], [-12.5, -1.6, 70], [-16, -3.0, 0]]) K.prop('cable_drum', x, z, r, { variant: 'standing', y: lY(x) - 0.05 });
+        K.prop('substation', -17.5, 13.5, 0, { y: lY(-17.5) - 0.05 });
+        K.prop('gum_tree', 9, -9, 200, { y: -0.05, seed: 32 });
+      }
       // the yard: cable drums, a stack of pallets, a skip, the old lines truck, a smokers' bench, a dead floodlight
       K.prop('cable_drum', 5.2, 2.2, 20, { variant: 'standing' });
       K.prop('cable_drum', 7.0, 1.6, 80, {});
@@ -43272,6 +44077,22 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
   const C4 = { ring: null, far: [], esc: null, chase: null, fight: null, arm: null, armCam: false, podLed: null, bag: [], logs: null, pieces: null, lastCam: null };
   try { if (typeof window !== 'undefined' && window.SH) window.SH.c4 = C4; } catch (e) { /* tests only */ }
 
+  // a quad of ground in room coordinates, corners at heights yf(x, z) (planar when yf is linear over the box): drawn
+  // only, no floor — the land round a street beyond where he can walk
+  function C4_ground(K, x0, z0, x1, z1, yf, mat) {
+    const P = (x, z) => [x, yf(x, z), z];
+    const a = P(x0, z0), b = P(x0, z1), c = P(x1, z1), d = P(x1, z0);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([...a, ...b, ...c, ...d], 3));
+    const s = typeof mat === 'string' ? 1 / Tex.size(mat) : 0.3;
+    g.setAttribute('uv', new THREE.Float32BufferAttribute([a[0] * s, -a[2] * s, b[0] * s, -b[2] * s, c[0] * s, -c[2] * s, d[0] * s, -d[2] * s], 2));
+    g.setIndex([0, 1, 2, 0, 2, 3]); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, K.mat(mat)); m.receiveShadow = true; m.castShadow = false;
+    m.userData.ownedGeo = true;
+    K.mesh(m, { static: true });
+    return m;
+  }
+
   // ---------------------------------------------------------------------------------------------------------------
   // Canvas textures (drawn once, shared, never disposed)
   // ---------------------------------------------------------------------------------------------------------------
@@ -43575,6 +44396,17 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       // ---- NORTH: the cable company's despatch wall ----------------------------------------------------------------------
       K.wall(6, -4.36, 44.5, -4.36, 6.2, { tex: 'brick', color: '#8d7462' }, { thick: 0.3, grime: true });
       K.box(25.25, 6.2, -4.45, 38.8, 0.3, 0.55, { tex: 'concrete', color: '#7b7d77' });
+      // the despatch building behind its wall (never a card with the fog behind it): one block back 18 m, a taller store
+      // at its west end, parapet caps, a downpipe on each end
+      {
+        const BRK = { tex: 'brick', color: '#8d7462' }, CAP = { tex: 'concrete', color: '#7b7d77' }, NS = { shadow: false };
+        K.box(25.25, 0, -13.35, 38.5, 6.2, 17.7, BRK, NS);
+        K.box(25.25, 6.2, -22.1, 38.8, 0.3, 0.4, CAP, NS);
+        for (const x of [6.05, 44.45]) K.box(x, 6.2, -13.3, 0.4, 0.3, 17.8, CAP, NS);
+        K.box(14, 6.2, -14.5, 16, 1.9, 13, { tex: 'brick', color: '#7f6858' }, NS);
+        K.box(14, 8.1, -14.5, 16.3, 0.25, 13.3, CAP, NS);
+        for (const x of [5.9, 44.6]) K.cyl(x, 0, -4.7, 0.06, 6.2, { tex: 'metal', color: '#4a4f4c' }, { seg: 6 });
+      }
       K.prop('roller_door', 24, -4.15, 0, { w: 3.6, h: 3.0, open: 0, color: '#8a9088', y: wlY(24) + 0.15 });
       K.sign('SIGNAL HILL CABLE & LINE — DESPATCH', 24, wlY(24) + 3.8, -4.2, 4.8, 0.45, { style: 'shop', bg: '#2a3a44', fg: '#e8e4d2' });
       K.sign('NO PARKING\nDRIVEWAY IN CONSTANT USE', 30.4, wlY(30.4) + 1.9, -4.2, 0.9, 0.5, { style: 'council' });
@@ -43589,7 +44421,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       DR.forEach(([x, z, r], i) => K.prop('cable_drum', x, z, i % 2 ? 90 : 0, { radius: r, y: wlY(x) }));
       for (const [x, z] of [[51, -7.4], [69, -8.4], [82.4, -8.3]]) K.prop('cable_drum', x, z, 90, { radius: 0.6, y: wlY(x) + 1.62, variant: 'flat' });
       K.prop('hut', 76, -11.5, 0, { w: 4, d: 3, text: 'LINES DEPOT', y: wlY(76) - 0.05 });
-      K.box(66, wlY(66) - 0.1, -9, 42, 0.1, 9, { tex: 'gravel', color: '#77766c' }, { shadow: false });
+      C4_ground(K, 45, -16, 90, -4.45, (x) => wlY(x) - 0.01, { tex: 'gravel', color: '#77766c' });   // (it climbs with the lane: the drums sit on it)
       K.sign('TELECOM LINES DEPOT\nAUTHORISED VEHICLES ONLY', 47.4, wlY(47.4) + 1.55, -4.32, 1.4, 0.6, { style: 'council', bg: '#e8e4d2' });
       // ---- street furniture -------------------------------------------------------------------------------------------
       K.prop('streetlight', 14, -3.95, 0, { bank: 1 });
@@ -43605,7 +44437,19 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.box(17, wlY(17) - 1.4, 7.5, 32, 1.2, 6, { tex: 'grass', color: '#636b58' }, { shadow: false });
       K.prop('substation', 38.5, 7.2, 180, { w: 7, d: 5.2, y: wlY(38.5) });
       K.box(38.5, wlY(38.5) - 0.02, 7.2, 7.2, 0.05, 5.4, { tex: 'gravel', color: '#6f6e66' }, { shadow: false });
-      K.box(66, wlY(66) - 0.05, 6.5, 44, 0.06, 4.4, { tex: 'grass', color: '#5f6656' }, { shadow: false });
+      // the land round the lane: north behind the despatch and the depot, south from the substation on (falling away
+      // gently), round the bend at the bottom and on past the exchange's gate at the top
+      {
+        const GR = { tex: 'grass', color: '#5f6656' };
+        for (const [x0, x1] of [[-40, 0], [0, 90], [90, 125]]) {
+          C4_ground(K, x0, -50, x1, x1 > 0 ? -4.3 : -2.8, (x) => wlY(x) - 0.04, GR);    // (round the bend: under its footpath)
+          if (x1 > 33) for (const [z0, z1] of [[4.3, 10], [10, 45]]) C4_ground(K, Math.max(x0, 33), z0, x1, z1, (x, z) => wlY(x) - 0.04 - Math.max(0, z - 10) * 0.25, GR);
+        }
+        K.box(33.2, wlY(33) - 6, 24.6, 0.6, 6.05, 40.6, { tex: 'dirt', color: '#5a5448' }, { shadow: false });   // the end of that land above the drop
+        K.box(33.2, wlY(33) - 1.4, 7.2, 0.6, 1.4, 5.8, { tex: 'dirt', color: '#5a5448' }, { shadow: false });
+        K.prop('gum_tree', -8, -12, 30, { y: 0.05, seed: 44 });
+        K.prop('gum_tree', 58, 14, 150, { y: wlY(58) - 0.9, seed: 45 });
+      }
       K.prop('cable_drum', 52.2, 6.2, 0, { radius: 0.8, y: wlY(52.2) });
       K.prop('cable_drum', 55, 6.0, 0, { radius: 0.7, y: wlY(55), variant: 'flat' });
       K.prop('cable_drum', 74.5, 6.3, 90, { radius: 0.8, y: wlY(74.5) });
@@ -43735,6 +44579,19 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.box(30.3, 0, 1.6, 61, 5.6, 0.1, { color: '#070909', roughness: 1 });
       for (let x = 1; x < 60; x += 8.4) K.box(x, 0, 3.72, 0.35, 5.6, 0.12, { tex: 'concrete', color: '#aaa699' });
       K.box(30.3, 5.6, 3.5, 61, 0.35, 0.55, { tex: 'concrete', color: '#85827a' });
+      // the Care Centre itself behind its facade and the dark behind the glass: the ground floor's block back 27 m, its
+      // roof, and Floor 1 set back above it with a ribbon of dark windows (the facade is never a card with the fog behind)
+      {
+        const MASS = { tex: 'concrete', color: '#8f8c82' }, CAP = { tex: 'concrete', color: '#85827a' }, NS = { shadow: false };
+        K.box(30.3, 0, -11.75, 61, 5.6, 26.5, MASS, NS);
+        K.box(30.3, 5.5, 2.45, 61, 0.1, 1.9, CAP, NS);
+        K.box(30.3, 5.6, -24.9, 61.2, 0.35, 0.5, CAP, NS);
+        for (const x of [-0.1, 60.7]) K.box(x, 5.6, -10.7, 0.5, 0.35, 28.6, CAP, NS);
+        K.box(30.3, 5.6, -12.5, 56, 3.9, 20, { tex: 'concrete', color: '#96938a' }, NS);
+        K.box(30.3, 9.5, -12.5, 56.3, 0.3, 20.3, CAP, NS);
+        for (let x = 4; x < 57; x += 6.4) K.box(x + 2.7, 6.5, -2.48, 5.2, 1.9, 0.06, { color: '#101415', roughness: 0.25, metalness: 0.3 }, NS);
+        K.box(44, 9.8, -16, 6, 1.8, 5, { tex: 'metal', color: '#6f7370' }, NS);       // the roof plant
+      }
       K.plane(30.2, 4.75, 3.7, 2.2, 0.8, Tex.wordmark({ w: 2.2, h: 0.8, bg: BR.teal, age: 0.6 }), { rotY: 0, emissive: true, emissiveIntensity: 0.55 });
       K.light('point', 30.2, 4.6, 4.6, { color: '#6fd8d0', intensity: 3, distance: 6, bank: 1, name: 'c4park:sign', flicker: true });
       K.sign('CUSTOMER CARE CENTRE', 30, 3.95, 3.69, 5.2, 0.5, { style: 'shop', bg: '#0b4f52', fg: '#f4f3ee' });
@@ -43815,6 +44672,19 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.exit({ id: 'c4_park:lane', box: [35.3, 39.7, 42.7, 40.7], to: 'c4_wirelane', entry: 'park' });
       K.box(39, -0.3, 52, 7.6, 0.3, 22.8, { tex: 'bitumen', color: '#3a3c3b' }, { shadow: false });
       for (const xx of [35.8, 42.2]) K.box(xx, -0.2, 52, 1.3, 0.35, 22.8, { tex: 'footpath', color: '#8a8880' }, { shadow: false });
+      // ---- the land round the park (east of the west drop): grass under everything, the vacant lot behind the bus stop, the
+      // stem's fences running on down the hill, the road running on east through the gate toward the ring road --------------
+      C4_ground(K, 2.9, -30, 110, 80, () => -0.04, { tex: 'grass', color: '#5f6656' });
+      C4_ground(K, 21.1, 27.75, 35.0, 40.6, () => -0.02, { tex: 'gravel', color: '#77766c' });
+      K.prop('pallet', 24.2, 31.5, 20, { n: 3, collide: false });
+      K.prop('dumpster', 31.8, 37.6, 90, { collide: false });
+      for (const [px, pz] of [[22.6, 36.2], [28.4, 39.4], [33.6, 30.2]]) K.prop('shrub', px, pz, px * 9, { w: 1.2, h: 0.7, dead: true, collide: false });
+      for (let z = 42; z < 62; z += 3.4) for (const xx of [35.1, 42.9]) K.prop('chainlink', xx, z + 1.7, 90, { len: 3.4, h: 2.0, collide: false });
+      K.box(85.3, -0.3, 19.5, 49.4, 0.3, 7, { tex: 'bitumen', color: '#3a3c3b' }, { shadow: false });
+      for (const zz of [15.25, 23.75]) K.box(85.3, -0.2, zz, 49.4, 0.35, 1.5, { tex: 'footpath', color: '#8a8880' }, { shadow: false });
+      K.prop('streetlight', 72, 14.9, 0, { real: false, bank: 3 });
+      K.prop('gum_tree', 70, 30, 60, { seed: 46 });
+      K.prop('gum_tree', 64, 6, 200, { seed: 47 });
       // CALL 4 rings on entering the business park
       K.trigger([35.3, 27.5, 42.7, 36.5], (G) => G.call('luka4'), { id: 'c4_park:call4', when: (s) => s.chapter === 4 && !(s.calls && s.calls.luka4) });
 
@@ -44521,6 +45391,11 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.wall(10.1, 8, -0.1, 8, H, 'plaster', { skirting: true });
       K.wall(0, 8.1, 0, -0.1, H, 'plaster', { both: false, openings: [{ at: 4.1, w: 1.0, h: 2.15 }] });
       K.door({ id: 'c4_break:door', x: 0, z: 4.0, rot: 90, w: 0.95, style: 'wood', to: 'c4_floor', entry: 'break', sign: 'FLOOR 1' });
+      // outside the cutaway west wall, round the door camera: the ceiling, the floor and the side walls run on (it looked
+      // up past the end of the ceiling into nothing)
+      K.box(-1.4, H, 4, 2.8, 0.15, 8.4, 'ceiling_tile', { shadow: false });
+      K.box(-1.4, -0.15, 4, 2.8, 0.15, 8.4, { tex: 'lino', color: '#8a8472' }, { shadow: false });
+      for (const z of [-0.2, 8.2]) K.box(-1.4, 0, z, 2.8, H, 0.2, 'plaster', { shadow: false });
       // north: the payphone, the noticeboard, the vending machine
       K.payphone(1.9, 0.08, 0, { wall: true, id: 'c4_break:payphone' });
       K.prop('notice_board', 4.6, 0.08, 0, { mount: 1.55 });
@@ -44599,6 +45474,13 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.wall(10, -0.1, 10, 8.1, H, 'plaster', { skirting: true });
       K.wall(0, 8.1, 0, -0.1, H, 'plaster', { skirting: true });
       K.door({ id: 'c4_records:door', x: RC.door[0], z: RC.door[1], rot: 180, w: 0.95, style: 'metal', to: 'c4_floor', entry: 'records', sign: 'FLOOR 1' });
+      // outside both cutaway walls, round the two high cameras: the ceiling, the floor and the side walls run on (they
+      // looked up past the ends of the ceiling into nothing)
+      for (const zc of [-1.4, 9.4]) {
+        K.box(5, H, zc, 10.4, 0.15, 2.8, 'ceiling_tile', { shadow: false });
+        K.box(5, -0.15, zc, 10.4, 0.15, 2.8, { tex: 'lino', color: '#7a7a70' }, { shadow: false });
+        for (const x of [-0.15, 10.15]) K.box(x, 0, zc, 0.3, H, 2.8, 'plaster', { shadow: false });
+      }
       // floor-to-ceiling shelves of dot-matrix printouts
       K.fogOnly(() => {
         for (const z of [1.3, 3.5, 5.7]) { K.prop('binders_shelf', 0.2, z, 90, { len: 2.1, h: 2.9 }); K.prop('binders_shelf', 9.8, z, -90, { len: 2.1, h: 2.9 }); }
@@ -44736,6 +45618,9 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.blocker(6.9, 12.0, 13.3, 12.7, 'The shutter\'s stuck halfway. Outside there\'s nothing. Just dark.');
       K.box(10, -0.02, 15, 12, 0.02, 6, { tex: 'tile', color: '#3a3c3a' }, { shadow: false });
       K.box(10, 0, 18, 12, 4, 0.1, { color: '#0a0c0c', roughness: 1 });
+      // (the dark mall closed in: its sides and ceiling — from the high camera, through the shutter, past its end was nothing)
+      for (const x of [4, 16]) K.box(x, 0, 15, 0.1, 4, 6.1, { color: '#0a0c0c', roughness: 1 }, { shadow: false });
+      K.box(10, 4, 15, 12.2, 0.1, 6.2, { color: '#0a0c0c', roughness: 1 }, { shadow: false });
       K.light('point', 10, 2.8, 14.5, { color: '#5a7a78', intensity: 1.2, distance: 5, real: false });
       // the doors: the side door he came in by; the back office (maglock, released by the duress button)
       K.door({ id: 'c4_oldstore:side', x: OS.side[0], z: OS.side[1], rot: 90, w: 0.95, style: 'glass', to: 'c4_floor', entry: 'westwall', locked: (s) => !!(s.done && s.done['cs:4-2']) && !(s.flags && s.flags.c4_bossDone), lockMsg: 'It won\'t open from this side.' });
@@ -46002,7 +46887,6 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.collider(43.7, -9.3, 44, -6.5, { h: 1.2 }); K.collider(60, -9.3, 60.3, -6.5, { h: 1.2 });
       K.collider(44, -9.35, 60, -9.25, { h: 1.2 });
       for (const [x0, x1] of [[14, 22], [32.4, 44], [60, 78]]) for (let x = x0; x < x1 - 0.5; x += 2.1) K.prop('shrub', x + 1.05, -7.3, 0, { w: 2.0, h: 1.2, dead: x % 3 < 1 });
-      K.box(27, -1.2, -12, 9, 1.2, 10, { tex: 'concrete', color: '#5c5a54' }, { shadow: false });
       K.prop('boom_gate', 23.2, -7.2, 90, { len: 7.5 });
       K.prop('hut', 32.9, -9.4, 0, { w: 1.6, d: 1.6, h: 2.4, text: 'PARKING' });
       K.sign('STAFF PARKING\nPERMIT HOLDERS ONLY', 27, 2.4, -7.0, 2.4, 0.7, { style: 'council', bg: '#e8e4d2' });
@@ -46038,6 +46922,84 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
         K.collider(96.5, -6.6, 97, 6.6, { h: 2 });
         K.exit({ id: 'c5_ringroad:hospital', box: [95, -6.6, 97, 6.6], to: 'c7_ringroad', entry: 'office', when: () => !!ROOMS.c7_ringroad, blockedMsg: 'The road goes on. [beat] Not yet.' });
         K.trigger([76, -6.6, 80, 6.6], async (G) => { await G.think('That wasn\'t there before.'); }, { id: 'c5_ringroad:before' });
+      }
+
+      // ---- the land either side of the road (gap sweep) ------------------------------------------------------------
+      // Behind the east arm's hedges the ground used to stop at the footpath: the staff car park's ramp was a slab ending
+      // in the white and the tower stood on nothing. Now lawns and paving run back to the tower, the ramp goes down to a
+      // portal under the tower's grounds, a scrub lot lies behind the west arm's fence, and south of the road the verge
+      // runs out to the edge where the hill falls away. Before Chapter 6 the land breaks off with the road at x 78.
+      {
+        const XE = RR.east() ? 100 : 78;
+        const LAWN = { tex: 'grass', color: '#4a5244' }, VERGE = { tex: 'grass', color: '#474f42' }, SOIL = { tex: 'dirt', color: '#56503f' };
+        const PAVE = { tex: 'footpath', color: '#8a887f' }, RAMPC = { tex: 'concrete', color: '#6e6d67' }, WALLC = { tex: 'concrete', color: '#85847c' };
+        const gnd = (x0, z0, x1, z1, top, mat, h = 6) => K.box((x0 + x1) / 2, top - h, (z0 + z1) / 2, x1 - x0, h, z1 - z0, mat, { shadow: false });
+        // north of the east arm: the tower's lawns (the ramp cut out of them), paving round the tower's foot
+        gnd(14.3, -66, 22.2, -6.3, 0.07, LAWN);
+        gnd(31.8, -66, XE, -6.3, 0.07, LAWN);
+        gnd(22.2, -66, 31.8, -21.3, 0.07, LAWN, 0.37);
+        gnd(29.5, -61.5, 74.5, -25.8, 0.12, PAVE, 0.3);
+        if (!RR.east()) K.box(XE + 0.04, -6, -36.15, 0.1, 6.07, 59.7, SOIL, { shadow: false });   // (the broken edge)
+        // the staff car park: a flat apron under the boom, the ramp down between parapet walls to a portal, dark inside
+        gnd(22.2, -9.5, 31.8, -6.3, 0.05, RAMPC, 0.3);
+        { const run = 11.5, drop = 2.65, L = Math.hypot(run, drop), a = Math.atan2(drop, run) / D2R;
+          K.plane(27, 0.05 - drop / 2, -9.5 - run / 2, 9.6, L, { tex: 'concrete_wet', color: '#5e5d58' }, { rot: [-90 - a, 0, 0] }); }
+        K.box(27, -2.62, -24, 9.6, 0.02, 6, { color: '#191b1a', roughness: 1 }, { shadow: false });
+        for (const x of [22.05, 31.95]) K.box(x, -2.8, -13.8, 0.3, 3.75, 15, WALLC, { shadow: false });
+        K.box(27, -0.3, -21.2, 10.2, 1.25, 0.4, WALLC, { shadow: false });
+        for (const x of [22.55, 31.45]) K.box(x, -2.8, -21.9, 1.2, 2.5, 1.8, WALLC, { shadow: false });
+        K.box(27, -2.6, -26.2, 7.8, 2.3, 8.4, { color: '#0c0f0f', roughness: 1 }, { shadow: false });
+        K.box(27, -0.3, -21.95, 7.8, 0.02, 1.1, { color: '#3a3c3a', roughness: 1 }, { shadow: false });
+        K.sign('STAFF CAR PARK  ·  CLEARANCE 2.3 m', 27, 0.32, -20.98, 5.2, 0.42, { style: 'council', bg: '#e8e4d2', fg: '#1d1d1d' });
+        for (const x of [23.6, 30.4]) K.box(x, -0.55, -20.95, 1.1, 0.1, 0.06, { color: '#c9a716', roughness: 0.6 }, { shadow: false });
+        // the grounds: a fence along the west edge where the hill falls away, gums, a lamp by the path, a service bin
+        for (let z = -13.4; z > -44; z -= 6) K.prop('chainlink', 14.45, z - 3, 90, { len: 6, h: 2.0, collide: false });
+        for (const [x, z, s] of [[18.2, -17.5, 0.9], [17.6, -33, 1.0], [37.2, -14.5, 0.85], [39.5, -23.5, 1.05], [65.5, -14, 0.9], [68.2, -23, 1.0], [75.2, -13.5, 0.8]]) K.prop('gum_tree', x, z, x * 11, { y: 0.07, scale: s, collide: false });
+        K.prop('streetlight', 42.8, -18, 90, { lit: false, collide: false });
+        K.prop('streetlight', 61.2, -22, -90, { lit: false, collide: false });
+        K.prop('bin', 34.2, -12.2, 90, { variant: 'wheelie', color: '#2c4a2e', collide: false });
+        // south of the east arm: the verge shelf runs on to the land's end, then the hill falls away into the fog
+        const XS = RR.east() ? 150 : XE;
+        gnd(70, 6.4, XS, 18, 0.05, VERGE, 2.45);
+        K.plane((10 + XS) / 2, 0.05 - 2.8, 18 + 5.3, XS - 10, 12, VERGE, { rot: [-62, 0, 0] });        // (28° down to the south)
+        // after Chapter 6 the road runs on east past the old end (it used to stop at x 97 at an edge): the carriageway
+        // and footpaths, the guardrail, and past the tower's grounds the hill's retaining wall with the grass on top
+        if (RR.east()) {
+          K.box(123.5, -0.3, 0, 53, 0.3, 9, { tex: 'bitumen', color: '#3c3e3c' }, { shadow: false });
+          for (const sz of [-1, 1]) K.box(123.5, -0.3, sz * 5.48, 53, 0.45, 1.96, 'footpath', { shadow: false });
+          for (let x = 99; x < 150; x += 6) K.box(x, 0.004, 0, 3, 0.01, 0.12, { color: '#c8c6bc', roughness: 0.8 }, { shadow: false });
+          for (let x = 98; x < 149; x += 6) K.prop('guardrail', x + 3, 6.6, 0, { len: 6, collide: false });
+          K.box(125, -0.2, -fp - 0.1, 50, 2.8, 0.25, { tex: 'concrete', color: '#7e7d76' }, { shadow: false });
+          K.box(XE + 0.12, -0.2, -fp - 4.3, 0.25, 2.8, 8.2, { tex: 'concrete', color: '#7e7d76' }, { shadow: false });
+          K.box(125, 2.3, -fp - 4.3, 50, 0.3, 8.2, { tex: 'grass', color: '#4e5647' }, { shadow: false });
+          K.prop('gum_tree', 112, -fp - 3.4, 40, { y: 2.6, scale: 0.9, collide: false });
+          K.prop('streetlight', 110, fp - 0.3, 180, { lit: false, collide: false });
+        }
+        if (!RR.east()) K.box(XS + 0.04, -2.4, 12.2, 0.1, 2.45, 11.6, SOIL, { shadow: false });
+        // the west arm: a scrub lot behind the north fence, the verge and the fall south of the guardrail
+        gnd(-39, -40, -14.3, -6.3, 0.03, SOIL);
+        K.box(-39.05, -6, -23.15, 0.1, 6.03, 33.7, SOIL, { shadow: false });
+        gnd(-39, 6.3, -14.25, 14, 0.04, VERGE, 2.4);
+        K.box(-39.05, -2.4, 10.15, 0.1, 2.44, 7.7, SOIL, { shadow: false });
+        K.plane(-30.3, 0.04 - 2.8, 14 + 5.3, 17.4, 12, VERGE, { rot: [-62, 0, 0] });
+        for (const [x, z] of [[-35.5, -10.5], [-31, -15], [-26.4, -9.8], [-22.5, -18.5], [-18.2, -11.4], [-29.5, -24]]) K.prop('shrub', x, z, x * 13, { w: 1.6, h: 0.9, dead: true, collide: false });
+        K.prop('leaf_pile', -24.5, -12.5, 0, { radius: 1.1 });
+        K.prop('pallet', -20.2, -8.4, 25, { collide: false });
+        // the south arm: the road runs on past the park gate into the fog (it used to stop at an edge), the retaining
+        // wall and the hill with it; west of the road the lots and the servo sit on ground that reaches back to a paling
+        // fence line, not on slabs over the white
+        const ZS = 118;
+        K.box(0, -0.3, (72.6 + ZS) / 2, 9, 0.3, ZS - 72.6, { tex: 'bitumen', color: '#3c3e3c' }, { shadow: false });
+        for (const s of [-1, 1]) K.box(s * 5.48, -0.3, (72.6 + ZS) / 2, 1.96, 0.45, ZS - 72.6, 'footpath', { shadow: false });
+        for (let z = 75; z < ZS; z += 6) K.box(0, 0.004, z, 0.12, 0.01, 3, { color: '#c8c6bc', roughness: 0.8 }, { shadow: false });
+        K.box(fp + 0.1, -0.2, (72.8 + ZS) / 2, 0.25, 2.8, ZS - 72.8, { tex: 'concrete', color: '#7e7d76' }, { shadow: false });
+        K.box(fp + 4, 2.4, (72 + ZS) / 2, 7.5, 0.3, ZS - 72, { tex: 'grass', color: '#4e5647' }, { shadow: false });
+        K.prop('gum_tree', fp + 3.4, 84, 300, { y: 2.6, scale: 0.95, collide: false });
+        K.prop('streetlight', fp - 0.3, 86, -90, { lit: false, collide: false });
+        gnd(-44, 14, -6.3, ZS, -0.01, SOIL, 0.3);
+        for (let z = 72.8; z < ZS - 1; z += 4) K.prop('chainlink', -fp - 0.15, z + 2, 90, { len: 4, h: 2.0, collide: false });
+        for (const [z0, z1] of [[14, 30], [52, 72.6]]) { const n = Math.ceil((z1 - z0) / 6), l = (z1 - z0) / n; for (let i = 0; i < n; i++) K.prop('fence', -21.7, z0 + l * (i + 0.5), 90, { len: l, h: 1.8 }); }
+        for (const [x, z] of [[-10.5, 18], [-17.5, 25.5], [-12.2, 66], [-19.4, 57], [-8.8, 70.5]]) K.prop('shrub', x, z, x * 7, { w: 1.4, h: 0.8, dead: true, collide: false });
       }
 
       // ---- exits ------------------------------------------------------------------------------------------------------
@@ -46177,6 +47139,32 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.sign('CARPARK — PERMIT HOLDERS', 31.83, 3.1, 7.2, 2.6, 0.3, { style: 'council', bg: '#e8e4d2', rotY: -90 });
       K.interact(31.3, 1.2, 7.2, async (G) => { G.sfx('door_locked', { pos: [31.8, 1.2, 7.2] }); await G.msg('It\'s locked.'); await G.think('Permit holders only. [beat] Even the cars had to earn it.'); }, { id: 'c5_forecourt:carpark', r: 1.6 });
       K.writing('IT\'LL BE FINE', 0.18, 1.5, 13.5, 2.0, { rotY: 90, world: 'fog' });
+      // (gap sweep) what the side walls belong to — the loading dock's service wing on the west, the car park podium on
+      // the east — and the ring road running on past the forecourt both ways, the hill falling away beyond its far
+      // footpath: over the walls and past the road's ends the cameras used to look into nothing
+      {
+        const BRK = { tex: 'brick', color: '#65554a' }, CAP = { tex: 'concrete', color: '#6c6a62' }, CON = { tex: 'concrete', color: '#7d7c75' };
+        K.box(-5.32, 0, 11.5, 10.36, 5.4, 21.4, BRK, { shadow: false });
+        K.box(-5.32, 5.4, 11.5, 10.66, 0.18, 21.7, CAP, { shadow: false });
+        K.box(-9.8, 5.58, 6.5, 2.4, 1.6, 3.2, { tex: 'metal', color: '#4d5250' }, { shadow: false });
+        K.box(-0.12, 3.4, 13.5, 0.06, 0.9, 6, { color: '#1a1e1e', roughness: 0.3 }, { shadow: false });
+        K.box(38.07, 0, 11.5, 11.86, 3.3, 21.4, CON, { shadow: false });
+        K.box(38.1, 3.3, 11.5, 11.2, 1.15, 20.8, { color: '#101313', roughness: 1 }, { shadow: false });
+        K.box(38.07, 4.45, 11.5, 11.86, 0.95, 21.4, CON, { shadow: false });
+        for (let z = 2.5; z < 22; z += 4.8) K.box(32.3, 3.3, z, 0.4, 1.15, 0.4, CON, { shadow: false });
+        K.sign('CAR PARK — LEVEL 1', 38.1, 4.95, 22.22, 4.2, 0.5, { style: 'council', bg: '#0b4f52', fg: '#ffffff' });
+        // the road: on past both ends of the forecourt, its far footpath, the guardrail, the verge falling to the fog
+        K.box(16, -0.3, 30, 112, 0.3, 8, { tex: 'bitumen', color: '#3a3c3b' }, { shadow: false });
+        K.box(-19, -0.45, 24, 38, 0.45, 4, 'footpath', { shadow: false });
+        K.box(51, -0.45, 24, 38, 0.45, 4, 'footpath', { shadow: false });
+        for (let x = -38; x < 70; x += 6) K.box(x, 0.004, 30, 3, 0.01, 0.12, { color: '#c8c6bc', roughness: 0.8 }, { shadow: false });
+        K.box(16, -0.3, 35, 112, 0.45, 2, 'footpath', { shadow: false });
+        for (let x = -37; x < 70; x += 6) K.prop('guardrail', x, 35.9, 0, { len: 6, y: 0.15, collide: false });
+        K.box(16, -2.4, 38.5, 112, 2.45, 5, { tex: 'grass', color: '#474f42' }, { shadow: false });
+        K.plane(16, 0.05 - 2.8, 41 + 5.3, 112, 12, { tex: 'grass', color: '#474f42' }, { rot: [-62, 0, 0] });
+        K.prop('streetlight', -14, 22.6, 180, { lit: false, collide: false });
+        K.prop('streetlight', 46, 22.6, 180, { lit: false, collide: false });
+      }
       K.dress('leaves', [0.5, 2, 31.5, 21.5], 70, { seed: 541 });
       K.dress('papers', [4, 6, 28, 20], 10, { seed: 542 });
       // (low on the monolith's east end face: the slab stands at 25°, so that face points 115°)
@@ -47500,6 +48488,17 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.wall(-3.2, 0.02, 0, 0.02, 2.9, { tex: 'plaster', color: '#a9a69c' }, {});
       K.wall(0, D - 0.02, -3.2, D - 0.02, 2.9, { tex: 'plaster', color: '#a9a69c' }, {});
       K.collider(-3.3, 0, -0.02, D, { h: 3 });
+      // (gap sweep) the dark floor round the room for the cameras outside its cut-away north and south walls: floor,
+      // ceiling and walls — past the room's corners and under its edges they used to look into nothing
+      { const EF = { tex: 'carpet', color: '#3e4448' }, EC = { tex: 'ceiling_tile', color: '#4e514c' }, EW = { tex: 'plaster', color: '#3b403d' };
+        for (const [x0, z0, x1, z1] of [[-3.4, D, W + 1.8, D + 4.4], [-3.4, -4.4, W + 1.8, 0], [W, 0, W + 1.8, D]]) {
+          K.box((x0 + x1) / 2, -0.03, (z0 + z1) / 2, x1 - x0, 0.025, z1 - z0, EF, { shadow: false });
+          K.box((x0 + x1) / 2, H + 0.01, (z0 + z1) / 2, x1 - x0, 0.05, z1 - z0, EC, { shadow: false });
+        }
+        K.box(-3.45, 0, D / 2, 0.1, H + 0.06, D + 8.8, EW, { shadow: false });
+        K.box(W + 1.85, 0, D / 2, 0.1, H + 0.06, D + 8.8, EW, { shadow: false });
+        for (const z of [-4.45, D + 4.45]) K.box(W / 2 - 0.8, 0, z, W + 5.3, H + 0.06, 0.1, EW, { shadow: false });
+        K.prop('filing_cabinet', W + 1.4, D + 3.6, -90, {}); K.prop('filing_cabinet', -2.9, -3.8, 90, {}); }
       K.prop('fluoro_tube', -1.5, PR.door, 0, { h: 2.87, variant: 'troffer', bank: 1, name: 'c5pr:out' });
       K.prop('couch', -2.7, 1.2, 90, { variant: 'vinyl', color: '#2e4a4a', len: 1.8 });
       K.fogOnly(() => K.prop('plant_pot', -2.8, 0.55, 0, { variant: 'palm' }));
@@ -48119,6 +49118,9 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       }
       K.box(20, AT.roof, 15, 14.4, 0.06, 14.4, { color: '#0d1414', roughness: 0.1, metalness: 0.3 }, { world: 'fog', shadow: false, collide: false });
       for (let i = 0; i <= 4; i++) K.box(V[0] + i * 3.5, AT.roof - 0.2, 15, 0.12, 0.2, 14.4, { tex: 'metal', color: '#5a605e' }, { world: 'fog', collide: false });
+      // (gap sweep) the roof's upstand round the void, down to the dark floors behind Level 4's balustrade: from the stair
+      // the camera looked up through the gap between them into nothing
+      for (const [cx, cz, sx, sz] of [[20, V[1] - 1.9, 14.8, 4.2], [20, V[3] + 1.9, 14.8, 4.2], [V[0] - 1.9, 15, 4.2, 18.6], [V[2] + 1.9, 15, 4.2, 18.6]]) K.box(cx, AT.L4 + 3.0, cz, sx, AT.roof + 0.06 - AT.L4 - 3.0, sz, { color: '#0b0e0e', roughness: 1 }, { world: 'fog', shadow: false, collide: false });
       // Level 4's lit office strips (Fog) / a few red emergency lights (Outage), seen from below
       K.fogOnly(() => { for (const [x, z, r] of [[20, V[1] - 1.2, 0], [20, V[3] + 1.2, 0], [V[0] - 1.2, 15, 90], [V[2] + 1.2, 15, 90]]) K.box(x, AT.L4 + 2.85, z, r ? 0.3 : 10, 0.03, r ? 10 : 0.3, { color: '#e8f2ee', emissive: '#e8f2ee', emissiveIntensity: 1.2 }, { collide: false, shadow: false }); });
       // pendant lights hung from the roof on long cables (Fog); in the Outage a few red emergency fills and the cold
@@ -49021,6 +50023,14 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       for (const x of [0.6, 1.95, 3.1, 4.25, 5.6]) K.box(x, 0.8, -0.02, 0.06, 1.75, 0.1, { tex: 'metal', color: '#6c7372', metalness: 0.5 });
       K.plane(3.1, 1.68, -0.03, 5.4, 1.75, { color: '#9fb2ae', roughness: 0.08, metalness: 0.3, transparent: true, opacity: 0.14 }, { double: true });
       K.plane(3.1, 1.6, -4.4, 12, 5, fogTex(), { emissive: 0.5 });
+      // (gap sweep) the tower's curtain wall round the window, seen by the camera outside it: the wall itself is one-sided,
+      // so from out there the room showed through above and below the glass and nothing round it
+      { const CW = { color: '#262d2f', roughness: 0.35, metalness: 0.25 }, SP = { tex: 'concrete', color: '#4c5553' };
+        K.box(3.1, -1.5, -0.14, 14, 2.3, 0.1, CW, { shadow: false });
+        K.box(3.1, 2.55, -0.14, 14, 2.0, 0.1, CW, { shadow: false });
+        for (const cx of [-1.75, 7.95]) K.box(cx, 0.8, -0.14, 4.3, 1.75, 0.1, CW, { shadow: false });
+        for (const y of [-0.45, 2.85]) K.box(3.1, y, -0.2, 14, 0.45, 0.04, SP, { shadow: false });
+        for (const x of [-3.1, -0.4, 6.6, 9.3]) K.box(x, -1.5, -0.2, 0.08, 6, 0.06, { tex: 'metal', color: '#7d8683' }, { shadow: false }); }
       // the blinds: half down, one slat bent, the cord hanging
       for (let i = 0; i < 13; i++) { const y = 2.5 - i * 0.07; const bent = i === 9; K.box(3.1, y, 0.06, 5.35, 0.008, 0.045, { color: '#d9d6cb', roughness: 0.5 }, { rot: bent ? 2 : 0 }); }
       K.box(3.1, 2.53, 0.06, 5.45, 0.04, 0.07, { color: '#cfcbbd' });
@@ -49788,6 +50798,15 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.wall(LO.W, -0.1, LO.W, LO.D + 0.1, H, 'plaster_stained', { skirting: true });
       K.wall(LO.W + 0.1, LO.D, -0.1, LO.D, H, 'plaster', { skirting: true });
       K.wall(0, LO.D + 0.1, 0, -0.1, H, 'plaster', { both: false, skirting: true });
+      // (gap sweep) the dark stock bay outside the cut-away west wall where the desk and CCTV cameras stand: its floor,
+      // ceiling and walls — over the ceiling's edge and past the north wall's end they used to look into nothing
+      { const DK = { tex: 'plaster', color: '#3c403d' };
+        K.box(-1.9, -0.03, LO.D / 2, 3.8, 0.03, LO.D + 0.2, { tex: 'lino', color: '#4a4a42' }, { shadow: false });
+        K.box(-1.9, H, LO.D / 2, 3.8, 0.08, LO.D + 0.2, { tex: 'ceiling_tile', color: '#5a5c56' }, { shadow: false });
+        K.box(-1.9, 0, -0.15, 3.8, H, 0.1, DK, { shadow: false });
+        K.box(-1.9, 0, LO.D + 0.15, 3.8, H, 0.1, DK, { shadow: false });
+        K.box(-3.85, 0, LO.D / 2, 0.1, H, LO.D + 0.4, DK, { shadow: false });
+        K.prop('shelf', -3.5, 3.2, 90, { len: 1.8, h: 2.0 }); }
       K.door({ id: 'c6_lukaoffice:door', x: LO.door, z: 0, rot: 0, w: 0.95, style: 'metal', color: '#6a7472', to: 'c6_level6', entry: 'office', signBack: 'STORE' });
       K.box(LO.door, 2.2, 0.07, 0.14, 0.06, 0.08, { color: '#e8e6de', roughness: 0.5 });
       K.light('led', LO.door + 0.05, 2.23, 0.12, { color: '#ff2a1c', blink: 2 });
@@ -50021,6 +51040,15 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       for (let x = 12.06; x < 13.2; x += 0.085) K.box(x, -0.03, 0, 0.018, 0.03, 2.4, { tex: 'metal', color: '#7a807d', metalness: 0.5 });
       for (let z = -1.15; z < 1.2; z += 0.3) K.box(12.61, -0.035, z, 1.18, 0.025, 0.02, { tex: 'metal', color: '#7a807d', metalness: 0.5 });
       K.box(12.61, -1.6, 0, 1.18, 1.55, 2.4, { color: '#040606', roughness: 1 });
+      // (gap sweep) the shaft round the car for the low camera outside its back wall: side walls, the landing wall past
+      // the doors, the pit, the car's roof and underside — beside the car it used to look into nothing
+      { const SC = { tex: 'concrete', color: '#3e4341' }, SM = { tex: 'metal', color: '#3a3e3c' };
+        for (const x of [10.15, 13.85]) K.box(x, -2.5, -1.8, 0.2, 9, 7.6, SC, { shadow: false });
+        K.box(12, -2.5, 2.0, 3.9, 9, 0.2, SC, { shadow: false });
+        K.box(12, -2.6, -1.8, 3.5, 0.1, 7.6, { color: '#0b0d0d', roughness: 1 }, { shadow: false });
+        K.box(12, 2.46, 0, 2.5, 0.35, 2.5, SM, { shadow: false });
+        K.box(11.41, -0.55, 0, 1.2, 0.5, 2.5, SM, { shadow: false });
+        for (const x of [10.35, 13.65]) K.box(x, -2.5, -1.8, 0.06, 9, 0.12, { tex: 'metal', color: '#5d6462' }, { shadow: false }); }
       K.light('point', 12.55, -0.5, -0.3, { color: '#2fb3aa', intensity: 2.6, distance: 3.2 });
       K.light('point', lxx - 0.55, 0.45, lzz - 0.6, { color: '#cfe3de', intensity: 2.0, distance: 1.9 });                 // low fill on his ankles
       const [lx, lz] = SHF.luka;
@@ -51298,6 +52326,37 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.box(122, 0, -22, 44, 14, 26, { tex: 'render_cracked', color: '#5f625c' }, { shadow: false });
       for (let i = 0; i < 9; i++) K.box(102 + i * 4.6, 3.2, -8.9, 2.2, 1.3, 0.1, { color: '#1a2222', roughness: 0.2, metalness: 0.4 }, { shadow: false });
       for (let i = 0; i < 9; i++) K.box(102 + i * 4.6, 7.2, -8.9, 2.2, 1.3, 0.1, { color: i === 5 ? '#3a4442' : '#1a2222', roughness: 0.2, metalness: 0.4 }, { shadow: false });
+      // (gap sweep) past the entrance the road used to stop at an edge over the white, the hospital a box in the air:
+      // now the car park's bitumen runs on behind its low wall and hedge, the multi-storey stands on the south side
+      // (decks, parapets, columns, dark inside), the retaining wall turns the corner, the hospital stands on the lot
+      {
+        const y0 = rrY(RR7.L), CON = { tex: 'concrete', color: '#8a8982' }, PAR = { tex: 'concrete', color: '#96958d' };
+        K.box(125, y0 - 6, -16.75, 58, 6, 46.5, { tex: 'bitumen', color: '#5e5e5a' }, { shadow: false });
+        K.box(125.15, y0 - 6, 18.25, 57.7, 6, 23.5, { tex: 'concrete', color: '#76756e' }, { shadow: false });
+        K.box(97.6, y0, -27.5, 0.35, 0.7, 25, { tex: 'brick', color: '#7a6a5a' }, { shadow: false });
+        for (let z = -39; z < -15.5; z += 2.2) K.prop('shrub', 98.3, z, 0, { w: 2.1, h: 1.1, dead: z % 3 < 1, y: y0, collide: false });
+        for (const z of [-4.3, 4.3]) K.prop('bollard', 96.6, z, 0, { variant: 'concrete', y: y0 });
+        for (let z = -36; z < -8; z += 2.6) K.box(106, y0 + 0.004, z, 5, 0.01, 0.09, { color: '#c8c6bc', roughness: 0.8 }, { shadow: false });
+        K.prop('car', 108.5, -14.3, 92, { color: '#3a4a58', y: y0 });
+        K.prop('hatchback', 108.4, -22.1, 88, { color: '#6d2622', y: y0 });
+        K.prop('streetlight', 99, -8.5, 90, { lit: false, y: y0, collide: false });
+        // the multi-storey on the south side (the car park's west edge seen from the road): three decks
+        K.box(115, y0, 17.25, 37, 0.02, 18.5, { tex: 'concrete', color: '#5f5e59' }, { shadow: false });
+        for (const dy of [2.9, 5.8, 8.7]) {
+          K.box(115, y0 + dy, 17.25, 37, 0.35, 18.5, CON, { shadow: false });
+          K.box(96.6, y0 + dy + 0.35, 17.25, 0.2, 0.95, 18.5, PAR, { shadow: false });
+          K.box(115, y0 + dy + 0.35, 8.1, 37, 0.95, 0.2, PAR, { shadow: false });
+        }
+        for (let z = 8.5; z <= 26.1; z += 5.85) K.box(96.8, y0, z, 0.5, 8.7, 0.5, CON, { shadow: false });
+        for (let x = 102; x < 133; x += 6.8) K.box(x, y0, 8.3, 0.5, 8.7, 0.5, CON, { shadow: false });
+        for (const dy of [0, 2.9, 5.8]) K.box(117, y0 + dy + 0.35, 18, 32, 2.55, 15, { color: '#111414', roughness: 1 }, { shadow: false });
+        K.box(115, y0, 26.4, 37, 9.95, 0.25, { tex: 'concrete', color: '#7c7b74' }, { shadow: false });
+        K.box(98.4, y0, 24.6, 3.6, 11.2, 3.6, { tex: 'render_cracked', color: '#8e8c82' }, { shadow: false });
+        K.plane(96.45, y0 + 3.9, 17.5, 1.8, 0.62, fullTex(), { rotY: -90, emissive: 1.3 });
+        // the hill's retaining wall turns north at the corner; the grass behind it
+        K.box(RR7.L + 1.15, -0.2, -fp - 4.25, 0.3, 3.0, 8.3, { tex: 'concrete', color: '#7e7d76' }, { shadow: false });
+        K.box(RR7.L + 0.55, -0.2, -fp - 0.1, 1.1, 3.0, 0.3, { tex: 'concrete', color: '#7e7d76' }, { shadow: false });
+      }
 
       // ---- exits ----------------------------------------------------------------------------------------------------
       K.exit({ id: 'c7_ringroad:office', box: [0, -6.4, 0.9, 6.4], to: 'c5_ringroad', entry: 'office', when: () => !!ROOMS.c5_ringroad, blockedMsg: 'The office is behind me. [beat] Keep going.' });
@@ -51418,17 +52477,57 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.examine(12.6, 0.9, 1.0, ['A sand bin full of butts. The nurses come out here.', 'Came.'], { id: 'c7cp:butts', r: 1.2 });
       K.examine(22.2, 1.5, 0.45, ['"District Hospital." [beat] She\'s in there.', 'Somewhere in there.'], { id: 'c7cp:doors', r: 1.2, when: () => !flag('c7_arrived') });   // (the dark glass beside the doors — never in front of them: it would take their E)
       K.examine(36.2, 2.6, 0.6, ['Emergency\'s round the side.', 'The side is just fog.'], { id: 'c7cp:emerg', r: 1.6 });
+      // (gap sweep) the hospital behind its facade: the ground floor's block (the lobby behind the doors left clear), a
+      // taller block set back above it with its window bands, the plant room — the facade was a card over the fog
+      {
+        const HM = { tex: 'render_cracked', color: '#9c9c90' }, HCAP = { tex: 'concrete', color: '#7e7d76' }, GL = { color: '#161c1c', roughness: 0.15, metalness: 0.45 };
+        K.box(8.35, 0, -13.15, 17.5, 9.2, 25.7, HM, { shadow: false });
+        K.box(31.05, 0, -13.15, 18.7, 9.2, 25.7, HM, { shadow: false });
+        K.box(19.4, 0, -14.2, 4.6, 9.2, 23.6, HM, { shadow: false });
+        K.box(20, 9.2, -13.3, 40.9, 0.3, 25.8, HCAP, { shadow: false });
+        K.box(20, 9.5, -17, 34, 6.3, 18, HM, { shadow: false });
+        K.box(20, 15.8, -17, 34.4, 0.35, 18.4, HCAP, { shadow: false });
+        for (const y of [10.4, 13.4]) K.box(20, y, -7.97, 32, 1.4, 0.08, GL, { shadow: false });
+        for (const y of [10.4, 13.4]) K.box(37.03, y, -17, 0.08, 1.4, 16, GL, { shadow: false });
+        K.box(26, 16.15, -19, 10, 2.6, 6, { tex: 'metal', color: '#4d5250' }, { shadow: false });
+        for (let i = 0; i < 6; i++) for (const y of [1.0, 4.3]) K.box(40.44, y, -3.2 - i * 4.1, 0.08, 1.5, 2.3, GL, { shadow: false });
+        for (let i = 0; i < 6; i++) K.box(40.46, 0.95, -3.2 - i * 4.1, 0.12, 0.06, 2.4, HCAP, { shadow: false });
+      }
 
       // ---- the multi-storey on the west: three decks, parapets, a ramp, FULL ------------------------------------------
       const MS = { x0: -17, x1: -0.35 };
+      const MSC = { tex: 'concrete', color: '#8a8982' }, MSP = { tex: 'concrete', color: '#96958d' };
       for (const y of [2.9, 5.8, 8.7]) {
-        K.box((MS.x0 + MS.x1) / 2, y, 14, MS.x1 - MS.x0, 0.35, 36, { tex: 'concrete', color: '#8a8982' }, { shadow: false });
+        // (the first deck has the ramp's hole in it: x −17…−11.8, z 9…26)
+        if (y === 2.9) {
+          K.box((MS.x0 + MS.x1) / 2, y, 2.5, MS.x1 - MS.x0, 0.35, 13, MSC, { shadow: false });
+          K.box((-11.8 + MS.x1) / 2, y, 17.5, MS.x1 + 11.8, 0.35, 17, MSC, { shadow: false });
+          K.box((MS.x0 + MS.x1) / 2, y, 29, MS.x1 - MS.x0, 0.35, 6, MSC, { shadow: false });
+          K.box(-11.9, y + 0.35, 17.5, 0.2, 0.95, 17, MSP, { shadow: false });
+        } else K.box((MS.x0 + MS.x1) / 2, y, 14, MS.x1 - MS.x0, 0.35, 36, MSC, { shadow: false });
+        for (const z of [-3.9, 31.9]) K.box((MS.x0 + MS.x1) / 2, y + 0.35, z, MS.x1 - MS.x0, 0.95, 0.2, MSP, { shadow: false });
         K.box(MS.x1 - 0.1, y + 0.35, 14, 0.2, 0.95, 36, { tex: 'concrete', color: '#96958d' }, { shadow: false });
         K.box(MS.x1 - 0.1, y - 0.25, 14, 0.24, 0.25, 36, { tex: 'concrete', color: '#6e6d67' }, { shadow: false });
       }
       for (let z = -3; z <= 31; z += 6.8) K.box(MS.x1 - 0.3, 0, z, 0.5, 8.7, 0.5, { tex: 'concrete', color: '#8f8e86' }, { shadow: false });
       K.box(-9, 0, 27, 6, 2.9, 0.3, { tex: 'concrete', color: '#7a7972' }, { shadow: false, rot: 0 });
-      K.box(-8, 1.2, 12, 10, 0.3, 4.2, { tex: 'concrete', color: '#7f7e77' }, { shadow: false, rot: 0 });
+      // (gap sweep) inside it: the rows of columns, the ground slab, the ramp up to the first deck along the back wall,
+      // the blank back wall with the level numbers, the stair cores at both ends, the roof's lamps — through the open
+      // decks the cameras used to see straight out into the fog, and the ramp was a slab hanging in the air
+      {
+        const MSW = { tex: 'concrete', color: '#7c7b74' }, CORE = { tex: 'render_cracked', color: '#8e8c82' }, HCAP0 = { tex: 'concrete', color: '#6e6d67' };
+        for (const x of [-5.9, -11.75]) for (let z = -3; z <= 31; z += 6.8) K.box(x, 0, z, 0.5, 8.7, 0.5, { tex: 'concrete', color: '#8f8e86' }, { shadow: false });
+        K.box(-8.5, 0, 14, 17, 0.02, 36, { tex: 'concrete', color: '#5f5e59' }, { shadow: false });                 // (to x 0: a crack showed under the low wall)
+        K.box(-17.12, 0, 14, 0.25, 9.95, 36.2, MSW, { shadow: false });
+        for (const [y, t] of [[1.6, 'G'], [4.5, 'LEVEL 1'], [7.4, 'LEVEL 2'], [10.3, 'ROOF']]) if (t !== 'ROOF') K.sign(t, -16.98, y, 3.6, 1.6, 0.5, { style: 'council', bg: '#1d5d78', fg: '#ffffff', rotY: 90 });
+        for (const z of [-2.35, 30.35]) { K.box(-15.2, 0, z, 3.6, 11.2, 3.7, CORE, { shadow: false }); K.box(-15.2, 11.2, z, 3.8, 0.15, 3.9, HCAP0, { shadow: false }); }
+        K.box(-13.38, 0, 30.35, 0.05, 2.1, 1.0, { tex: 'metal', color: '#5a6a6a' }, { shadow: false });
+        K.sign('STAIRS', -13.36, 2.4, 30.35, 0.8, 0.25, { style: 'council', bg: '#2e7d4a', fg: '#ffffff', rotY: 90 });
+        const run = 17, rise = 3.23, L = Math.hypot(run, rise), a = Math.atan2(rise, run) / D2R;
+        K.plane(-14.4, 0.02 + rise / 2, 17.5, 4.8, L, { tex: 'concrete', color: '#6e6d67' }, { rot: [-(90 - a), 0, 0], double: true });
+        K.plane(-11.95, 0.02 + rise / 2 + 0.44, 17.58, L, 0.9, MSP, { rot: [0, 90, a], double: true });
+        for (const z of [3, 25]) K.prop('streetlight', -8.5, z, 90, { y: 9.05, lit: false, collide: false });
+      }
       // ground level: a low wall along the edge, the entrance with its boom and the FULL sign
       for (const [z0, z1] of [[-1, 19], [25, 31]]) K.box(-0.5, 0, (z0 + z1) / 2, 0.3, 1.1, z1 - z0, { tex: 'concrete', color: '#8a8982' });
       K.collider(-0.8, -1, -0.2, 19, { h: 3 });
@@ -51446,6 +52545,28 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       for (let x = 13; x < 40; x += 2.2) K.prop('shrub', x, 30.9, 0, { w: 2.1, h: 1.1, dead: x % 3 < 1 });
       for (const x of [3.6, 12.4]) K.prop('bollard', x, 29.7, 0, { variant: 'concrete' });
       K.prop('sign_post', 12.8, 28.9, 180, { style: 'council', text: 'ENTRY\nVISITORS', bg: '#1d5d78', fg: '#ffffff', w: 0.5, h: 0.45 });
+      // (gap sweep) outside the south wall: the grass, the road in running south into the fog with its footpaths, gums
+      // and poles; east of the fence the ground falls away (a raw earth edge under the car park's side). The south
+      // cameras stand out past the wall — there used to be nothing under them.
+      {
+        const GR = { tex: 'grass', color: '#4a5244' };
+        K.box(10, -0.5, 55.2, 60, 0.49, 49.6, GR, { shadow: false });
+        K.box(8, -0.3, 55.1, 10, 0.3, 49.8, { tex: 'bitumen', color: '#3c3e3c' }, { shadow: false });
+        for (const x of [2.1, 13.9]) K.box(x, -0.3, 55.2, 1.8, 0.45, 49.6, 'footpath', { shadow: false });
+        for (let z = 33; z < 80; z += 6) K.box(8, 0.004, z, 0.12, 0.01, 3, { color: '#c8c6bc', roughness: 0.8 }, { shadow: false });
+        for (const [x, z, sc] of [[23.5, 38.5, 0.9], [34.5, 46, 1.0], [-7.5, 41, 0.85], [27, 58, 1.05]]) K.prop('gum_tree', x, z, x * 17, { scale: sc, collide: false });
+        for (const z of [40, 62]) K.prop('power_pole', 15.2, z, 0, { span: 22 });
+        K.prop('streetlight', 0.9, 48, 90, { lit: false, collide: false });
+        K.box(40.21, -5, 43.75, 0.42, 4.99, 72.5, { tex: 'dirt', color: '#5a5446' }, { shadow: false });
+        slab(K, 40.3, 26, 60, 60, [-2.5, -0.5, -4.2, -3.2], { tex: 'grass', color: '#353c32' });
+        slab(K, 40.3, 60, 60, 80, [-4.2, -3.2, -5.2, -4.6], { tex: 'grass', color: '#353c32' });
+        // past the road's blocker Summit Road climbs on east into the fog, the hillside with it
+        slab(K, 56, 1.5, 88, 7.5, [2.6, 6.8, 2.6, 6.8], { tex: 'bitumen', color: '#4a4b48' });
+        slab(K, 60, -14, 88, 1.5, [7.5, 11, 3.07, 6.75], { tex: 'grass', color: '#3a4236' });
+        slab(K, 60, 7.5, 88, 26, [3.07, 6.75, -0.5, 1.8], { tex: 'grass', color: '#353c32' });
+        slab(K, 60, 26, 88, 60, [-0.5, 1.8, -3.2, -1.2], { tex: 'grass', color: '#353c32' });
+        slab(K, 60, 60, 88, 80, [-3.2, -1.2, -4.6, -3.4], { tex: 'grass', color: '#353c32' });
+      }
 
       // ---- the east edge: chain-link, the Summit Road gate (z 1.5–7.5) -------------------------------------------------
       K.collider(40, 7.5, 40.3, 30.4, { h: 2.2 });
@@ -51491,8 +52612,11 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       // (from the car park's own edge: a gap between the two floors would leave the open gate unwalkable)
       K.road(39.95, 1.5, 56, 7.5, { axis: 'x', markings: 'none', footpath: 0, kerb: false, slope: { y0: 0, y1: 2.6 } });
       K.collider(40.3, 1.2, 56, 1.5, { h: 2.5 }); K.collider(40.3, 7.5, 56, 7.8, { h: 2.5 });
-      slab(K, 40.3, -14, 60, 1.5, [2.2, 7.5, 0.1, 2.7], { tex: 'grass', color: '#3a4236' });
-      slab(K, 40.3, 7.5, 60, 26, [0.05, 2.6, -2.5, -0.5], { tex: 'grass', color: '#353c32' });
+      // (the banks meet the road's edges a little below them all the way up: a crack showed under the road)
+      slab(K, 40.3, -14, 56, 1.5, [2.2, 6.5, 0.02, 2.55], { tex: 'grass', color: '#3a4236' });
+      slab(K, 56, -14, 60, 1.5, [6.5, 7.5, 2.55, 3.07], { tex: 'grass', color: '#3a4236' });
+      slab(K, 40.3, 7.5, 56, 26, [0.02, 2.55, -2.5, -0.9], { tex: 'grass', color: '#353c32' });
+      slab(K, 56, 7.5, 60, 26, [2.55, 3.07, -0.9, -0.5], { tex: 'grass', color: '#353c32' });
       for (let x = 42; x < 56; x += 4.5) { K.prop('guardrail', x + 2.2, 1.35, 180, { len: 4.5, y: lerp(0, 2.6, (x + 2.2 - 40.3) / 15.7), collide: false }); }
       K.prop('power_pole', 47, 8.4, 0, { span: 20, y: 1.2 });
       K.prop('rf_sign', 52, 7.9, 180, { variant: 'post', y: lerp(0, 2.6, 11.7 / 15.7) });
@@ -52293,6 +53417,11 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.door({ id: 'c7_nurses:corridor', x: NU.W, z: 3.5, rot: 90, w: 1.2, h: 2.2, style: 'fire', to: 'c7_corridor', entry: 'nurses' });
       // the Ward 3 doors: open doorways onto the dark ward, the leaves propped back; walking through = Ward 3
       K.collider(0, -0.75, NU.W, -0.7, { h: 2.5 });
+      // (gap sweep) the dark ward behind the doorways: its floor, walls and ceiling — past the dark panels in the doorways
+      // the high cameras used to look into nothing
+      annex(K, -0.3, -3.0, NU.W + 0.3, -0.7, H, ['n', 'w', 'e'], { mat: { tex: 'plaster', color: '#2e3230' }, floor: { tex: 'lino', color: '#343833' }, ceil: { tex: 'ceiling_tile', color: '#3c3f3a' } });
+      K.box(NU.W / 2, H, -0.39, NU.W + 0.6, 0.06, 0.62, { tex: 'ceiling_tile', color: '#3c3f3a' }, { shadow: false });
+      for (const x of [-0.35, NU.W + 0.35]) K.box(x, 0, -0.39, 0.1, H, 0.62, { tex: 'plaster', color: '#2e3230' }, { shadow: false });
       for (const [x, w] of NU.doors) {
         K.box(x, 0, -1.25, w + 0.2, 2.3, 0.1, { color: '#0d1110', roughness: 1 }, { shadow: false });
         K.exit({ id: 'c7_nurses:ward' + x, box: [x - w / 2 + 0.05, -0.7, x + w / 2 - 0.05, -0.32], to: 'c7_ward3', entry: 'nurses', sound: 'door', blockedMsg: 'Not that way.' });
@@ -54014,6 +55143,15 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.prop('sign_post', 36.9, 11.3, 0, { style: 'council', text: 'SUMMIT RD\nMAST ACCESS ONLY\nNO THROUGH ROAD', w: 0.8, h: 0.6, post: 2.2 });
       K.examine(39.6, 0.4, 11.3, ['The chain\'s on the ground. The padlock\'s still locked.', 'Somebody cut the chain instead. [beat] Or it just let go.'], { id: 'c8su:chain', r: 1.4 });
       K.examine(36.9, 1.6, 11.0, ['"Summit Road. Mast access only. No through road."', 'No through road. [beat] It only goes up.'], { id: 'c8su:sign', r: 1.3 });
+      // (gap sweep) the hospital car park the gate opens from — its bitumen, the chain-link along its edges, a parked car,
+      // a dead lamp: the gate camera stood over nothing and the apron ended at an edge
+      K.box(45, -6, 26.1, 30, 5.995, 28, { tex: 'bitumen', color: '#5e5e5a' }, { shadow: false });
+      for (const [x0, x1] of [[30, 36.25], [43.75, 51.9], [51.9, 60]]) K.prop('chainlink', (x0 + x1) / 2, 12.2, 0, { len: x1 - x0, h: 2.2, collide: false });
+      for (let z = 12.2; z < 39; z += 6.8) K.prop('chainlink', 30.1, z + 3.4, 90, { len: 6.8, h: 2.2, collide: false });
+      for (let x = 32.5; x < 59; x += 2.6) K.box(x, 0.004, 21, 0.09, 0.01, 4.6, { color: '#c8c6bc', roughness: 0.8 }, { shadow: false });
+      K.prop('hatchback', 48.5, 21.2, 2, { color: '#1f2629' });
+      K.prop('car', 35.1, 21.4, 178, { color: '#6d2622' });
+      K.prop('streetlight', 31, 15.5, 90, { lit: false, collide: false });
 
       // ---- the telco work car on the apron (the tech who couldn't get up the hill) ---------------------------------------
       K.prop('car', 41.6, 2.2, 180, { color: '#e3e1da', variant: 'wagon', plate: 'TEL 4401', hazards: true, name: 'c8su:car' });
@@ -54349,7 +55487,14 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       const dt = bags.g('dirt', { tex: 'dirt', color: '#6d6252' }), vg = bags.g('grass', { tex: 'grass', color: '#56604d' });
       for (const [a, b, c, d] of [[[0, -0.02, 0], [0, -0.02, 34], [-10, -6, 34], [-10, -6, 0]], [[30, -0.02, 34], [30, -0.02, 0], [40, -6, 0], [40, -6, 34]], [[30, -0.02, 0], [0, -0.02, 0], [0, -5, -10], [30, -5, -10]]]) quad(dt, a, b, c, d, 0.4, [0, 1, 0]);
       quad(vg, [0, 0, 20.1], [3, 0, 20.1], [3, 0, 34.2], [0, 0, 34.2], 0.5, [0, 1, 0]); quad(vg, [27, 0, 20.1], [30, 0, 20.1], [30, 0, 34.2], [27, 0, 34.2], 0.5, [0, 1, 0]);
-      K.box(15, -0.06, 40, 8, 0.06, 12, 'bitumen', { shadow: false });
+      // (gap sweep) south of the apron the hilltop falls away with the road coming up: the apron used to end at an edge
+      // over nothing under the apron camera
+      const bt = bags.g('road', { tex: 'bitumen', color: '#4a4b48' });
+      quad(bt, [11, -0.01, 34.2], [19, -0.01, 34.2], [19, -4, 62], [11, -4, 62], 0.4, [0, 1, 0]);
+      quad(vg, [0, 0, 34.2], [11, 0, 34.2], [11, -4, 62], [0, -5, 62], 0.5, [0, 1, 0]);
+      quad(vg, [19, 0, 34.2], [30, 0, 34.2], [30, -5, 62], [19, -4, 62], 0.5, [0, 1, 0]);
+      quad(dt, [0, -0.02, 34], [0, -5, 62], [-10, -11, 62], [-10, -6, 34], 0.4, [0, 1, 0]);
+      quad(dt, [30, -0.02, 34], [40, -6, 34], [40, -11, 62], [30, -5, 62], 0.4, [0, 1, 0]);
       bags.flush(K);
       C8_townLights(K, { cx: 15, cz: 10, y: -58, r0: 60, r1: 150, n: 220, seed: 812, opacity: 0.45 });
       K.exit({ id: 'c8_compound:road', box: [8, 33.5, 22, 34.3], to: 'c8_summit', entry: 'top', sound: 'steps' });
@@ -56652,6 +57797,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.ceiling(OW, -4, W, 0, 2.7, 'ceiling_tile');
       K.wall(OW - 0.075, 0, OW - 0.075, -4.15, 2.7, wallM, { skirting: true });
       K.wall(OW - 0.1, -4.075, W + 0.15, -4.075, 2.7, wallM, { skirting: true });
+      K.wall(W + 0.075, -4.15, W + 0.075, -0.15, 2.7, wallM, { skirting: true });             // (gap sweep: its east side was open)
       K.prop('desk', CS.mon[0], -3.55, 0, { clutter: false, w: 1.6 });
       // (the chair pushed back from the desk: whoever sat here got up in a hurry)
       K.prop('office_chair', CS.mon[0] + 1.35, -2.35, 130, {});
@@ -56675,9 +57821,34 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.prop('poster', 14.2, -4.0, 0, { style: 'notice', text: 'CALL BACKS\nWITHIN 24 HRS', mount: 1.55 });
       K.light('fluoro', 14.5, 2.68, -2, { len: 1.2, diffuser: true, intensity: 6, distance: 7 });
       // ---- outside the glass: the footpath, the road, the facades opposite, bright overcast morning ----------------
-      K.box(W / 2, -0.06, 15, 40, 0.06, 4, { tex: 'footpath', color: '#c9c6bd' }, { shadow: false });
-      K.box(W / 2, -0.08, 20.5, 40, 0.06, 7, { tex: 'bitumen', color: '#5d5f5c' }, { shadow: false });
-      K.box(W / 2, -0.06, 25, 40, 0.06, 2, { tex: 'footpath', color: '#c9c6bd' }, { shadow: false });
+      K.box(W / 2, -0.06, 15, 78, 0.06, 4, { tex: 'footpath', color: '#c9c6bd' }, { shadow: false });
+      K.box(W / 2, -0.08, 20.5, 78, 0.06, 7, { tex: 'bitumen', color: '#5d5f5c' }, { shadow: false });
+      K.box(W / 2, -0.06, 25, 78, 0.06, 2, { tex: 'footpath', color: '#c9c6bd' }, { shadow: false });
+      // (gap sweep) the store is the ground floor of a building on a city street: offices above it, the shops either
+      // side, the block behind them — it used to stand alone, a box on a footpath with the morning sky round it
+      {
+        const UP = { tex: 'render_cracked', color: '#d8d2c4' }, UP2 = { tex: 'brick', color: '#a88e78' }, CAPM = { tex: 'concrete', color: '#b8b3a6' };
+        const GL = { color: '#3c4648', roughness: 0.12, metalness: 0.5 }, MUL = { tex: 'metal', color: '#9aa09c' };
+        K.box(W / 2, 3.18, D + 0.12, W + 0.8, 0.3, 0.14, CAPM, { shadow: false });
+        K.box(W / 2, 3.22, 4.44, W + 0.5, 8.4, 17.48, UP, { shadow: false });
+        for (const [x0, x1, mat] of [[-30, -0.25, UP2], [W + 0.25, 48, UP2]]) {
+          K.box((x0 + x1) / 2, 0, 3.07, x1 - x0, 4.5, 14.74, mat, { shadow: false });
+          K.box((x0 + x1) / 2, 4.5, 4.44, x1 - x0, 7.12, 17.48, mat, { shadow: false });
+        }
+        K.box(W / 2, 11.62, 4.44, 78.4, 0.4, 17.9, CAPM, { shadow: false });
+        for (const y of [4.3, 7.3]) {
+          K.box(W / 2, y + 0.9, D + 0.2, W - 0.6, 1.6, 0.06, GL, { shadow: false });
+          for (let x = 0.3; x <= W - 0.2; x += 2.9) K.box(x, y + 0.9, D + 0.24, 0.08, 1.6, 0.06, MUL, { shadow: false });
+        }
+        K.box(W / 2, 10.2, D + 0.2, W - 0.6, 1.1, 0.06, GL, { shadow: false });
+        for (const cx of [-15, -5.2, W + 5.2, W + 15]) for (const y of [5.6, 8.5]) K.box(cx, y, D + 0.2, 7.4, 1.5, 0.06, GL, { shadow: false });
+        for (const x of [-0.28, -8.55, W + 0.28, W + 8.55]) K.box(x, 0, D - 1.2, x === -0.28 || x === W + 0.28 ? 0.36 : 0.3, 4.5, 2.8, CAPM, { shadow: false });
+        for (const [x0, x1] of [[-30, -16.7], [W + 16.7, 48]]) K.box((x0 + x1) / 2, 0, 11.81, x1 - x0, 4.5, 2.74, UP2, { shadow: false });
+        K.prop('shopfront', -4.45, D + 0.12, 0, { w: 8, name: 'THE DAILY GRIND', variant: 'shop', lit: true, awning: true });
+        K.prop('shopfront', -12.65, D + 0.12, 0, { w: 8, name: 'DRY CLEANING', variant: 'shop', lit: true, awning: true });
+        K.prop('shopfront', W + 4.45, D + 0.12, 0, { w: 8, name: 'CITY POST', variant: 'shop', lit: true, awning: true });
+        K.prop('shopfront', W + 12.65, D + 0.12, 0, { w: 8, name: 'SHOE REPAIRS · KEYS', variant: 'repair', lit: true, awning: true });
+      }
       for (const x of [-1, 5, 13, 19]) K.plane(x, 0.0 - 0.045, 20.5, 2.4, 0.14, { color: '#e8e6dc', roughness: 0.6 }, { rot: [-90, 0, 0] });
       [['bank', 'CITY BANK'], ['pharmacy', 'CHEMIST'], ['shop', 'NEWS & LOTTO'], ['shop', 'SUSHI TRAIN']].forEach(([v, n], i) => K.prop('shopfront', -4 + i * 8.4, 26.2, 180, { w: 8, name: n, variant: v, lit: true, awning: true }));
       K.plane(W / 2, 11, 27.5, 60, 22, cityTex(), { rotY: 180, emissive: true, emissiveIntensity: 0.85 });
@@ -57148,6 +58319,15 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.box(RD.door[0], 0.9, 6.4, 5, 0.05, 0.06, { tex: 'metal', color: '#c9cfcc' });
       K.box(RD.door[0], H - 0.02, 5.5, 5, 0.02, 1.9, { tex: 'ceiling_tile', color: '#f4f4f0' }, { shadow: false });
       K.light('fluoro', RD.door[0], H - 0.03, 5.5, { len: 1.2, intensity: 5, distance: 6, real: false });
+      // (gap sweep) the ward round the room for the door camera outside the cut-away wall: floor, ceiling and walls —
+      // past the room's corners and over its ceiling it used to look into the sky
+      { const CF = { tex: 'lino_hospital', color: '#b9bdb2' }, CC = { tex: 'ceiling_tile', color: '#f0f0ea' };
+        K.box(3.2, -0.03, 7.1, 8.4, 0.025, 5.0, CF, { shadow: false });
+        for (const [x0, x1] of [[-1, -0.16], [W + 0.16, W + 1]]) { K.box((x0 + x1) / 2, -0.03, 1.8, x1 - x0, 0.025, 5.6, CF, { shadow: false }); K.box((x0 + x1) / 2, H + 0.01, 1.8, x1 - x0, 0.05, 5.6, CC, { shadow: false }); }
+        K.box(3.2, H + 0.01, 7.1, 8.4, 0.05, 5.0, CC, { shadow: false });
+        for (const x of [-1.05, W + 1.05]) K.box(x, 0, 4.3, 0.1, H + 0.06, 10.6, wm, { shadow: false });
+        for (const [x0, x1] of [[-1.1, -0.1], [W + 0.1, W + 1.1]]) K.box((x0 + x1) / 2, 0, -1.05, x1 - x0, H + 0.06, 0.1, wm, { shadow: false });   // (not across the window's view)
+        for (const x of [-1.0, W + 1.0]) K.box(x, 0.9, 5.5, 0.04, 0.05, 6, { tex: 'metal', color: '#c9cfcc' }, { shadow: false }); }
       // (the door stands open, folded back flat against the corridor wall; just the frame here)
       for (const sx of [-1, 1]) K.box(RD.door[0] + sx * 0.6, 0, D + 0.075, 0.1, 2.2, 0.2, { color: '#8a6a4a', roughness: 0.6 });
       K.box(RD.door[0], 2.15, D + 0.075, 1.3, 0.1, 0.2, { color: '#8a6a4a', roughness: 0.6 });

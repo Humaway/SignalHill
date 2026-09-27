@@ -1119,8 +1119,9 @@
     await G.wait(0.5);
     // (never on him in the doorway)
     const clear = () => inHut() && Math.hypot(P().x - dx, P().z - dz) > 1.4;
+    // (any let-go after the lead-in holds off until he has left the hut: the trigger never replays the build-up at once)
     if (!(await G.until(() => (C8_calm(10) && clear()) || !inHut() || touched(), { timeout: 5 })) || !clear() || touched() || !G.scareReady) {
-      if (touched()) await standDown();
+      await standDown();
       return;
     }
     // 2. SLAM — the door, shut behind him; the tube dies with it
@@ -2321,7 +2322,8 @@
         });
         return 'callback';
       } finally {
-        C8_glintOff(e);
+        // (a slash frozen mid-wind-up when The Close ends lets go, so the arm isn't left raised into 8-3)
+        C8_glintOff(e); C8_swingHold(e, 99, 0);
         if (C8.beam) { C8.beam.cone.visible = false; C8.beam.disc.visible = false; }
         try { const L = World.light('c8t:beam'); if (L) L.on(false); } catch (err) { /* world */ }
       }

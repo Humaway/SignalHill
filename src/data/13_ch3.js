@@ -40,6 +40,11 @@
   const FN = Tex.fonts;
   // transient presentation state (never saved; what must survive lives in S)
   const C3 = { boss: null, fuseUI: false, amb: 0, stairsBeat: false };
+  // the jump scares' triggers: one scare beat at a time (a trigger box re-entered while its beat still runs — the yard's
+  // breath waiting for the gate shot — never starts a second one; a beat is never longer than 30 s), and never with
+  // something awake and close to him (a scare is never a fight's cover: the id waits for the next pass)
+  const C3_calm = () => { try { const t = Enemies.nearestThreat(Player.pos, { aware: true }); return !t || t.dist > 8; } catch (e) { return true; } };
+  function C3_solo(fn) { return async (G) => { if ((C3.scareAt && Script.time - C3.scareAt < 30) || !C3_calm()) return; C3.scareAt = Script.time; try { await fn(G); } finally { C3.scareAt = 0; } }; }
 
   // ---------------------------------------------------------------------------------------------------------------
   // The exchange's six circuits (spec §9 3-4). S.done['c3:circ'] lists the switched-on ones; BASEMENT runs at first.
@@ -724,6 +729,24 @@
     x.fillStyle = '#f2eee2'; x.save(); x.translate(250, 196); x.rotate(0.4); x.fillRect(0, 0, 9, 14); x.restore();      // a fallen letter
     age(x, w, h, r, 0.6);
   });
+  // JUMP SCARE c3:greeter (the Fog world, the foyer, the first time through, on the way to the hall door) — the cut to
+  // the low shot from the glass doors: the dusty desk, the stopped clock, the 1961 staff photo with every face faded …
+  // and under it, a few steps from him, where there was nobody, a store rep in a fresh teal polo, lanyard on his chest,
+  // smiling far too wide, watching him. The stab; a beat; the wall is bare again. ("Ring for attention. Nobody
+  // comes.") Plays in its shot or not at all (the id waits).
+  async function C3_greeterScare(G) {
+    if (!G.scareReady || done('scare:c3:greeter') || World.room !== 'c3_foyer' || S.outage) return;
+    const inLow = () => { const c = Cam.current; return !!(c && c.id === 'c3_foyer:low'); };
+    if (!(await G.until(inLow, { timeout: 3 })) || !G.scareReady) return;
+    const g = G.glimpse({ kind: 'rep', pos: [6.15, 0.62], lookAt: 'player', expr: 'smile_huge', anim: 'stand_still', dur: 1.3, onlyIfOnScreen: true, wait: 2, rig: { seed: 61 } });
+    await G.until(() => g.shown || g.done, { timeout: 3 });
+    if (!g.shown || !G.scareReady) { g.remove(); return; }
+    // (the grey from the glass doors catches his face — the smile reads from the doors)
+    const fill = G.addLight('point', { pos: [6.0, 1.85, 1.75], color: '#b4c6c2', intensity: 1.8, distance: 3.2 });
+    await G.scare({ id: 'c3:greeter', kind: 'stab', shake: 0.3, flash: 0.22, heart: 2.5 });
+    await G.until(() => g.done, { timeout: 2 });
+    if (fill) fill.free();
+  }
   defineRoom({
     id: 'c3_foyer', name: 'FOYER', area: 'SIGNAL HILL TRUNK EXCHANGE', chapter: 3, outdoor: false, surface: 'tile', ambient: 'hum',
     fog: { density: 0.032, color: '#3b4543' },
@@ -804,6 +827,9 @@
       K.examine(2.6, 1.2, 5.45, 'A candlestick phone and a headset under glass. "A proud history of service." [beat] The dust is on the inside.', { id: 'c3fy:case', r: 1.4 });
       K.examine(4.2, 1.5, 0.55, 'GROUND: OPERATORS\' HALL. RECORDS. CANTEEN. [beat] BASEMENT: PLANT. FUSES. CABLE VAULT.', { id: 'c3fy:board', r: 1.3 });
       K.examine(FY.hallX, 2.4, 0.6, 'The clock stopped at twenty to three.', { id: 'c3fy:clock', r: 1.4 });
+      // JUMP SCARE c3:greeter — on the way to the hall door the first time, someone under the staff photo (C3_greeterScare)
+      K.trigger([0.4, 0.7, 5.6, 2.62], C3_solo(C3_greeterScare), { id: 'c3_foyer:greeter', once: false, world: 'fog',
+        when: () => S.chapter === 3 && !done('cs:3-1') && !done('scare:c3:greeter') });
       K.examine(7.35, 0.4, 6.1, 'Phone books. Nineteen eighty-six. Tied up with string to go somewhere, and never went.', { id: 'c3fy:books', r: 1.1 });
       K.examine(1.4, 0.8, 7.2, 'Three chairs for visitors. Somebody left their umbrella hooked on one.', { id: 'c3fy:chairs', r: 1.3 });
     },
@@ -928,6 +954,72 @@
     // close static at Wai's board
     { id: 'c3_hall:wai', vol: [5.8, 4.66, 9.6, 7.8], pri: 1, type: 'static', pos: [13.9, 2.2, 7.95], target: [6.9, 1.05, 5.1], fov: 'fit' },
   ];
+  // JUMP SCARE c3:board (the Fog world, the dark hall after 3-1, on the way down the centre aisle to the basement) — on
+  // row 2's fourth run of boards (x 22.6…29.8, facing the aisle), dead since 1987: one lamp blinks on. Faint voices leak
+  // from a headset on its hook. Then every lamp on the board lights at once with a hail of relays, amber light thrown
+  // across the aisle onto him — and a moment later it's dark again, as dead as before.
+  const FB = { x: 26.2, z: 4.315, n: 8 };
+  function C3_flareBoard(K) {
+    const L = FB.n * 0.9;
+    // the lamp caps of one position (the switchboard prop's layout: 20 columns × 9 rows on a 256 × 320 field), most lit
+    const tex = C3_tex('flarelamps', 256, 320, (x, w, h, r) => {
+      x.fillStyle = '#000'; x.fillRect(0, 0, w, h);
+      for (let row = 0; row < 9; row++) for (let c = 0; c < 20; c++) {
+        if (r() < 0.22) continue;
+        const cx = 9 + c * 12.3 + 1, cy = 16 + row * 34 + 1, k = 0.65 + r() * 0.35;
+        const gr = x.createRadialGradient(cx, cy, 0, cx, cy, 6.5);
+        gr.addColorStop(0, `rgba(255,244,214,${k})`); gr.addColorStop(0.35, `rgba(255,190,110,${k * 0.85})`); gr.addColorStop(1, 'rgba(255,150,60,0)');
+        x.fillStyle = gr; x.fillRect(cx - 7, cy - 7, 14, 14);
+      }
+    }, { wrap: true });
+    tex.repeat.set(FB.n, 1);
+    const mat = new THREE.MeshBasicMaterial({ map: tex, color: '#ffe2b0', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: true });
+    // the board's jack field: the upright (y 0.78, 0.33 behind the board's line, tilted back 6°), 1 m tall — a hair in front
+    const g = new THREE.Group(); g.name = 'c3h_flare';
+    const up = new THREE.Group(); up.position.set(0, 0.78, -0.33); up.rotation.x = -6 * D2R; g.add(up);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(L, 1.0), mat); m.position.set(0, 0.57, 0.064); m.renderOrder = 4; m.userData.ownedGeo = true; up.add(m);
+    g.position.set(FB.x, 0, FB.z);
+    g.visible = false;
+    K.mesh(g, { static: false, name: 'c3h_flare' });            // (untagged: an Outage swap never shows it; C3_boardScare does)
+    // the glow of the lit lamps as the long shot down the aisle sees the board (edge-on, its jack field hides behind the
+    // positions' uprights): a scatter of halos over the field — and the one lamp that comes on first (all off till then)
+    const hr = U.rng(4077);
+    for (let i = 0; i < 18; i++) {
+      const lx = -L / 2 + 0.2 + (i + hr() * 0.6) * ((L - 0.4) / 18), ly = 1.12 + hr() * 0.62, lz = FB.z - 0.3 + (ly - 1.35) * -0.1;
+      K.light('led', FB.x + lx, ly, lz + 0.03, { color: '#ffcf8a', size: 0.01, intensity: 3.4, halo: 0.3 + hr() * 0.14, haloOpacity: 0.8, name: 'c3h:fl' + i, on: false, world: 'fog' });
+    }
+    K.light('led', FB.x - 2.05, 1.66, FB.z - 0.33, { color: '#ffcf8a', size: 0.012, intensity: 3.2, halo: 0.22, haloOpacity: 0.7, blink: 0.9, duty: 0.55, name: 'c3h:lone', on: false, world: 'fog' });
+  }
+  async function C3_boardScare(G) {
+    if (!G.scareReady || done('scare:c3:board') || World.room !== 'c3_hall' || S.outage) return;
+    const ov = G.obj('c3h_flare'), lone = G.light('c3h:lone');
+    const fls = []; for (let i = 0; i < 18; i++) { const l = G.light('c3h:fl' + i); if (l) fls.push(l); }
+    const lampP = [FB.x - 2.05, 1.66, FB.z - 0.3];
+    let fl = null;
+    try {
+      // one lamp, blinking, on a board that's been dead for forty years; voices in a headset nobody's wearing
+      if (lone) lone.on(true);
+      G.sfx('click', { pos: lampP, vol: 0.55 });
+      await G.wait(0.7);
+      G.sfx('murmur_tethered', { pos: [FB.x - 2.05, 1.2, FB.z + 0.3], dur: 2.2, vol: 0.45 });
+      await G.wait(2.1);
+      if (World.room !== 'c3_hall' || !G.scareReady) return;
+      // every lamp at once, the relays going off like hail, amber light thrown across the aisle
+      if (ov) ov.visible = true;
+      for (const l of fls) l.on(true);
+      fl = G.addLight('point', { pos: [FB.x - 0.6, 1.5, FB.z + 1.1], color: '#ffc47a', intensity: 7, distance: 8.5 });
+      for (let k = 0; k < 8; k++) G.sfx('click', { pos: [FB.x - 3.4 + k * 0.95, 1.5, FB.z - 0.25], vol: 0.85, delay: k * 0.035 });
+      G.sfx('plug', { pos: [FB.x, 1.3, FB.z], vol: 0.8, rate: 0.8 });
+      await G.scare({ id: 'c3:board', kind: 'stab', shake: 0.35, flash: 0.3, heart: 4 });
+      await G.wait(0.3);
+      G.sfx('clunk', { pos: [FB.x, 1.2, FB.z], vol: 0.6 });
+    } finally {
+      if (ov) ov.visible = false;
+      for (const l of fls) l.on(false);
+      if (fl) fl.free();
+      if (lone) lone.on(false);
+    }
+  }
   defineRoom({
     id: 'c3_hall', name: "OPERATORS' HALL", area: 'SIGNAL HILL TRUNK EXCHANGE', chapter: 3, outdoor: false, surface: 'lino', ambient: 'hum',
     fog: { density: 0.026, color: '#39423f' }, outageFog: { density: 0.03, color: '#17312e' },
@@ -966,6 +1058,10 @@
       dadoRun(0, 14, 0, 0, [[14 - HL.fdZ - 0.98, 14 - HL.fdZ + 0.98]]);
       // ---- the switchboards ---------------------------------------------------------------------------------------------
       C3_rows(K, { waiLit: waiAt() !== 'lost' });
+      // JUMP SCARE c3:board — a dead board that lights up, every lamp at once (hidden until C3_boardScare)
+      C3_flareBoard(K);
+      K.trigger([21.2, 4.7, 23.2, 8.6], C3_solo(C3_boardScare), { id: 'c3_hall:flare', once: false, world: 'fog',
+        when: () => S.chapter === 3 && done('cs:3-1') && !flag('c3_fused') && !done('scare:c3:board') });
       // Wai's stool and the one beside it (where Aidan sits in 3-1)
       K.prop('stool', HL.wai[0], HL.wai[1], 180, { variant: 'operator' });
       K.prop('stool', HL.stool2[0], HL.stool2[1], 160, { variant: 'operator', name: 'c3h_stool2' });
@@ -2315,7 +2411,7 @@
       K.prop('chainlink', 10, 0.1, 0, { len: 20, h: 2.4, barbed: true });
       K.prop('chainlink', 19.9, 5, -90, { len: 10, h: 2.4, barbed: true });
       K.prop('chainlink', 0.1, 1.5, 90, { len: 3, h: 2.4, barbed: true });
-      K.prop('chainlink', 0.1, 8.6, 90, { len: 3.2, h: 2.4, barbed: true });
+      K.prop('chainlink', 0.1, 8.6, 90, { len: 3.2, h: 2.4, barbed: true, name: 'c3yd_fenceS' });   // (named: C3_yardScare shakes it)
       K.collider(0, -0.1, 20, 0.3, { h: 2.6 }); K.collider(19.7, 0, 20.1, 10, { h: 2.6 });
       K.collider(-0.1, 0, 0.3, YD.gateZ - 2.0, { h: 2.6 }); K.collider(-0.1, YD.gateZ + 2.0, 0.3, 10, { h: 2.6 });
       const open = flag('c3_bossDone');
@@ -2384,6 +2480,9 @@
       // (the trigger sits in the gate's mouth, in front of the exit box: an exit whose when() is false is a blocker, so a
       // trigger inside it could never be entered)
       K.trigger([0.3, YD.gateZ - 1.9, 1.3, YD.gateZ + 1.9], (G) => C3_toWireLane(G), { id: 'c3_yard:out', once: false, when: () => flag('c3_bossDone') && S.chapter === 3 });
+      // JUMP SCARE c3:yardgate — on the way to the open gate, something hits the fence beside it from outside (C3_yardScare)
+      K.trigger([2.6, 0.3, 6.8, 7.4], C3_solo(C3_yardScare), { id: 'c3_yard:gateScare', once: false,
+        when: () => S.chapter === 3 && flag('c3_bossDone') && !done('scare:c3:yardgate') && !C3.leaving });
       K.exit({ id: 'c3_yard:lane', box: [-1.2, YD.gateZ - 1.9, 0.25, YD.gateZ + 1.9], to: 'c4_wirelane', entry: 'yard', when: () => S.chapter >= 4 && !!ROOMS.c4_wirelane, blockedMsg: null, mapMark: false });
       // ---- examine --------------------------------------------------------------------------------------------------
       K.examine(8.2, 1.2, 7.4, ['The old lines truck. "LINES 7" stencilled on the door.', 'Ladders on the roof rack, a flask on the dash. [beat] Somebody\'s whole day, parked.'], { id: 'c3yd:truck', r: 2.2 });
@@ -2400,6 +2499,42 @@
       }
     },
   });
+  // JUMP SCARE c3:yardgate (the Fog world, after the boss: "Air. The gate's open.") — on the way to the open gate, heavy
+  // breathing somewhere out past the fence; then, as the gate's own shot has him, a Reach hits the chain-link beside the
+  // gate from the lane side (the panel by the building, left of him in that shot), flushed red, its long arms at the
+  // wire, the whole panel bellying in and rattling — and it's gone back into the fog, leaving him the open gate to walk
+  // through. (Harmless: a glimpse behind the fence. The breath waits for the gate shot; walking back up the yard calls
+  // it off and keeps the id for the next time.)
+  async function C3_yardScare(G) {
+    if (!G.scareReady || done('scare:c3:yardgate') || World.room !== 'c3_yard' || C3.leaving) return;
+    const F = G.obj('c3yd_fenceS'), F0 = F ? F.position.clone() : null;
+    const HIT = [0.1, 1.3, 8.2];
+    const inGateShot = () => { const c = Cam.current; return !!(c && c.id === 'c3_yard:gate'); };
+    const gone = () => World.room !== 'c3_yard' || C3.leaving || !Player.pos || Player.pos.x > 9;
+    let breath = null;
+    try {
+      breath = G.sfx('reach_breath', { loop: true, pos: [-1.9, 1.7, 8.6], vol: 0.85, intensity: 0.95 });
+      await G.wait(1.2);
+      if (!(await G.until(() => inGateShot() || gone(), { timeout: 20 }))) return;
+      if (gone() || !G.scareReady) return;
+      await G.wait(0.25);                               // (the cut has landed)
+      if (gone() || !G.scareReady) return;
+      const g = G.glimpse({ kind: 'reach', pos: [-0.74, 8.15], yaw: 90, lookAt: 'player', anim: 'brace', dur: 0.95, fadeOut: 0.5 });
+      if (g.actor) { try { g.actor.setTint('#8a1a10', 0.5, { skin: true }); } catch (e) { /* rig */ } }
+      G.sfx('pound', { n: 2, pos: HIT, vol: 1.0 });
+      G.sfx('roller', { dur: 0.8, pos: HIT, vol: 1.0 });
+      const hit = G.scare({ id: 'c3:yardgate', kind: 'slam', shake: 0.45, flash: 0.3, heart: 4 });
+      // the panel bellies in toward him and rattles itself still
+      for (let k = 0; k < 9 && F && F0; k++) { F.position.x = F0.x + (k % 2 ? -0.025 : 0.06) * (1 - k / 9); await G.wait(0.055); }
+      if (F && F0) F.position.copy(F0);
+      await hit;
+      if (breath && breath.stop) { breath.stop(1.2); breath = null; }
+      await G.wait(0.9);
+    } finally {
+      if (F && F0) F.position.copy(F0);
+      if (breath && breath.stop) breath.stop(0.4);
+    }
+  }
   // the yard gate → CHAPTER CARD "CUSTOMER CARE" (G.startChapter(4) goes to c4_wirelane:yard)
   async function C3_toWireLane(G) {
     if (S.chapter !== 3 || C3.leaving) return;
@@ -2599,7 +2734,8 @@
     W.look(null); if (W.raw) W.raw.eyes('down');
     await G.say('WAI', 'Mm. [beat] Power\'s going in and out. If you want anything else from this place, I need the frame room lit. Fuse room\'s in the basement. Mind the stairs.');
     await G.wait(0.5);
-    G.stopMusic(2);
+    // (no stopMusic: the Tomorrow phrase ends by itself — with the lines clicked through, a stop here faded it out
+    // mid-phrase)
     // state (plain statements)
     if (!G.has('jumper_tool')) G.give('jumper_tool', 1, { silent: true });
     if (board && board.userData.setLamp) board.userData.setLamp('27', false);
@@ -2805,7 +2941,8 @@
     W.look(G.aidan);
     await G.say('WAI', 'Your mate came by, by the way. Big lad, loud. Went down to the call centre. Said he could hear phones.');
     await G.wait(0.8);
-    G.stopMusic(2.5);
+    // (no stopMusic: the Line motif ends by itself — with the lines clicked through, a stop here faded it out
+    // mid-phrase)
     // state (plain statements)
     A.place(15.6, 2.4, 160); A.pose('idle');
     if (A.raw) { A.raw.idleLife = true; A.raw.posture = Math.max(A.raw.posture || 0, 0.28); A.raw.lookAt(null); }

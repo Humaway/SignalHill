@@ -45,6 +45,11 @@
   const isPad = () => { try { return Input.lastDevice === 'gamepad'; } catch (e) { return false; } };
   // transient presentation state (never saved): fog pushes, the chase handles, looping room sounds
   const C2 = { fog: null, fogTo: null, lastCam: null, chaseWalls: [], tick: null, hum: null, pursuer: null };
+  // the jump scares' triggers: one scare beat at a time (a trigger box re-entered while its beat still runs — the
+  // lookout waiting for its shot, the porch's dark — never starts a second one; a beat is never longer than 12 s), and
+  // never with something awake and close to him (a scare is never a fight's cover: the id waits for the next pass)
+  const C2_calm = () => { try { const t = Enemies.nearestThreat(Player.pos, { aware: true }); return !t || t.dist > 8; } catch (e) { return true; } };
+  function C2_solo(fn) { return async (G) => { if ((C2.scareAt && Script.time - C2.scareAt < 12) || !C2_calm()) return; C2.scareAt = Script.time; try { await fn(G); } finally { C2.scareAt = 0; } }; }
 
   // ---------------------------------------------------------------------------------------------------------------
   // Canvas textures (drawn once, shared, never disposed)
@@ -495,6 +500,21 @@
       else railSeg(K, [a, yf(a), z], [b, yf(b), z], { ends: o.ends && (i === 0 || i === n - 1), variant: o.variant });
     }
   }
+  // JUMP SCARE c2:lookout (Fog world, the first hairpin, H1 — the lookout bend) — the cut to the high shot over the
+  // hairpin as he comes round from segment A, and there's someone standing on the inside of the bend where the road
+  // folds back: hunched, in a cardigan, facing him, its head turning after him. The stab lands on the cut; a beat
+  // later it isn't there. (A trigger in the hairpin; the id waits for a pass where the figure actually comes into the
+  // shot — segment A's lens only ever showed it as a speck in the fog.)
+  async function C2_lookoutScare(G) {
+    if (!G.scareReady || S.done['scare:c2:lookout'] || S.outage) return;
+    // (only once the hairpin's own high shot has him: from segment A's lens the rail is a speck in the fog)
+    const inH1 = () => { const c = Cam.current; return !!(c && c.id === 'c2_hilltoprd:h1'); };
+    if (!(await G.until(inH1, { timeout: 5 })) || !G.scareReady) return;
+    const g = G.glimpse({ kind: 'tethered', pos: [42.2, -3.4], lookAt: 'player', dur: 1.7, fadeOut: 0.5, onlyIfOnScreen: true, wait: 4, def: { cardigan: '#7a6a86' } });
+    await G.until(() => g.shown || g.done, { timeout: 5 });
+    if (!g.shown || !G.scareReady || !C2_calm()) { g.remove(); return; }
+    await G.scare({ id: 'c2:lookout', kind: 'stab', vol: 0.9, shake: 0.25, flash: 0.2, heart: 3 });
+  }
   function railRunZ(K, z0, z1, x, yf, side = 1, o = {}) {
     const n = Math.max(1, Math.round(Math.abs(z1 - z0) / 4));
     for (let i = 0; i < n; i++) {
@@ -747,6 +767,8 @@
       K.box(48, GY - 0.05, -44, 8, 0.05, 12, 'bitumen', { shadow: false });
       // Luka's call 2 rings at the village gate
       K.trigger([43.8, -34, 52.2, -24], (G) => G.call('luka2'), { id: 'c2_hilltoprd:call2' });
+      // JUMP SCARE c2:lookout — round the first hairpin, someone standing on the inside of the bend (C2_lookoutScare)
+      K.trigger([40.4, -3.0, 47.6, 8.2], C2_solo(C2_lookoutScare), { id: 'c2_hilltoprd:lookout', once: false, world: 'fog', when: () => S.chapter === 2 && !S.done['scare:c2:lookout'] });
     },
     // at the lookout the fog thins a little while that shot holds (the view over the edge; the Prologue's trick)
     onUpdate(dt) { const c = Cam.current; C2.fogTo = c && c.id === 'c2_hilltoprd:h1' ? 0.032 : 0.05; fogStep(dt, null); },
@@ -1253,6 +1275,9 @@
       // the loop broken: the Outage lifts on the way up, then the chapter card
       K.trigger([0.8, -15.5, 7.2, -11.2], (G) => liftOnTheWayUp(G), { id: 'c2_crescent:lift', once: false, world: 'outage', when: () => S.chapter === 2 && flag('c2_loopBroken') && !World.outageBusy });
       K.trigger([0, -31.9, 8, -29.4], (G) => toTheExchange(G), { id: 'c2_crescent:up', once: false, when: () => S.chapter === 2 && flag('c2_loopBroken') });
+      // JUMP SCARE c2:porch — the Outage loop, the north side between Units 7 and 8: the lights die round him (C2_porchScare)
+      K.trigger([33.6, -2.2, 37.4, 8.0], C2_solo(C2_porchScare), { id: 'c2_crescent:porch', once: false, world: 'outage',
+        when: () => S.chapter === 2 && inLoop() && !World.outageBusy && !S.done['scare:c2:porch'] });
 
       // ---- Unit 9's lockbox, the chase blockers --------------------------------------------------------------------------
       { const [lx, lz] = U9F.p(-2.55, 0.12); K.prop('key_lockbox', lx, lz, U9F.rot, { y: 0.15, mount: 1.25, code: S.done['c2:lockbox'] ? '1947' : '0000' });
@@ -1342,6 +1367,46 @@
     S.flags.c2_loopN = loopN() + 1;
     G.sfx('dialup', { dur: 1.2, vol: 0.35 });
     await G.goto('c2_crescent', 'gate', { sound: 'steps' });
+  }
+  // JUMP SCARE c2:porch (the Outage loop, the north side of the Crescent, between Units 7 and 8) — every light round him
+  // dies at once, the red porch lights and the island's glow with a crackle; in the dark, a whisper right at his
+  // shoulder; the lights stutter back — and one of them is standing in the road in front of him, close enough to touch.
+  // Another blink, and it's gone.
+  async function C2_porchScare(G) {
+    if (!G.scareReady || S.done['scare:c2:porch'] || !inLoop() || World.outageBusy || World.room !== 'c2_crescent') return;
+    const near = (l, r) => { const p = Player.pos; return !!(l.pos && p && Math.hypot(l.pos.x - p.x, l.pos.z - p.z) < r); };
+    const off = [];
+    const relight = (dur) => { try { if (off.length) World.lightsOn({ dur, filter: (l) => off.includes(l) }); } catch (e) { /* room gone */ } };
+    let g = null;
+    try {
+      await G.lightsOut({ dur: 0.2, filter: (l) => { if (!near(l, 20)) return false; off.push(l); return true; } });
+      {
+        const p = Player.pos, yaw = Player.actor ? Player.actor.root.rotation.y : -Math.PI / 2;
+        G.sfx('whisper', { pos: [p.x + Math.cos(yaw) * 0.4, p.y + 1.62, p.z - Math.sin(yaw) * 0.4], dur: 1.3, vol: 0.9 });
+      }
+      await G.wait(1.5);
+      if (World.room !== 'c2_crescent' || !S.outage || !G.scareReady || !C2_calm()) { relight(0.4); return; }
+      // in the road ahead of him, facing him (where he's heading now, on the road or the footpath)
+      const p = Player.pos, yaw = Player.actor ? Player.actor.root.rotation.y : -Math.PI / 2;
+      const gx = clamp(p.x + Math.sin(yaw) * 2.8, 1.2, 58.8), gz = clamp(p.z + Math.cos(yaw) * 2.8, -1.6, 7.4);
+      g = G.glimpse({ kind: 'tethered', pos: [gx, gz], lookAt: 'player', dur: 3, def: { cardigan: '#4c525e' } });
+      // the first light back is right over it: red, the porch-light red, on the shell over its face
+      const glow = G.addLight('point', { pos: [gx + (p.x - gx) * 0.25, 2.2, gz + (p.z - gz) * 0.25 + 0.3], color: '#ff3a26', intensity: 3.4, distance: 4.8 });
+      G.sfx('plastic', { pos: [gx, 1.1, gz], vol: 0.8, dur: 0.5, dens: 1.2 });            // its packaging crackles
+      relight(0.12);
+      await G.scare({ id: 'c2:porch', kind: 'screech', shake: 0.4, flash: 0.35, heart: 4 });
+      await G.wait(0.45);
+      // a blink — and it's gone
+      if (glow) glow.on(false);
+      await G.lightsOut({ dur: 0.04, filter: (l) => off.includes(l) });
+      if (g) { g.remove(); g = null; }
+      if (glow) glow.free();
+      await G.wait(0.18);
+      relight(0.1);
+    } finally {
+      if (g) g.remove();
+      if (World.room === 'c2_crescent' && S.outage) relight(0.3);
+    }
   }
   // after the pendant: the Outage lifts on the way up Exchange Road
   async function liftOnTheWayUp(G) {
@@ -1637,13 +1702,15 @@
       G2.sfx('click', { vol: 0.6 }); await G2.wait(0.6);
       G2.sfx('beep', { vol: 0.4 }); await G2.wait(0.7);
       if (pt && pt.userData.setBlink) pt.userData.setBlink(false);
-      G2.music('tomorrow', { clipped: true, vol: 0.45 });
+      // (the whole phrase, not the clipped one: it resolves on the close-up as the machine beeps off — ~8.5 s from here,
+      // the line ~7 s + the beep + the hold below; nothing stops it, it rings out into play)
+      G2.music('tomorrow', { vol: 0.45 });
       await G2.say('ANSWERING MACHINE (phone)', 'This is a courtesy message regarding case one-one-eight, two-two-three-one. Your callback has been scheduled for: tomorrow.');
       S.done['c2:machine'] = true;
       G2.track('F', 1, 'unit9 answering machine');
       if (pt && pt.userData.setCount) pt.userData.setCount(0);
       G2.sfx('beep', { vol: 0.4 });
-      await G2.wait(1.4);
+      await G2.wait(2.0);
       G2.camRelease();
     }, { control: false, letterbox: false, skippable: true, name: 'c2:machine' });
   }
@@ -1674,6 +1741,48 @@
   async function leaveUnit9(G) {
     if (!flag('c2_modemIn') && !S.outage) { await G.think('The modem first. That\'s what I came for.'); return; }
     await G.goto('c2_crescent', 'unit9', { sound: 'door' });
+  }
+  // JUMP SCARE c2:u9door (Fog world, after the third restart, before 2-2) — back out in her hall (the hall shot looks
+  // down it at the front door): the clock stops. A held breath of silence. Then three fists on the front door, the
+  // door jumping in its frame with each one; then nothing, and the clock starts again. (When he opens it: 2-2, the
+  // tall figure at the end of the path.)
+  async function C2_frontDoorScare(G) {
+    if (!G.scareReady || S.done['scare:c2:u9door'] || World.room !== 'c2_unit9') return;
+    const d = G.door('c2_unit9:front'), rec = d && d.rec;
+    const DOOR = [4.0, 1.35, 8.1];
+    // each blow jumps the door in its frame and lets the grey from the path in round its edges for an instant
+    let leak = null;
+    const jolt = async (a) => {
+      G.sfx('pound', { n: 1, pos: DOOR, vol: 1.0 });
+      if (leak) leak.set({ intensity: 3.2 });
+      if (rec && rec.setOpen) rec.setOpen(a);
+      await G.wait(0.06);
+      if (leak) leak.set({ intensity: 1.0 });
+      if (rec && rec.setOpen) rec.setOpen(a * 0.3);
+      await G.wait(0.05);
+      if (leak) leak.set({ intensity: 0 });
+      if (rec && rec.setOpen) rec.setOpen(0);
+    };
+    // (the clock comes back only on the way out of a finished beat: a beat cut short by leaving the room leaves it to
+    // the room's onEnter — restarting it from a finally could outlive the room's own stopRoomSounds)
+    const clockBack = () => { if (World.room === 'c2_unit9' && !C2.tick && !S.outage) C2.tick = Snd.play('clock_tick', { loop: true, pos: [1.8, 1.95, 4.9], vol: 0.45 }); };
+    try {
+      if (C2.tick && C2.tick.stop) C2.tick.stop(0.08);                 // the clock stops
+      C2.tick = null;
+      await G.wait(1.5);
+      if (World.room !== 'c2_unit9' || S.done['cs:2-2'] || !G.scareReady) { clockBack(); return; }
+      leak = G.addLight('point', { pos: [4.0, 1.5, 7.7], color: '#a7b6b3', intensity: 0, distance: 5.5 });
+      const hit = G.scare({ id: 'c2:u9door', kind: 'slam', pos: DOOR, shake: 0.35, flash: 0.22, heart: 3 });
+      await jolt(0.035); await G.wait(0.3);
+      await jolt(0.03); await G.wait(0.34);
+      await jolt(0.045);
+      if (leak) leak.free();
+      await hit;
+      await G.wait(2.6);
+      clockBack();
+    } finally {
+      if (rec && rec.setOpen) rec.setOpen(0);
+    }
   }
   // 2-1's fog spilling in over the hall carpet when the front door opens (six drifting layers of the fog texture; hidden
   // until C2.spill is set, then it rolls in about three metres and thins away)
@@ -1771,6 +1880,9 @@
       // doors: the front door (its own interaction), the bathroom (closed), the bedroom (ajar), the linen press
       K.door({ id: 'c2_unit9:front', x: 4.0, z: 8, rot: 0, w: 0.95, h: 2.1, style: 'wood', color: '#5a3a2a', when: () => false, mapMark: false });
       K.interact(4.0, 1.1, 7.45, (G) => leaveUnit9(G), { id: 'c2_unit9:frontdoor', r: 1.1 });
+      // JUMP SCARE c2:u9door — the modem's dead for good; back out in the hall, fists on her front door (C2_frontDoorScare)
+      K.trigger([3.3, 5.05, 4.7, 7.25], C2_solo(C2_frontDoorScare), { id: 'c2_unit9:knock', once: false, world: 'fog',
+        when: () => S.chapter === 2 && !S.outage && flag('c2_modemIn') && (S.done['c2:restarts'] | 0) >= 3 && !S.done['cs:2-2'] && !chasing() && !S.done['scare:c2:u9door'] });
       K.door({ id: 'c2_unit9:bath', x: 3.3, z: 6.4, rot: 90, w: 0.8, h: 2.0, style: 'wood', color: '#e6dfcb', when: () => false, mapMark: false });
       K.examine(3.45, 1.1, 6.4, "It's just the bathroom.", { id: 'c2u9:bath', r: 0.9 });
       K.door({ id: 'c2_unit9:bed', x: 4.7, z: 2.4, rot: 90, w: 0.85, h: 2.0, style: 'wood', color: '#e6dfcb', open: 0.85, swing: 1 });

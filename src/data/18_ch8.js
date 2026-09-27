@@ -1074,17 +1074,26 @@
   // leans on the hut, the tin creaks, the door trembles on its hinges and the tube stutters. Then the door SLAMS shut
   // behind him and the tube dies with it — only the racks' LEDs in the dark. Three knocks on the other side of the door.
   // The tube stutters back. A breath; and the door creaks open by itself, slowly, onto the fog. Nobody there. (The
-  // doorway is shut for a few seconds only — E on the door opens it as ever; a scare never shuts it on him standing in it.)
+  // doorway is shut for a few seconds only — E on the door opens it as ever; a scare never shuts it on him standing in it.
+  // It only plays with the door standing open behind him — never on a door he has shut himself — and when he takes the
+  // door in hand during the tremble the scene lets go of it and holds off until he has left the hut.)
   async function C8_hutScare(G) {
     if (done('scare:c8:hut') || World.room !== 'c8_compound' || !S.outage) return;
     const P = () => Player.pos, [dx, dz] = CP.door;
     const inHut = () => !!P() && World.room === 'c8_compound' && P().x > 22.2 && P().x < 26.9 && P().z > 5.1 && P().z < 9.4;
     const took = () => !!(S.taken && (S.taken['c8_compound:firstaid'] || S.taken['c8_compound:energy']));
+    const d = G.door('c8_compound:hut2'), rec = d && d.rec, PASS = rec ? rec.passAt ?? 0.5 : 0.5;
+    // (the door standing open behind him and still — not shut by his hand, not mid-swing: the slam needs an open door to
+    // shut and the creak an open door to go back to)
+    let seen = rec ? rec.amount : null;
+    const ajar = () => { if (!rec) return true; const a = rec.amount ?? (rec.open ? 1 : 0), still = a === seen; seen = a; return still && a >= PASS; };
     const t0 = G.time;
-    const ready = () => G.scareReady && C8_calm(10) && inHut() && P().x > 23.8 && (took() || G.time - t0 > 4) && C8_camIs('c8_compound:hut');
+    const ready = () => G.scareReady && C8_calm(10) && inHut() && P().x > 23.8 && ajar() && (took() || G.time - t0 > 4) && C8_camIs('c8_compound:hut');
     if (!(await G.until(() => ready() || !inHut(), { timeout: 30 })) || !ready()) return;
-    const d = G.door('c8_compound:hut2'), rec = d && d.rec;
-    const amt0 = rec && rec.amount != null ? rec.amount : 0.8;
+    const amt0 = Math.max(PASS, rec && rec.amount != null ? rec.amount : 0.8);
+    // (he took the door in hand: the scene lets go of it and holds off until he has left the hut — the trigger re-arms
+    // when he comes back in)
+    const standDown = () => G.until(() => !inHut());
     let shut = false, mine = null, user = false;
     const leaf = (a) => { mine = clamp(a, 0, 1); try { if (rec && rec.setOpen) rec.setOpen(mine); } catch (e) { /* door */ } };
     // (he opened it himself — E on the door while it was shut, the door's own swing moving the leaf: the scene leaves the
@@ -1102,7 +1111,7 @@
     {
       let t = 0, hands = false;
       await G.loop((dt) => { if (touched()) { hands = true; return true; } t += dt; leaf(amt0 - 0.05 * Math.sin(t * 17) * Math.sin(Math.min(1, t / 1.2) * Math.PI)); return t >= 1.2; });
-      if (hands) return;
+      if (hands) { await standDown(); return; }
       leaf(amt0);
     }
     G.sfx('tube_flicker', { pos: [24.5, 2.7, dz], vol: 0.5, dur: 0.45 });
@@ -1110,7 +1119,10 @@
     await G.wait(0.5);
     // (never on him in the doorway)
     const clear = () => inHut() && Math.hypot(P().x - dx, P().z - dz) > 1.4;
-    if (!(await G.until(() => (C8_calm(10) && clear()) || !inHut(), { timeout: 5 })) || !clear() || touched() || !G.scareReady) return;
+    if (!(await G.until(() => (C8_calm(10) && clear()) || !inHut() || touched(), { timeout: 5 })) || !clear() || touched() || !G.scareReady) {
+      if (touched()) await standDown();
+      return;
+    }
     // 2. SLAM — the door, shut behind him; the tube dies with it
     const hit = G.scare({ id: 'c8:hut', kind: 'slam', pos: DOOR, shake: 0.5, flash: 0.22, lock: 0.3, heart: 5 });
     shut = true;
@@ -1145,9 +1157,15 @@
     if (!opened() && shut) {
       G.sfx('creak', { pos: DOOR, vol: 0.7, dur: 2.2 });
       G.sfx('wind_gust', { vol: 0.55 });
-      if (rec && rec.collider) rec.collider.enabled = false;
+      // (the doorway stays shut until the leaf has swung past the point where it counts as open)
       let t = 0;
-      await G.loop((dt) => { t += dt; if (opened()) return true; leaf(amt0 * U.ease.inOut(clamp(t / 2.4, 0, 1))); return t >= 2.4; });
+      await G.loop((dt) => {
+        t += dt;
+        if (opened()) return true;
+        leaf(amt0 * U.ease.inOut(clamp(t / 2.4, 0, 1)));
+        if (mine >= PASS && rec && rec.collider) rec.collider.enabled = false;
+        return t >= 2.4;
+      });
     }
     reopen();
   }

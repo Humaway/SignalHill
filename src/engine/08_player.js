@@ -878,11 +878,13 @@ const Player = (() => {
       if (H.kind === 'cut' && (!alive(H.e) || !cuttable(H.e) || distTo(H.e) > 2)) { ui('holdPrompt', null); if (actor) actor.finishGestures(); holdAct = null; return; }
       if (H.kind === 'interact' && (!World.isActive(H.it) || distTo(H.it) > (H.it.r ?? 1.2) + 0.6)) { ui('holdPrompt', null); holdAct = null; return; }
       H.t += dt;
+      if (H.kind === 'interact' && H.it.keep) H.it.held = H.t;       // kept progress survives any break in the hold
       const shown = H.kind === 'cut' ? H.t >= 0.3 : true;
       if (shown) ui('holdPrompt', H.text, U.clamp(H.t / H.need));
       if (H.kind === 'cut' && H.t >= 0.3 && !H.reached && actor) { H.reached = true; actor.gesture('reach', { hand: 'L', target: V(H.e.pos.x, (H.e.pos.y || 0) + 0.8, H.e.pos.z), hold: true }); }
       if (H.t >= H.need) {
         holdAct = null; ui('holdPrompt', null);
+        if (H.kind === 'interact' && H.it.keep) H.it.held = 0;
         if (H.kind === 'cut') { if (actor) actor.finishGestures(); doCut(H.e); }
         else if (typeof World !== 'undefined') World.interact(H.it);
       }
@@ -905,7 +907,7 @@ const Player = (() => {
     const it = useIt;
     if (!it || typeof World === 'undefined') return;
     lastUsed.it = it; lastUsed.t = clock;
-    if (it.hold > 0) { holdAct = { kind: 'interact', it, t: 0, need: it.hold, text: it.holdText || 'Hold {interact}' }; speed = 0; return; }
+    if (it.hold > 0) { holdAct = { kind: 'interact', it, t: it.keep ? Math.min(it.held || 0, it.hold * 0.98) : 0, need: it.hold, text: it.holdText || 'Hold {interact}' }; speed = 0; if (it.keep && it.held > 0) ui('holdPrompt', holdAct.text, U.clamp(holdAct.t / holdAct.need)); return; }
     Input.consume('interact');
     World.interact(it);
   }

@@ -179,7 +179,8 @@ italic, slanted fallback so it still reads as written (`Tex.handFontPresent(stac
   examine within 0.6 m of a door / payphone / ladder (both live at build time); an unwalkable seam (0.02–0.5 m)
   between two floors of about the same height with nothing walkable or solid in it (`K.floor` beside `K.road` that
   don't quite meet); more than 8 real point lights within 14 m.
-* `K.interact(x,y,z, fn, {id, r, hold, holdText, when})`, `K.examine(…)`, `K.pickup(item, x,y,z, {id, n, msg,
+* `K.interact(x,y,z, fn, {id, r, hold, holdText, keep, when})` (`keep:true` on a hold keeps its progress when the hold is
+  broken — let go, hit, knocked out of reach — and resumes from there; the Restructure's WAI jacks use it), `K.examine(…)`, `K.pickup(item, x,y,z, {id, n, msg,
   extraOnEasy, rot, glint})` (heal pickups obey `DIFF.pickup`; Hard removes ~30% deterministically by id), `K.doc(docId,
   x,y,z, {id, model:'paper'|'sticky'|'binder'|'board'|'none', wall, glint})` — no markers: `glint` is opt-in
   (`true`|size) and only sparkles where the torch or a lamp actually lights the item (never in the dark), `K.payphone(x,z,rot, {wall})` (wall phones:

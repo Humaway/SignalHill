@@ -6954,6 +6954,9 @@ const Kit = (() => {
       // CONTRACT+: prio (m added to the pick score; defaults by kind — World.nearestInteractable), yBand [y0,y1] (feet
       // height band: stacked landings), crawl:true (usable while crawling)
       if (o.prio !== undefined) rec.prio = +o.prio || 0;
+      // CONTRACT+: keep:true on a hold interaction keeps its progress when the hold is broken (let go, hit, knocked out
+      // of reach) and resumes from there next time (rec.held, seconds; cleared on completion)
+      if (o.keep) { rec.keep = true; rec.held = 0; }
       const band = bandOf(o);
       if (band) rec.yBand = band;
       if (o.crawl) rec.crawl = true;
@@ -18958,11 +18961,13 @@ const Player = (() => {
       if (H.kind === 'cut' && (!alive(H.e) || !cuttable(H.e) || distTo(H.e) > 2)) { ui('holdPrompt', null); if (actor) actor.finishGestures(); holdAct = null; return; }
       if (H.kind === 'interact' && (!World.isActive(H.it) || distTo(H.it) > (H.it.r ?? 1.2) + 0.6)) { ui('holdPrompt', null); holdAct = null; return; }
       H.t += dt;
+      if (H.kind === 'interact' && H.it.keep) H.it.held = H.t;       // kept progress survives any break in the hold
       const shown = H.kind === 'cut' ? H.t >= 0.3 : true;
       if (shown) ui('holdPrompt', H.text, U.clamp(H.t / H.need));
       if (H.kind === 'cut' && H.t >= 0.3 && !H.reached && actor) { H.reached = true; actor.gesture('reach', { hand: 'L', target: V(H.e.pos.x, (H.e.pos.y || 0) + 0.8, H.e.pos.z), hold: true }); }
       if (H.t >= H.need) {
         holdAct = null; ui('holdPrompt', null);
+        if (H.kind === 'interact' && H.it.keep) H.it.held = 0;
         if (H.kind === 'cut') { if (actor) actor.finishGestures(); doCut(H.e); }
         else if (typeof World !== 'undefined') World.interact(H.it);
       }
@@ -18985,7 +18990,7 @@ const Player = (() => {
     const it = useIt;
     if (!it || typeof World === 'undefined') return;
     lastUsed.it = it; lastUsed.t = clock;
-    if (it.hold > 0) { holdAct = { kind: 'interact', it, t: 0, need: it.hold, text: it.holdText || 'Hold {interact}' }; speed = 0; return; }
+    if (it.hold > 0) { holdAct = { kind: 'interact', it, t: it.keep ? Math.min(it.held || 0, it.hold * 0.98) : 0, need: it.hold, text: it.holdText || 'Hold {interact}' }; speed = 0; if (it.keep && it.held > 0) ui('holdPrompt', holdAct.text, U.clamp(holdAct.t / holdAct.need)); return; }
     Input.consume('interact');
     World.interact(it);
   }
@@ -43153,7 +43158,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       } else if (L0.t < T3) {
         if (!L0.hit) {
           L0.hit = true;
-          if (segDist(P.x, P.z, L0.a[0], L0.a[2], L0.b[0], L0.b[2]) < 0.7 && Player.mode !== 'dead') Player.damage(RS.lashDmg, e, { push: 0.9, from: [L0.a[0], P.y, L0.a[2]] });
+          if (segDist(P.x, P.z, L0.a[0], L0.a[2], L0.b[0], L0.b[2]) < 0.7 && Player.mode !== 'dead') Player.damage(RS.lashDmg, e, { push: Player.holding ? 0.2 : 0.9, from: [L0.a[0], P.y, L0.a[2]] });   // (it stings, but doesn't throw him off a jack he's patching)
         }
         C3_whipPose(L0.w, L0.a, L0.b, lerp(1, 0, (L0.t - T2) / (T3 - T2)), 0);
       } else { L0.w.g.visible = false; D.lash = null; D.lashCd = (lvl() === 'hard' ? 2.2 : 2.9) + Math.random() * 1.4; }
@@ -43380,7 +43385,7 @@ const DOC_pick = (base, lvl = DOC_level()) => (DOCUMENTS[`${base}_${lvl}`] ? `${
       K.pickup('rmap_exchange', 17.4, 0.02, 8.2, { id: 'c3_frame:rmap', glint: true, r: 1.2 });
       // the WAI jacks (the boss's hold-E points)
       FR.jacks.forEach((J, j) => K.interact(J.stand[0], J.pos[1] + 0.1, J.stand[1], (G) => C3_patch(G, j),
-        { id: 'c3_frame:jack' + j, r: 1.25, hold: 3, holdText: 'Re-patch the line', world: 'outage', when: () => !!(C3.boss && C3.boss.data.fight && !C3.boss.data.result && !C3.boss.data.patched[j]) }));
+        { id: 'c3_frame:jack' + j, r: 1.25, hold: 3, keep: true, holdText: 'Re-patch the line', world: 'outage', when: () => !!(C3.boss && C3.boss.data.fight && !C3.boss.data.result && !C3.boss.data.patched[j]) }));
       // ---- through the east doorway: the west end of the Operators' Hall (Wai's board) -----------------------------------------
       const R = FR.replica;
       K.box(25.5, -0.05, 7.0, 11, 0.05, 13.5, { tex: 'lino', color: '#6e5e4a' });

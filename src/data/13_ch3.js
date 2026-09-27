@@ -1981,7 +1981,7 @@
       } else if (L0.t < T3) {
         if (!L0.hit) {
           L0.hit = true;
-          if (segDist(P.x, P.z, L0.a[0], L0.a[2], L0.b[0], L0.b[2]) < 0.7 && Player.mode !== 'dead') Player.damage(RS.lashDmg, e, { push: 0.9, from: [L0.a[0], P.y, L0.a[2]] });
+          if (segDist(P.x, P.z, L0.a[0], L0.a[2], L0.b[0], L0.b[2]) < 0.7 && Player.mode !== 'dead') Player.damage(RS.lashDmg, e, { push: Player.holding ? 0.2 : 0.9, from: [L0.a[0], P.y, L0.a[2]] });   // (it stings, but doesn't throw him off a jack he's patching)
         }
         C3_whipPose(L0.w, L0.a, L0.b, lerp(1, 0, (L0.t - T2) / (T3 - T2)), 0);
       } else { L0.w.g.visible = false; D.lash = null; D.lashCd = (lvl() === 'hard' ? 2.2 : 2.9) + Math.random() * 1.4; }
@@ -2208,7 +2208,7 @@
       K.pickup('rmap_exchange', 17.4, 0.02, 8.2, { id: 'c3_frame:rmap', glint: true, r: 1.2 });
       // the WAI jacks (the boss's hold-E points)
       FR.jacks.forEach((J, j) => K.interact(J.stand[0], J.pos[1] + 0.1, J.stand[1], (G) => C3_patch(G, j),
-        { id: 'c3_frame:jack' + j, r: 1.25, hold: 3, holdText: 'Re-patch the line', world: 'outage', when: () => !!(C3.boss && C3.boss.data.fight && !C3.boss.data.result && !C3.boss.data.patched[j]) }));
+        { id: 'c3_frame:jack' + j, r: 1.25, hold: 3, keep: true, holdText: 'Re-patch the line', world: 'outage', when: () => !!(C3.boss && C3.boss.data.fight && !C3.boss.data.result && !C3.boss.data.patched[j]) }));
       // ---- through the east doorway: the west end of the Operators' Hall (Wai's board) -----------------------------------------
       const R = FR.replica;
       K.box(25.5, -0.05, 7.0, 11, 0.05, 13.5, { tex: 'lino', color: '#6e5e4a' });

@@ -1117,6 +1117,9 @@ const Kit = (() => {
       // CONTRACT+: prio (m added to the pick score; defaults by kind — World.nearestInteractable), yBand [y0,y1] (feet
       // height band: stacked landings), crawl:true (usable while crawling)
       if (o.prio !== undefined) rec.prio = +o.prio || 0;
+      // CONTRACT+: keep:true on a hold interaction keeps its progress when the hold is broken (let go, hit, knocked out
+      // of reach) and resumes from there next time (rec.held, seconds; cleared on completion)
+      if (o.keep) { rec.keep = true; rec.held = 0; }
       const band = bandOf(o);
       if (band) rec.yBand = band;
       if (o.crawl) rec.crawl = true;

@@ -97,18 +97,18 @@ export default async function (page, h) {
   const w = (s) => (s ? s.wall - first.wall : null), tm = (s) => (s ? `${f2(s.t)} s (${f2(w(s))} wall)` : '-');
   notes.push(`1. black + static: 0 → ${tm(tFade)}; the static hiss plays for ${(hissOn * 100).toFixed(0)}% of it; the distant phone rings from ${tm(at((s) => s.ring))}`);
   notes.push(`2. the Lookout vista fades up: ${tm(tFade)} → ${tm(tVista)}`);
-  // (each time is the first frame past a threshold, and the game starts the PRESS ANY KEY fade on a frame too, so the gap
-  // is only known to within the frames' length: under CPU load a menu-clock step is up to 50 ms, and the ±0.2 s allowed
-  // round the spec's 2 s grows by the two longest steps between the name being in and PRESS ANY KEY showing)
-  const steps = [];
-  if (tNameIn && tPress) for (let i = Math.max(1, S.indexOf(tNameIn)); i <= S.indexOf(tPress); i++) steps.push(S[i].t - S[i - 1].t);
-  steps.sort((a, b) => b - a);
-  const pressTol = 0.2 + (steps[0] || 0) + (steps[1] || 0);
-  notes.push(`3. SIGNAL HILL fades in: ${tm(tName)} → ${tm(tNameIn)}; PRESS ANY KEY: ${tm(tPress)} → ${tm(tPressIn)} — ${f2(tPress && tNameIn ? tPress.t - tNameIn.t : null)} s after the name is in (2 ± ${f2(pressTol)} s: frames up to ${f2(steps[0] || 0)} s)`);
+  // (each time is the first frame past its threshold — up to one menu-clock step late — and the game starts the PRESS ANY
+  // KEY fade on a frame too — up to a step late again — so the gap is only known to within those frames' steps: on top
+  // of the ±0.2 s round the spec's 2 s, it may be short by the step the name came in on, or long by the steps of the
+  // frame the fade started on and the frame PRESS ANY KEY showed on. At 60 fps a step is 17 ms; under CPU load, 0.1 s)
+  const stepAt = (i) => (i > 0 ? S[i].t - S[i - 1].t : 0);
+  const pressLo = 1.8 - stepAt(S.indexOf(tNameIn)), pressHi = 2.2 + stepAt(S.findIndex((s) => s.stage === 'press')) + stepAt(S.indexOf(tPress));
+  const gap = tPress && tNameIn ? tPress.t - tNameIn.t : null;
+  notes.push(`3. SIGNAL HILL fades in: ${tm(tName)} → ${tm(tNameIn)}; PRESS ANY KEY: ${tm(tPress)} → ${tm(tPressIn)} — ${f2(gap)} s after the name is in (${f2(pressLo)}–${f2(pressHi)} s allowed at these frames)`);
   if (!(tFade && Math.abs(tFade.t - 3) <= 0.1)) bad(`the black lasts ${f2(tFade && tFade.t)} s (spec: 3 s)`);
   if (!(hissOn > 0.9)) bad('no static hiss during the black');
   if (!(tVista && tVista.t - tFade.t <= 4)) bad('the vista does not fade up within 4 s of the black');
-  if (!(tPress && tNameIn && Math.abs(tPress.t - tNameIn.t - 2) <= pressTol)) bad('"PRESS ANY KEY" is not 2 s after "SIGNAL HILL"');
+  if (!(gap != null && gap >= pressLo && gap <= pressHi)) bad('"PRESS ANY KEY" is not 2 s after "SIGNAL HILL"');
   if (!(ringOn > 0.95)) bad(`the phone is not ringing the whole time before the key (${(ringOn * 100).toFixed(0)}% of the frames)`);
   // 4. the key: the ring stops mid-ring, the menu fades in
   const stop = L.stops[0], key = L.key;

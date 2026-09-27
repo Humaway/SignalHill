@@ -1695,6 +1695,7 @@ The last chapter is short and relentless. Every fear converges, then the game en
   - If `waiSaved`: WAI (phone): "Gate's on the old combination. Every tech learned it. The year the exchange opened." \[beat\] "Go on, mate. I'll put you through when you get there."
   - If not: a laminated card inside the phone box: "GATE: year the exchange opened (see plaque)."
 - The code is 1961.
+- *Revised after playtesting:* the exchange's brass plaque ("Opened 14 August 1961", the Exchange Plaque document) is repeated on a concrete foundation stone beside the east gate post, so the "(see plaque)" clue is answered at the gate itself and the code never depends on something read in Chapter 3.
 
 **GAMEPLAY 8-3 The climb**
 

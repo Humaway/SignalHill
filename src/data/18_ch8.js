@@ -10,7 +10,8 @@
 //                   The fog thins as he climbs; the mast's red light shows through it at the top.
 //   c8_compound     The mast compound (30 × 20 m chain-link, x 0–30, z 0–20) and the gate apron south of it. Gate: a
 //                   4-digit combination padlock (1961; Hard 1408), the Compound Diagram (map_mast) cable-tied to it, the
-//                   emergency phone on the fence (Wai if waiSaved, else the laminated gate card), a payphone booth, the
+//                   emergency phone on the fence (Wai if waiSaved, else the laminated gate card), the exchange's brass
+//                   plaque on a foundation stone by the east gate post ("Opened 14 August 1961": the code), a payphone booth, the
 //                   Borrowed "Luka" (badge LUAK) at the gate. Inside: the mast's inner enclosure (→ c8_mast:base), the
 //                   east hut (first aid kit, energy drink), the locked west hut, the Unread on the floodlight pole.
 //   c8_mast         The mast (60 m lattice, centre 0,0): the base yard, three ladder runs with cages (L1 south face 0→20,
@@ -131,6 +132,25 @@
     tx(x, 'YOU ARE HERE ▲', 124, 290 - 44, 10, '#b3261e', { weight: 'bold' });
     age(x, w, h, r, 0.35);
     const g = x.createLinearGradient(0, 0, w, h); g.addColorStop(0, 'rgba(255,255,255,0.18)'); g.addColorStop(0.4, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h);
+  });
+  // the exchange's brass dedication plaque, repeated on the foundation stone by the compound gate — the mast went up
+  // with the exchange (the text is the Exchange Plaque document: the gate card's "see plaque", right beside the gate)
+  const plaqueTex = () => ctex('plaque', 512, 360, (x, w, h, r) => {
+    const g = x.createLinearGradient(0, 0, w, h); g.addColorStop(0, '#9a7f45'); g.addColorStop(0.5, '#c8a860'); g.addColorStop(1, '#7c6232');
+    x.fillStyle = g; x.fillRect(0, 0, w, h);
+    x.strokeStyle = '#5a4520'; x.lineWidth = 8; x.strokeRect(12, 12, w - 24, h - 24);
+    x.strokeStyle = 'rgba(255,240,200,0.35)'; x.lineWidth = 2; x.strokeRect(22, 22, w - 44, h - 44);
+    const ink = '#3a2a10';
+    tx(x, 'SIGNAL HILL', w / 2, 74, 34, ink, { font: FN.serif, weight: 'bold', align: 'center', spacing: 4 });
+    tx(x, 'TRUNK EXCHANGE', w / 2, 114, 34, ink, { font: FN.serif, weight: 'bold', align: 'center', spacing: 4 });
+    tx(x, 'Opened 14 August 1961', w / 2, 168, 24, ink, { font: FN.serif, align: 'center' });
+    tx(x, '"Connecting the district to the world"', w / 2, 222, 21, ink, { font: FN.serif, align: 'center' });
+    tx(x, 'Dedicated to the operators', w / 2, 272, 21, ink, { font: FN.serif, align: 'center' });
+    tx(x, 'who keep us talking.', w / 2, 300, 21, ink, { font: FN.serif, align: 'center' });
+    for (const [a, b] of [[30, 30], [w - 30, 30], [30, h - 30], [w - 30, h - 30]]) { x.fillStyle = '#5a4520'; x.beginPath(); x.arc(a, b, 7, 0, Math.PI * 2); x.fill(); }
+    // weathered up here: verdigris, and the date rubbed bright
+    for (let i = 0; i < 90; i++) { x.fillStyle = `rgba(70,120,100,${r() * 0.22})`; x.beginPath(); x.arc(r() * w, r() * h, 3 + r() * 16, 0, Math.PI * 2); x.fill(); }
+    x.fillStyle = 'rgba(255,240,200,0.2)'; x.beginPath(); x.ellipse(w / 2, 162, 120, 20, 0, 0, Math.PI * 2); x.fill();
   });
   // the laminated card inside the emergency phone box (riddle-level wording, matching the gate_card docs)
   const gateCardTex = (lv) => ctex('gatecard|' + lv, 200, 280, (x, w, h, r) => {
@@ -1018,7 +1038,9 @@
     A.look(null);
     if (r !== code) {
       const knows = flag('c8_phone') || !!(S.docs && S.docs[pickDoc('gate_card')]);
-      if (G.once('c8:padFail')) await G.think(knows ? 'The exchange. [beat] The plaque on the forecourt said when it opened.' : 'Four numbers. [beat] Somebody who worked up here would know them.');
+      // (one nudge before the clue — toward the emergency phone — and one after it, toward the plaque by the gate)
+      if (!knows) { if (G.once('c8:padFail')) await G.think('Four numbers. [beat] Somebody who worked up here would know them.'); }
+      else if (G.once('c8:padFailKnows')) await G.think('The exchange. [beat] The plaque by the gate says when it opened.');
       return;
     }
     G.set('c8_gate', true);
@@ -1050,7 +1072,7 @@
       await G.wait(0.5);
       G.sfx('clunk', { pos: [px, 1.3, pz], vol: 0.7 });
       A.look(null);
-      await G.think(riddle() === 'easy' ? 'Nineteen sixty-one.' : riddle() === 'hard' ? 'The day and the month. [beat] The plaque on the exchange forecourt.' : 'The year the exchange opened. [beat] The plaque on the forecourt.');
+      await G.think(riddle() === 'easy' ? 'Nineteen sixty-one.' : riddle() === 'hard' ? 'The day and the month. [beat] There\'s a plaque by the gate.' : 'The year the exchange opened. [beat] There\'s a plaque by the gate.');
       note(G, riddle() === 'easy' ? 'Gate code: 1961.' : riddle() === 'hard' ? 'Gate code: the day and month the exchange opened.' : 'Gate code: the year the exchange opened.', 'c8_code');
       C8.inCall = false;
       return;
@@ -1240,7 +1262,12 @@
       for (const x of [4, 9.5, 21, 26.5]) K.prop('rf_sign', x, 20.06, 0, { variant: 'fence', mount: 1.45 });
       for (const z of [5, 15]) { K.prop('rf_sign', 0.06, z, 90, { variant: 'fence', mount: 1.45 }); K.prop('rf_sign', 29.94, z, -90, { variant: 'fence', mount: 1.45 }); }
       K.sign('SIGNAL HILL RADIO TERMINAL\nSITE 4401\nAUTHORISED PERSONNEL ONLY', 18.4, 1.75, 20.1, 1.0, 0.5, { style: 'council' });
-      K.examine(18.4, 1.6, 20.5, ['"Signal Hill Radio Terminal. Site 4401."', 'Authorised personnel only. [beat] Nobody authorised me to do anything.'], { id: 'c8c:plaque', r: 1.3 });
+      // the foundation stone at the east gate post, the exchange's brass plaque on it (the mast went up with the exchange):
+      // the gate card's "see plaque" is right here, so the code never needs anything from earlier in the game
+      K.box(17.6, 0, 20.42, 0.74, 0.82, 0.34, { tex: 'concrete', color: '#a19e95' }, { collide: true });
+      K.plane(17.6, 0.5, 20.595, 0.52, 0.365, plaqueTex(), { roughness: 0.35, emissive: 0.4, name: 'c8c:plaqueBrass' });
+      K.doc('plaque', 17.6, 0.5, 20.62, { id: 'c8_compound:plaque', model: 'none', r: 1.05 });
+      K.examine(19.0, 1.6, 20.5, ['"Signal Hill Radio Terminal. Site 4401."', 'Authorised personnel only. [beat] Nobody authorised me to do anything.'], { id: 'c8c:plaque', r: 1.1 });
       K.examine(4, 1.45, 20.5, '"Danger — RF radiation — keep out." [beat] The paint\'s gone chalky. Somebody\'s drawn a smiley face on it.', { id: 'c8c:rf', r: 1.3 });
       // the padlock and the diagram
       K.interact(15, 1.0, 20.35, (G) => C8_padlock(G), { id: 'c8_compound:padlock', r: 1.25, when: () => !flag('c8_gate') });
